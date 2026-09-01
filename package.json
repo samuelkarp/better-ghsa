@@ -6,6 +6,7 @@
   "license": "Apache-2.0",
   "scripts": {
     "check": "tsc --noEmit",
+    "package": "npx --yes web-ext@10.6.0 build --artifacts-dir scratch/dist --overwrite-dest",
     "test": "node --test --test-concurrency=1"
   },
   "devDependencies": {
