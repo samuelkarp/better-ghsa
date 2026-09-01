@@ -1,5 +1,7 @@
 # Better GHSA
 
+![Better GHSA](docs/promo-small-440x280.png)
+
 A Firefox and Chrome extension that adds triage tracking to GitHub Security
 Advisories for the maintainers who work them.
 
