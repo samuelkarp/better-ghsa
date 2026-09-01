@@ -456,13 +456,17 @@ in scope at the level of a loadable build and install instructions they can
 follow. Store listings and signing are later work, and the constraints they
 impose are considerations throughout.
 
-The Firefox add-on id is `better-ghsa@sbk.wtf` and Firefox 128 is the floor. A
+The Firefox add-on id is `better-ghsa@sbk.wtf` and Firefox 140 is the floor. A
 Manifest V3 extension carries its own add-on id
 because signing requires one and addons.mozilla.org assigns none, and the id is
-fixed from the first signing because the update path is keyed by it. Firefox
-before 127 neither shows the `github.com` host permission at install nor grants
-it, so the content scripts would not inject and the extension would appear to
-do nothing; Firefox before 128 cannot receive updates at all.
+fixed from the first signing because the update path is keyed by it.
+
+The manifest declares that the extension collects and transmits no data.
+addons.mozilla.org requires that declaration of every extension, and Firefox
+reads it from 140 and Firefox for Android from 142, which is what sets the
+floor. The declaration is what a maintainer is shown at install, so it has to
+stay true: an extension that sent data anywhere would name the categories it
+sent.
 
 The extension never requires another maintainer to have it installed. A
 maintainer acting through GitHub's native UI must not corrupt or confuse the

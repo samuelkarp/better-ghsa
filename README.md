@@ -63,7 +63,7 @@ timings over the whole corpus and a CSV export. See
 There is no build step and no store listing. The extension is the repository
 contents, loaded from disk.
 
-Firefox 128 or later:
+Firefox 140 or later:
 
 1. Clone the repository.
 2. Open `about:debugging#/runtime/this-firefox`.
@@ -73,10 +73,9 @@ Firefox 128 or later:
 A temporary add-on is removed when Firefox closes. These steps are repeated
 each session.
 
-Firefox 128 is the floor for two reasons. Firefox 127 is the first version that
-shows the `github.com` host permission at install and grants it. Without that
-permission the content scripts never inject and the extension appears to do
-nothing. Firefox before 128 cannot receive extension updates at all.
+Firefox 140 is the floor. The manifest declares that the extension collects no
+data, in the key Firefox reads from 140 and Firefox for Android reads from 142.
+Earlier versions neither read that declaration nor show it at install.
 
 Chrome:
 
