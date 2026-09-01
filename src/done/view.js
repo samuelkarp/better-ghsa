@@ -96,9 +96,6 @@ if (typeof require === 'function') {
   /** What the control that writes one closure reason reads. */
   const SAVE_LABEL = 'Save';
 
-  /** What the closure control reads while the advisory carries no reason. */
-  const NO_REASON = 'No reason';
-
   /** The state GitHub gives an advisory that was published, as it names it. */
   const PUBLISHED = 'Published';
 
@@ -431,12 +428,15 @@ if (typeof require === 'function') {
       advisory === null ? undefined : edit.editsFor(edit.keyOf(advisory)).closureReason;
     const current = staged === undefined ? row.closureReason : staged;
 
+    // The option for an advisory carrying no reason reads blank, so a row with
+    // one set is the row that has words in the control. The control is named
+    // for a reader who cannot see that.
     const control = edit.selectControl(
       doc,
       'mr-1 bghsa-done-reason',
       globalThis.bghsa.schema.CLOSURE_REASONS,
       current,
-      NO_REASON,
+      '',
       { label: globalThis.bghsa.chips.sentenceCase, ariaLabel: 'Closure reason' }
     );
 
@@ -521,10 +521,11 @@ if (typeof require === 'function') {
     if (state !== null) {
       chips.append(globalThis.bghsa.chips.buildChip(doc, { text: state, tone: stateToneOf(state) }));
     }
-    // Publishing an advisory settles its severity, so the chip is filled there
-    // as a confirmed one is on the open list. Nothing is read or stored to
-    // decide it: the state is the whole rule.
-    if (row.severityLabel !== null) {
+    // REQUIREMENTS.md section 10: the severity stands on a published advisory
+    // and a closed one carries none. Publishing an advisory settles its
+    // severity, so the chip is filled there as a confirmed one is on the open
+    // list. Nothing is read or stored to decide it: the state is the whole rule.
+    if (row.severityLabel !== null && state !== CLOSED) {
       const text = globalThis.bghsa.chips.sentenceCase(row.severityLabel);
       chips.append(
         globalThis.bghsa.chips.buildChip(doc, {
@@ -542,9 +543,13 @@ if (typeof require === 'function') {
     }
     item.append(main);
 
-    const closure = element(doc, 'div', 'pl-2 flex-shrink-0');
-    closure.append(buildClosure(doc, row, corpus));
-    item.append(closure);
+    // REQUIREMENTS.md section 10: the reason is a closed advisory's, so a
+    // published row carries no control for one.
+    if (state !== PUBLISHED) {
+      const closure = element(doc, 'div', 'pl-2 flex-shrink-0');
+      closure.append(buildClosure(doc, row, corpus));
+      item.append(closure);
+    }
 
     item.append(
       element(

@@ -41,10 +41,10 @@ Each row carries:
   purple one, the colors GitHub gives the two endings. A state that is neither,
   which happens when the advisory's own page disagrees with the list it was
   found under, is uncolored.
-- A severity chip in the color GitHub paints that level. On a published row it
-  is filled with that color, because publishing an advisory settles its
-  severity.
-- The closure reason control.
+- A severity chip, unless the row is closed. On a published row it is filled
+  with the color GitHub paints that level, because publishing an advisory
+  settles its severity.
+- The closure reason control, unless the row is published.
 - "Observed" with the time the row's data was read, in UTC. A row backed by no
   advisory read reads "Not read".
 
@@ -53,10 +53,11 @@ finished search that found nothing reads "Not found".
 
 ## Recording a closure reason
 
-Each row carries a dropdown labeled "Closure reason" and a "Save" button. The
-options are:
+A row carries a dropdown labeled "Closure reason" and a "Save" button unless it
+is published. A published advisory has no closure reason. The first option is
+blank, which is what a row carries until a reason is set on it, so a row with
+one reads it at a glance. The rest are:
 
-- No reason
 - Duplicate
 - Not a vulnerability
 - Not reproducible

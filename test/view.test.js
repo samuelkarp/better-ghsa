@@ -553,7 +553,7 @@ test('the done view is reached from a toggle beside the one for GitHub', async (
   );
   assert.deepStrictEqual(
     Array.from(rows).map(chipLine),
-    ['Published High', 'Published High', 'Closed High'],
+    ['Published High', 'Published High', 'Closed'],
     'each row says which done state it is in'
   );
   assert.strictEqual(
@@ -693,7 +693,7 @@ test('the state chip is colored by the ending and the severity by GitHub', async
       // not the class for `low`, so what comes out can only be what was carried.
       member({
         ghsaId: painted,
-        state: 'closed',
+        state: 'published',
         severity: 'low',
         severityClass: 'Label--orange',
       }),
@@ -713,7 +713,7 @@ test('the state chip is colored by the ending and the severity by GitHub', async
         }),
       }),
       // Nothing to reuse, so GitHub's neutral modifier stands in.
-      member({ ghsaId: bare, state: 'closed', severity: 'low' }),
+      member({ ghsaId: bare, state: 'published', severity: 'low' }),
       // The crawl found this one under `?state=closed` and its own page says
       // Triage. The page is what the row reads, and the two endings are the
       // only states a color is named for.
@@ -732,23 +732,23 @@ test('the state chip is colored by the ending and the severity by GitHub', async
     ])
   );
 
-  assert.deepStrictEqual(chipLine(doneRow(doc, painted)), 'Closed Low');
+  assert.deepStrictEqual(chipLine(doneRow(doc, painted)), 'Published Low');
   assert.deepStrictEqual(
     chipColors(doneRow(doc, painted)),
-    ['Label--secondary bghsa-tone-done', 'Label--orange'],
-    'a closed advisory reads purple beside a severity in its own color'
+    ['Label--secondary bghsa-tone-success', 'Label--orange bghsa-fill'],
+    'a published advisory reads green beside a severity filled in its own color'
   );
 
   assert.deepStrictEqual(chipLine(doneRow(doc, read)), 'Published Moderate');
   assert.deepStrictEqual(
     chipColors(doneRow(doc, read)),
     ['Label--secondary bghsa-tone-success', 'Label--warning bghsa-fill'],
-    'a published advisory reads green over a severity filled in the color the read supplied'
+    'the severity color comes from whichever read supplied the level'
   );
 
   assert.deepStrictEqual(
     chipColors(doneRow(doc, bare)),
-    ['Label--secondary bghsa-tone-done', 'Label--secondary'],
+    ['Label--secondary bghsa-tone-success', 'Label--secondary bghsa-fill'],
     'a severity GitHub carried no modifier on'
   );
 
@@ -756,13 +756,78 @@ test('the state chip is colored by the ending and the severity by GitHub', async
   assert.deepStrictEqual(
     chipColors(doneRow(doc, neither)),
     ['Label--secondary', 'Label--secondary'],
-    'a state that is neither ending takes no color'
+    'a state that is neither ending takes no color and no fill'
   );
 
   // A chip carrying a color no rule defines draws as though it carried none.
   for (const name of ['bghsa-tone-done', 'bghsa-tone-success', 'bghsa-fill']) {
     assert.ok(view.STYLE_TEXT.includes(`.${name} {`), `no rule defines .${name}`);
   }
+});
+
+test('the severity chip stands on a published row and not on a closed one', async () => {
+  // One severity, one color, and two states over it, so a row that drew the
+  // chip from the level alone would draw both.
+  const published = ghsa('ccce');
+  const closed = ghsa('cccf');
+  const doc = await page(
+    await corpusOf([
+      member({ ghsaId: published, state: 'published', severity: 'high', severityClass: 'Label--orange' }),
+      member({ ghsaId: closed, state: 'closed', severity: 'high', severityClass: 'Label--orange' }),
+    ])
+  );
+
+  assert.strictEqual(chipLine(doneRow(doc, published)), 'Published High');
+  assert.deepStrictEqual(
+    chipColors(doneRow(doc, closed)),
+    ['Label--secondary bghsa-tone-done'],
+    'a closed advisory reads purple, and that chip is the only one it carries'
+  );
+  assert.strictEqual(
+    chipLine(doneRow(doc, closed)),
+    'Closed',
+    'a closed advisory carries its severity'
+  );
+});
+
+test('the reason control stands on a closed row and not on a published one', async () => {
+  // Both rows are backed by a read, so the control's presence can only follow
+  // from the state the row is in.
+  const closed = ghsa('cdcd');
+  const published = ghsa('dcdc');
+  const doc = await page(
+    await corpusOf([
+      member({
+        ghsaId: closed,
+        state: 'closed',
+        advisory: advisory({ ref: { ...REF, ghsaId: closed }, ghsaId: closed, state: 'Closed' }),
+      }),
+      member({
+        ghsaId: published,
+        state: 'published',
+        advisory: advisory({
+          ref: { ...REF, ghsaId: published },
+          ghsaId: published,
+          state: 'Published',
+        }),
+      }),
+    ])
+  );
+
+  assert.ok(
+    doneRow(doc, closed).querySelector('select.bghsa-done-reason') !== null,
+    'a closed row offers no reason to set'
+  );
+  assert.strictEqual(
+    doneRow(doc, published).querySelector('.bghsa-done-closure'),
+    null,
+    'a published row carries a reason control'
+  );
+  assert.strictEqual(
+    doneRow(doc, published).querySelector('button.bghsa-done-save'),
+    null,
+    'a published row carries a control that would write a reason'
+  );
 });
 
 test('the observed cell reads the same words the list rows read', async () => {
@@ -887,6 +952,29 @@ test('the reason an advisory carries is the reason its row shows', async () => {
     .filter((option) => option.hasAttribute('selected'))
     .map((option) => option.getAttribute('value'));
   assert.deepStrictEqual(chosen, ['not reproducible'], 'the control shows another reason');
+});
+
+test('the option for an advisory carrying no reason reads blank', async () => {
+  const closed = ghsa('ubbb');
+  const doc = await page(
+    await corpusOf([
+      member({
+        ghsaId: closed,
+        state: 'closed',
+        advisory: advisory({ ref: { ...REF, ghsaId: closed }, ghsaId: closed, state: 'Closed' }),
+      }),
+    ])
+  );
+
+  const control = one(doneRow(doc, closed), 'select.bghsa-done-reason');
+  const empty = one(control, 'option[value=""]');
+  assert.strictEqual(empty.textContent, '', 'the option for no reason reads words of its own');
+  assert.ok(empty.hasAttribute('selected'), 'a row nobody has set a reason on shows another option');
+  assert.strictEqual(
+    control.getAttribute('aria-label'),
+    'Closure reason',
+    'the control a reader cannot see is unnamed'
+  );
 });
 
 test('an advisory this view reads teaches the owner and backport pickers', async () => {

@@ -383,9 +383,13 @@ The done page lists published and closed advisories. Closure reasons can be set
 here retroactively.
 
 Each row carries a state chip colored by the ending the advisory came to: closed
-purple and published green, which is how GitHub colors them. On a published
-advisory the severity beside it is filled the way a confirmed severity is in
-section 9, because publication settles the rating.
+purple and published green, which is how GitHub colors them. The severity stands
+beside it, and a closed advisory carries none. On a published advisory it is
+filled the way a confirmed severity is in section 9, because publication settles
+the rating.
+
+A published advisory has no closure reason, so its row carries no control for
+setting one.
 
 The statistics are their own view. They cover the whole corpus, open and done,
 because they describe active work as much as finished work, and they are not a
