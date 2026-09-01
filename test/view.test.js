@@ -682,10 +682,11 @@ test("the four views converge, and GitHub's own view comes back whole", async ()
   );
 });
 
-test("the severity chip takes GitHub's own color and no other chip does", async () => {
+test('the state chip is colored by the ending and the severity by GitHub', async () => {
   const painted = ghsa('aaaa');
   const read = ghsa('bbbb');
   const bare = ghsa('cccc');
+  const neither = ghsa('cccd');
   const doc = await page(
     await corpusOf([
       // The class GitHub painted this advisory's own severity chip with. It is
@@ -711,30 +712,57 @@ test("the severity chip takes GitHub's own color and no other chip does", async 
           severityClass: 'Label--warning',
         }),
       }),
-      // Nothing to reuse, so the chip stays dimmed like the rest.
+      // Nothing to reuse, so GitHub's neutral modifier stands in.
       member({ ghsaId: bare, state: 'closed', severity: 'low' }),
+      // The crawl found this one under `?state=closed` and its own page says
+      // Triage. The page is what the row reads, and the two endings are the
+      // only states a color is named for.
+      member({
+        ghsaId: neither,
+        state: 'closed',
+        severity: 'low',
+        advisory: advisory({
+          ref: { ...REF, ghsaId: neither },
+          ghsaId: neither,
+          state: 'Triage',
+          severity: 'low',
+          severityLabel: 'Low',
+        }),
+      }),
     ])
   );
 
   assert.deepStrictEqual(chipLine(doneRow(doc, painted)), 'Closed Low');
   assert.deepStrictEqual(
     chipColors(doneRow(doc, painted)),
-    ['Label--secondary', 'Label--orange'],
-    'the state stays dimmed beside a severity that does not'
+    ['Label--secondary bghsa-tone-done', 'Label--orange'],
+    'a closed advisory reads purple beside a severity in its own color'
   );
 
   assert.deepStrictEqual(chipLine(doneRow(doc, read)), 'Published Moderate');
   assert.deepStrictEqual(
     chipColors(doneRow(doc, read)),
-    ['Label--secondary', 'Label--warning'],
-    'the color comes from whichever read supplied the level'
+    ['Label--secondary bghsa-tone-success', 'Label--warning bghsa-fill'],
+    'a published advisory reads green over a severity filled in the color the read supplied'
   );
 
   assert.deepStrictEqual(
     chipColors(doneRow(doc, bare)),
-    ['Label--secondary', 'Label--secondary'],
+    ['Label--secondary bghsa-tone-done', 'Label--secondary'],
     'a severity GitHub carried no modifier on'
   );
+
+  assert.deepStrictEqual(chipLine(doneRow(doc, neither)), 'Triage Low');
+  assert.deepStrictEqual(
+    chipColors(doneRow(doc, neither)),
+    ['Label--secondary', 'Label--secondary'],
+    'a state that is neither ending takes no color'
+  );
+
+  // A chip carrying a color no rule defines draws as though it carried none.
+  for (const name of ['bghsa-tone-done', 'bghsa-tone-success', 'bghsa-fill']) {
+    assert.ok(view.STYLE_TEXT.includes(`.${name} {`), `no rule defines .${name}`);
+  }
 });
 
 test('the observed cell reads the same words the list rows read', async () => {

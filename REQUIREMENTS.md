@@ -314,7 +314,8 @@ Each row shows the advisory title as a link, GitHub's state, and the owners as
 profile icons in the style of issue assignees. Below the title, chips carry the
 waiting state, the patch state including backport progress, the confirmation
 state of text and scoring, the CVE state, the severity marked as confirmed or
-unconfirmed, and the embargo. Each row shows the time its data was observed.
+unconfirmed, and the embargo. A confirmed severity is filled with the color
+GitHub paints that level. Each row shows the time its data was observed.
 
 Rows are filterable on waiting, severity, owner, state, patch, backports, and
 embargo, with a control that clears every filter. They are sortable by the
@@ -380,6 +381,11 @@ Two views, each reached from the advisory list.
 
 The done page lists published and closed advisories. Closure reasons can be set
 here retroactively.
+
+Each row carries a state chip colored by the ending the advisory came to: closed
+purple and published green, which is how GitHub colors them. On a published
+advisory the severity beside it is filled the way a confirmed severity is in
+section 9, because publication settles the rating.
 
 The statistics are their own view. They cover the whole corpus, open and done,
 because they describe active work as much as finished work, and they are not a

@@ -37,8 +37,13 @@ Each row carries:
 - A line beneath it with the GHSA identifier, the date the report was opened,
   and the reporter's login, in the form `GHSA-xxxx-xxxx-xxxx opened 2026-03-14
   by someone`. Any part that has not been read is left out.
-- Up to two chips: the advisory's state ("Published" or "Closed") and its
-  severity. The severity chip takes the color GitHub paints it with.
+- A state chip: "Published" as a filled green chip and "Closed" as a filled
+  purple one, the colors GitHub gives the two endings. A state that is neither,
+  which happens when the advisory's own page disagrees with the list it was
+  found under, is uncolored.
+- A severity chip in the color GitHub paints that level. On a published row it
+  is filled with that color, because publishing an advisory settles its
+  severity.
 - The closure reason control.
 - "Observed" with the time the row's data was read, in UTC. A row backed by no
   advisory read reads "Not read".

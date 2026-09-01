@@ -204,6 +204,7 @@ if (typeof require === 'function') {
     '.bghsa-list-meta { color: var(--fgColor-muted, currentColor); }',
     '.bghsa-list-empty { color: var(--fgColor-muted, currentColor); }',
     ...globalThis.bghsa.chips.TONE_RULES,
+    ...globalThis.bghsa.chips.FILL_RULES,
     `.${globalThis.bghsa.chips.DIM_CLASS} { opacity: 0.55; }`,
   ].join('\n');
 
@@ -552,15 +553,17 @@ if (typeof require === 'function') {
     }
     if (row.cve !== null) chips.push({ text: row.cve });
 
-    // A confirmed severity is the ordinary case and reads as the level alone.
-    // A row nothing has been read on says nothing either way, and its whole row
-    // is dim, so the level stands bare there too.
+    // A confirmed severity is the ordinary case and reads as the level alone,
+    // filled with the color GitHub painted it. A row nothing has been read on
+    // says nothing either way, and its whole row is dim, so the level stands
+    // bare there too.
     if (row.severityLabel !== null) {
       const severity = sentenceCase(row.severityLabel);
       chips.push({
         text: row.read && !row.severityConfirmed ? `${severity}, unconfirmed` : severity,
         severityClass: row.severityClass,
         dim: !row.severityConfirmed,
+        fill: row.severityConfirmed,
       });
     }
 

@@ -346,4 +346,15 @@ test('one builder draws every chip, and each part of a chip reaches its class', 
     ),
     `Label Label--danger ${chips.DIM_CLASS}`
   );
+
+  // A filled chip paints its own color, so its text carries the page's
+  // background color and takes an element of its own to be given one.
+  const filled = chips.buildChip(BLANK, { text: 'Critical', severityClass: 'Label--danger', fill: true });
+  assert.strictEqual(filled.getAttribute('class'), `Label Label--danger ${chips.FILL_CLASS}`);
+  assert.strictEqual(filled.textContent, 'Critical', 'a filled chip reads what it was given');
+  assert.strictEqual(
+    filled.querySelector('span')?.textContent,
+    'Critical',
+    'the text of a filled chip is in an element the fill rule can color'
+  );
 });

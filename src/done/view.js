@@ -99,6 +99,12 @@ if (typeof require === 'function') {
   /** What the closure control reads while the advisory carries no reason. */
   const NO_REASON = 'No reason';
 
+  /** The state GitHub gives an advisory that was published, as it names it. */
+  const PUBLISHED = 'Published';
+
+  /** The state GitHub gives an advisory that was closed, as it names it. */
+  const CLOSED = 'Closed';
+
   /** What stands where the crawl has found no done advisory. */
   const EMPTY_TEXT = 'Not found';
 
@@ -131,6 +137,8 @@ if (typeof require === 'function') {
     '.bghsa-done-empty { color: var(--fgColor-muted, currentColor); }',
     '.bghsa-done-count { color: var(--fgColor-muted, currentColor); }',
     '.bghsa-done-header { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }',
+    ...globalThis.bghsa.chips.TONE_RULES,
+    ...globalThis.bghsa.chips.FILL_RULES,
   ].join('\n');
 
   /** What the view holds for each document. @type {WeakMap<Document, Held>} */
@@ -259,6 +267,33 @@ if (typeof require === 'function') {
    */
   function memberOf(corpus, ghsaId) {
     return corpus.members.find((member) => member.ghsaId === ghsaId) ?? null;
+  }
+
+  /**
+   * The state one row is in, as the view reads it. The crawl names a state in
+   * the `?state=` value and the advisory's own page names it as GitHub displays
+   * it, so the two differ in case and the chip, the filter and the rules below
+   * read the one form.
+   *
+   * @param {DoneRow} row
+   * @returns {string | null}
+   */
+  function stateNameOf(row) {
+    return row.state === null ? null : globalThis.bghsa.chips.sentenceCase(row.state);
+  }
+
+  /**
+   * How the state chip is colored: purple for a closed advisory and green for a
+   * published one, which is the pair GitHub colors the two endings with. A state
+   * that is neither takes no tone.
+   *
+   * @param {string} state What {@link stateNameOf} read.
+   * @returns {import('../common/chips.js').Chip['tone']}
+   */
+  function stateToneOf(state) {
+    if (state === CLOSED) return 'done';
+    if (state === PUBLISHED) return 'success';
+    return undefined;
   }
 
   /**
@@ -479,19 +514,24 @@ if (typeof require === 'function') {
     main.append(link);
     main.append(element(doc, 'div', 'mt-1 text-small bghsa-done-meta', metaTextOf(row)));
 
-    // Every chip here is dimmed but the severity, which takes GitHub's own
-    // color for it. Color marks where the work stands, and a state an advisory
-    // has finished in, a crawl still running and an advisory nobody has read
-    // are none of them work waiting on a maintainer.
+    // The state chip carries the color of the ending the advisory came to, and
+    // the severity chip GitHub's own color for the level.
     const chips = element(doc, 'div', 'mt-1 bghsa-done-chips');
-    if (row.state !== null) {
-      const text = globalThis.bghsa.chips.sentenceCase(row.state);
-      chips.append(globalThis.bghsa.chips.buildChip(doc, { text }));
+    const state = stateNameOf(row);
+    if (state !== null) {
+      chips.append(globalThis.bghsa.chips.buildChip(doc, { text: state, tone: stateToneOf(state) }));
     }
+    // Publishing an advisory settles its severity, so the chip is filled there
+    // as a confirmed one is on the open list. Nothing is read or stored to
+    // decide it: the state is the whole rule.
     if (row.severityLabel !== null) {
       const text = globalThis.bghsa.chips.sentenceCase(row.severityLabel);
       chips.append(
-        globalThis.bghsa.chips.buildChip(doc, { text, severityClass: row.severityClass })
+        globalThis.bghsa.chips.buildChip(doc, {
+          text,
+          severityClass: row.severityClass,
+          fill: state === PUBLISHED,
+        })
       );
     }
     main.append(chips);

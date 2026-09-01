@@ -8,23 +8,24 @@ if (typeof require === 'function') {
 }
 
 /**
- * A chip the list row and the detail panel both carry. A tone names a Primer
- * state token, and a chip with no tone is dimmed. Both surfaces draw it as
- * `Label`, `Label--secondary`, and `bghsa-tone-{tone}`.
+ * A chip the list row, the completed row and the detail panel carry. A tone
+ * names a Primer state token, and a chip with no tone is dimmed. Every surface
+ * draws it as `Label`, `Label--secondary`, and `bghsa-tone-{tone}`.
  *
  * @typedef {object} Chip
  * @property {string} text
- * @property {'attention' | 'danger'} [tone]
+ * @property {'attention' | 'danger' | 'done' | 'success'} [tone]
  */
 
 /**
  * A chip as a surface draws it: what a producer here says, and what the surface
  * knows on top of it.
  *
- * @typedef {Chip & { severityClass?: string | null, dim?: boolean }} ChipSpec
+ * @typedef {Chip & { severityClass?: string | null, dim?: boolean, fill?: boolean }} ChipSpec
  *   `severityClass` is the `Label--` modifiers GitHub painted the advisory's
- *   own severity chip with, which stands in for the neutral one, and `dim`
- *   holds a chip back from its full color while keeping its hue.
+ *   own severity chip with, which stands in for the neutral one, `dim` holds a
+ *   chip back from its full color while keeping its hue, and `fill` paints that
+ *   color as the chip's own fill.
  */
 
 (() => {
@@ -111,10 +112,11 @@ if (typeof require === 'function') {
    * How a tone is painted, as the rules a surface's own stylesheet carries.
    *
    * The chips sit beside GitHub's own `Label--secondary`, a neutral outline over
-   * the page's background. A muted fill is the tone that reads as colored next
-   * to one and still carries default-strength text in both themes, where an
-   * emphasis fill would want `--fgColor-onEmphasis` over it. The fills fall back
-   * to a translucent color, which lands in either theme.
+   * the page's background. `attention` and `danger` are muted fills, which carry
+   * default-strength text; `done` and `success` are emphasis fills, which carry
+   * `--fgColor-onEmphasis`. A muted fill falls back to a translucent color and
+   * an emphasis fill to the opaque one GitHub paints it, so each lands in either
+   * theme.
    *
    * @type {readonly string[]}
    */
@@ -125,16 +127,43 @@ if (typeof require === 'function') {
     '.bghsa-tone-danger { color: var(--fgColor-default, currentColor);' +
       ' background-color: var(--bgColor-danger-muted, rgba(207, 34, 46, 0.2));' +
       ' border-color: var(--borderColor-danger-emphasis, #cf222e); }',
+    '.bghsa-tone-done { color: var(--fgColor-onEmphasis, #ffffff);' +
+      ' background-color: var(--bgColor-done-emphasis, #8250df);' +
+      ' border-color: var(--bgColor-done-emphasis, #8250df); }',
+    '.bghsa-tone-success { color: var(--fgColor-onEmphasis, #ffffff);' +
+      ' background-color: var(--bgColor-success-emphasis, #1f883d);' +
+      ' border-color: var(--bgColor-success-emphasis, #1f883d); }',
   ];
 
   /** What holds a chip back from its full color while keeping its hue. */
   const DIM_CLASS = 'bghsa-dim';
 
+  /** What paints a chip's own color as its fill. */
+  const FILL_CLASS = 'bghsa-fill';
+
+  /**
+   * How a filled chip is painted, as the rules a surface's own stylesheet
+   * carries.
+   *
+   * The fill is the color the chip's text carries, which on a severity chip is
+   * the one GitHub painted it, and the text over it is the page's own
+   * background. Primer holds a foreground and the background it is read over
+   * far enough apart to read either way round, so the pair carries its contrast
+   * inverted in both themes. The text takes an element of its own, because
+   * `currentColor` on the chip is the color the fill is taken from.
+   *
+   * @type {readonly string[]}
+   */
+  const FILL_RULES = [
+    `.${FILL_CLASS} { background-color: currentColor; border-color: currentColor; }`,
+    `.${FILL_CLASS} > span { color: var(--bgColor-default, #ffffff); }`,
+  ];
+
   /**
    * One chip, as every surface draws it: `Label`, then GitHub's own color for
    * the advisory's severity or the neutral modifier, then the tone, then the
-   * dimming. A surface that builds one by hand is a surface that can disagree
-   * with the others about what a chip is.
+   * fill, then the dimming. A surface that builds one by hand is a surface that
+   * can disagree with the others about what a chip is.
    *
    * @param {Document} doc
    * @param {ChipSpec} spec
@@ -143,10 +172,17 @@ if (typeof require === 'function') {
   function buildChip(doc, spec) {
     const classes = ['Label', spec.severityClass ?? 'Label--secondary'];
     if (spec.tone !== undefined) classes.push(`bghsa-tone-${spec.tone}`);
+    if (spec.fill === true) classes.push(FILL_CLASS);
     if (spec.dim === true) classes.push(DIM_CLASS);
     const node = doc.createElement('span');
     node.className = classes.join(' ');
-    node.textContent = spec.text;
+    if (spec.fill !== true) {
+      node.textContent = spec.text;
+      return node;
+    }
+    const text = doc.createElement('span');
+    text.textContent = spec.text;
+    node.append(text);
     return node;
   }
 
@@ -154,6 +190,8 @@ if (typeof require === 'function') {
     sentenceCase,
     TONE_RULES,
     DIM_CLASS,
+    FILL_CLASS,
+    FILL_RULES,
     buildChip,
     waitingChip,
     DRAFT_STATE,

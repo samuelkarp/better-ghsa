@@ -66,8 +66,10 @@ targets that have a pull request prepared against them.
 applicable".
 
 **Severity.** The level, and ", unconfirmed" appended when no maintainer has
-confirmed the scoring. An unconfirmed severity is dimmed. The severity on an
-unread row is dimmed too, because nothing has been read that could confirm it.
+confirmed the scoring. A confirmed severity is a filled chip in the color GitHub
+paints that level. An unconfirmed severity is dimmed and unfilled. The severity
+on an unread row is dimmed too, because nothing has been read that could confirm
+it.
 
 **Embargo.** One of "Embargo lifts 2026-04-01", "Embargo overdue since
 2026-04-01", or "Embargo, no lift date".

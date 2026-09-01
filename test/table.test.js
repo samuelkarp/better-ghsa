@@ -357,10 +357,17 @@ function chipsIn(doc) {
 }
 
 test('the stylesheet carries a rule for every color the chips invent', () => {
-  // Primer paints the classes GitHub's own chips carry. These three are the
+  // Primer paints the classes GitHub's own chips carry. These are the
   // extension's own, so a chip carrying one and no rule defining it would draw
   // as though it carried no color at all.
-  for (const name of ['bghsa-tone-attention', 'bghsa-tone-danger', 'bghsa-dim']) {
+  for (const name of [
+    'bghsa-tone-attention',
+    'bghsa-tone-danger',
+    'bghsa-tone-done',
+    'bghsa-tone-success',
+    'bghsa-fill',
+    'bghsa-dim',
+  ]) {
     assert.ok(table.STYLE_TEXT.includes(`.${name} {`), `no rule defines .${name}`);
   }
 });
@@ -681,6 +688,7 @@ function chipsOf(changes = {}) {
       if (spec.severityClass !== undefined && spec.severityClass !== null) {
         marks.push(spec.severityClass);
       }
+      if (spec.fill === true) marks.push('fill');
       if (spec.dim === true) marks.push('dim');
       return marks.length === 0 ? spec.text : `${spec.text}[${marks.join(' ')}]`;
     })
@@ -718,10 +726,11 @@ test('the severity chip marks the unconfirmed case and no other', () => {
     `severity nobody confirmed: ${unconfirmed}`
   );
 
-  // The confirmed case is the ordinary one, so the chip is the level alone.
+  // The confirmed case is the ordinary one, so the chip is the level alone,
+  // filled with the color the level carries.
   const confirmed = chipsOf({ read: true, severityLabel: 'Low', severityConfirmed: true });
   assert.ok(
-    confirmed === 'Blocked on us[danger] | Low',
+    confirmed === 'Blocked on us[danger] | Low[fill]',
     `severity a maintainer confirmed: ${confirmed}`
   );
 
@@ -743,7 +752,7 @@ test('the severity chip takes the class GitHub painted, not one off the level', 
     severityConfirmed: true,
   });
   assert.ok(
-    carried === 'Blocked on us[danger] | Critical[Label--orange]',
+    carried === 'Blocked on us[danger] | Critical[Label--orange fill]',
     `the class GitHub painted: ${carried}`
   );
 
@@ -757,8 +766,37 @@ test('the severity chip takes the class GitHub painted, not one off the level', 
   // the extension paints nothing of its own in its place.
   const bare = chipsOf({ read: true, severityLabel: 'Critical', severityConfirmed: true });
   assert.ok(
-    bare === 'Blocked on us[danger] | Critical',
+    bare === 'Blocked on us[danger] | Critical[fill]',
     `no class on GitHub's chip: ${bare}`
+  );
+});
+
+test('a confirmed severity is drawn filled and an unconfirmed one is not', () => {
+  // One level and one color over two rows, so what differs between the chips
+  // drawn can only be the confirmation.
+  const { doc } = tableOver([
+    sortRow('GHSA-aaaa-aaaa-aaaa', {
+      read: true,
+      severity: 'high',
+      severityLabel: 'High',
+      severityClass: 'Label--orange',
+      severityConfirmed: true,
+    }),
+    sortRow('GHSA-bbbb-bbbb-bbbb', {
+      read: true,
+      severity: 'high',
+      severityLabel: 'High',
+      severityClass: 'Label--orange',
+    }),
+  ]);
+  const drawn = tableRows(doc).map(chipLine);
+  assert.ok(
+    drawn[0]?.endsWith('High[Label--orange bghsa-fill]') === true,
+    `the chip of a severity a maintainer confirmed: ${drawn[0]}`
+  );
+  assert.ok(
+    drawn[1]?.endsWith('High, unconfirmed[Label--orange bghsa-dim]') === true,
+    `the chip of a severity nobody has confirmed: ${drawn[1]}`
   );
 });
 
