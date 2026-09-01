@@ -96,6 +96,12 @@ if (typeof require === 'function') {
   /** What the control that writes one closure reason reads. */
   const SAVE_LABEL = 'Save';
 
+  /** What the closure control and the filter over it are labeled. */
+  const REASON_LABEL = 'Closure reason';
+
+  /** What the filter over the two endings reads, as the open list names it. */
+  const STATE_LABEL = 'State';
+
   /** The state GitHub gives an advisory that was published, as it names it. */
   const PUBLISHED = 'Published';
 
@@ -294,6 +300,84 @@ if (typeof require === 'function') {
   }
 
   /**
+   * What the two filters offer, in the order they offer them.
+   *
+   * The reason is a closed advisory's. A published advisory holds none and
+   * carries no control for one, so it stands in the list while that filter is
+   * holding it to nothing and falls out of every value of it, the `None` value
+   * included. `None` is what a backfill works from: the closed advisories a
+   * read backs and no reason has been set on.
+   *
+   * @type {readonly import('../list/table.js').Facet<DoneRow>[]}
+   */
+  const FACETS = [
+    {
+      key: 'state',
+      label: STATE_LABEL,
+      values: [PUBLISHED, CLOSED],
+      valuesOf: (row) => {
+        const state = stateNameOf(row);
+        return state === null ? [] : [state];
+      },
+    },
+    {
+      key: 'reason',
+      label: REASON_LABEL,
+      values: globalThis.bghsa.schema.CLOSURE_REASONS.map(globalThis.bghsa.chips.sentenceCase),
+      applies: (row) => stateNameOf(row) === CLOSED,
+      valuesOf: (row) =>
+        row.closureReason === null ? [] : [globalThis.bghsa.chips.sentenceCase(row.closureReason)],
+    },
+  ];
+
+  /**
+   * What each filter is holding one document's list to, by facet key. It is held
+   * here rather than read off the controls, because a draw takes the view out
+   * and puts a new one back, and what a maintainer picked has to survive that.
+   *
+   * @type {WeakMap<Document, Record<string, string>>}
+   */
+  const filters = new WeakMap();
+
+  /**
+   * @param {Document} doc
+   * @returns {Record<string, string>} what each filter is holding the list to,
+   *   which is nothing until a control says otherwise.
+   */
+  function filtersOf(doc) {
+    return filters.get(doc) ?? {};
+  }
+
+  /**
+   * @param {Document} doc
+   * @returns {boolean} whether any filter is holding the list to a value. From
+   *   there the reset has nothing to do, and an empty list is empty because the
+   *   crawl found nothing rather than because a filter kept nothing.
+   */
+  function filtering(doc) {
+    return Object.values(filtersOf(doc)).some((value) => value !== '');
+  }
+
+  /**
+   * The rows the filters keep, in the order they were in. Nothing is read again
+   * and nothing is fetched: this is a view over the rows the corpus already
+   * holds, and a row it has not read yet is still a row.
+   *
+   * @param {readonly DoneRow[]} rows
+   * @param {Record<string, string>} held
+   * @returns {DoneRow[]}
+   */
+  function applyFilters(rows, held) {
+    const table = globalThis.bghsa.table;
+    return rows.filter((row) =>
+      FACETS.every((facet) => {
+        const wanted = held[facet.key] ?? '';
+        return wanted === '' || table.matchesFilter(facet, row, wanted);
+      })
+    );
+  }
+
+  /**
    * The line GitHub's own row carries under the title.
    *
    * @param {DoneRow} row
@@ -437,7 +521,7 @@ if (typeof require === 'function') {
       globalThis.bghsa.schema.CLOSURE_REASONS,
       current,
       '',
-      { label: globalThis.bghsa.chips.sentenceCase, ariaLabel: 'Closure reason' }
+      { label: globalThis.bghsa.chips.sentenceCase, ariaLabel: REASON_LABEL }
     );
 
     const save = element(doc, 'button', 'btn btn-sm bghsa-done-save', SAVE_LABEL);
@@ -563,6 +647,125 @@ if (typeof require === 'function') {
   }
 
   /**
+   * What one filter offers: the item that holds the list to nothing, then the
+   * values the rows hold.
+   *
+   * @param {Document} doc
+   * @param {import('../list/table.js').Facet<DoneRow>} facet
+   * @param {readonly DoneRow[]} rows Every row the corpus holds, so the values
+   *   come off the whole list and not off what the filters have left of it.
+   * @param {string} selected
+   * @returns {Element[]}
+   */
+  function filterItems(doc, facet, rows, selected) {
+    const table = globalThis.bghsa.table;
+    /**
+     * @param {string} value
+     * @returns {() => void}
+     */
+    const pressing = (value) => () => {
+      filters.set(doc, { ...filtersOf(doc), [facet.key]: value });
+      drawControls(doc);
+      draw(doc);
+    };
+    const items = [table.menuItem(doc, '', table.ANY_LABEL, selected === '', pressing(''))];
+    for (const value of table.filterOptions(rows, facet, selected)) {
+      items.push(table.menuItem(doc, value, value, value === selected, pressing(value)));
+    }
+    return items;
+  }
+
+  /**
+   * The filters this surface puts on the bar, beside the open list's, and the
+   * way back to the list unfiltered.
+   *
+   * They sit on the bar the toggles sit on, which is where the open list's own
+   * filters are, so both views are worked from one strip. The bar stands
+   * outside the view a draw replaces, so a read landing draws the rows and
+   * leaves the control a maintainer is pointing at where it is.
+   *
+   * @param {Document} doc
+   * @returns {Element}
+   */
+  function buildControls(doc) {
+    const table = globalThis.bghsa.table;
+    const rows = rowsOf(current(doc).corpus);
+    const held = filtersOf(doc);
+    const box = element(doc, 'div', 'd-flex flex-wrap flex-items-center bghsa-done-controls');
+    for (const facet of FACETS) {
+      const selected = held[facet.key] ?? '';
+      const control = table.menu(
+        doc,
+        'bghsa-done-filter',
+        facet.label,
+        selected,
+        filterItems(doc, facet, rows, selected)
+      );
+      control.setAttribute(table.FACET_ATTRIBUTE, facet.key);
+      box.append(control);
+    }
+
+    const reset = element(doc, 'button', 'btn btn-sm mb-1 bghsa-done-reset', table.RESET_LABEL);
+    reset.setAttribute('type', 'button');
+    if (!filtering(doc)) reset.setAttribute('disabled', '');
+    reset.addEventListener('click', () => {
+      filters.set(doc, {});
+      drawControls(doc);
+      draw(doc);
+    });
+    box.append(reset);
+    return box;
+  }
+
+  /**
+   * @param {Document} doc
+   * @returns {Element | null} the filters on the bar, and null before the list
+   *   surface has drawn one.
+   */
+  function controlsIn(doc) {
+    return doc.querySelector(`#${globalThis.bghsa.table.ROOT_ID} .bghsa-done-controls`);
+  }
+
+  /**
+   * Draws the filters again from what they are now holding the list to, which
+   * is what puts every menu on the item that view names and every summary on
+   * the value it is holding to. A press is what asks for this; a read landing
+   * asks for {@link syncControls}.
+   *
+   * @param {Document} doc
+   * @returns {void}
+   */
+  function drawControls(doc) {
+    const held = controlsIn(doc);
+    if (held === null) return;
+    const fresh = buildControls(doc);
+    if (held.classList.contains(globalThis.bghsa.table.HIDDEN_CLASS)) {
+      fresh.classList.add(globalThis.bghsa.table.HIDDEN_CLASS);
+    }
+    held.replaceWith(fresh);
+  }
+
+  /**
+   * Puts the values the filters offer on what the corpus now holds. A read
+   * landing can turn up a closure reason no row carried before, and the control
+   * offers it from then on.
+   *
+   * @param {Document} doc
+   * @returns {void}
+   */
+  function syncControls(doc) {
+    const box = controlsIn(doc);
+    if (box === null) return;
+    const rows = rowsOf(current(doc).corpus);
+    const held = filtersOf(doc);
+    globalThis.bghsa.table.syncMenus(box, (key) => {
+      const facet = FACETS.find((each) => each.key === key) ?? null;
+      if (facet === null) return null;
+      return filterItems(doc, facet, rows, held[key] ?? '');
+    });
+  }
+
+  /**
    * What the view says when a page of the walk or an advisory read failed.
    * REQUIREMENTS.md section 11 displays what it can, marks the result
    * incomplete, and shows a banner. The banner is the
@@ -619,7 +822,11 @@ if (typeof require === 'function') {
   function buildBody(doc, rows, state) {
     const list = element(doc, 'ul', 'bghsa-done-rows');
     if (rows.length === 0) {
-      const empty = state.corpus === null ? (statusTextOf(state) ?? EMPTY_TEXT) : EMPTY_TEXT;
+      // A list the filters emptied is not a repository with nothing on it, and
+      // the table already has words for both.
+      let empty = EMPTY_TEXT;
+      if (state.corpus === null) empty = statusTextOf(state) ?? EMPTY_TEXT;
+      else if (filtering(doc)) empty = globalThis.bghsa.table.EMPTY_TEXT;
       list.append(element(doc, 'li', 'Box-row bghsa-done-empty', empty));
       return list;
     }
@@ -646,7 +853,8 @@ if (typeof require === 'function') {
     const header = element(doc, 'div', 'Box-header bghsa-done-header');
     header.append(element(doc, 'strong', '', HEADING_TEXT));
     const rows = rowsOf(state.corpus);
-    const countText = globalThis.bghsa.table.countTextOf(rows.length);
+    const shown = applyFilters(rows, filtersOf(doc));
+    const countText = globalThis.bghsa.table.viewCountText(shown.length, rows.length);
     header.append(element(doc, 'span', 'ml-2 text-normal bghsa-done-count', countText));
     // What the list is of, which is not a statistic: a maintainer reading a row
     // has to be able to tell whether more are on their way, and whether the
@@ -658,7 +866,7 @@ if (typeof require === 'function') {
     const banner = buildBanner(doc, state.failures);
     if (banner !== null) root.append(banner);
 
-    root.append(buildBody(doc, rows, state));
+    root.append(buildBody(doc, shown, state));
     return root;
   }
 
@@ -698,6 +906,9 @@ if (typeof require === 'function') {
     else surface.append(root);
     ensureStyle(doc);
     setHidden(root, table.viewMode(doc) !== MODE);
+    // The filters stand on the bar, which this draw does not touch. What a read
+    // landing changes there is the values they offer.
+    syncControls(doc);
     return root;
   }
 
@@ -753,6 +964,8 @@ if (typeof require === 'function') {
       setHidden(toggleNode, mode === table.VIEW_NATIVE);
     }
     if (root !== null) setHidden(root, mode !== MODE);
+    const controls = controlsIn(doc);
+    if (controls !== null) setHidden(controls, mode !== MODE);
   }
 
   /**
@@ -929,7 +1142,7 @@ if (typeof require === 'function') {
 
   // The list surface holds the choice of view and the bar the toggles sit on,
   // so this one takes its place there as soon as it loads.
-  globalThis.bghsa.table.addSurface({ control: buildToggle, show, left });
+  globalThis.bghsa.table.addSurface({ control: buildToggle, controls: buildControls, show, left });
 
   if (typeof module !== 'undefined') {
     module.exports = exported;

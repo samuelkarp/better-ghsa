@@ -391,6 +391,11 @@ the rating.
 A published advisory has no closure reason, so its row carries no control for
 setting one.
 
+Rows are filterable on state and on closure reason, with a control that clears
+every filter. Those filters stand on the same bar as the open list's, and the
+bar shows the set belonging to the view on screen. The reason filter is over closed advisories, and the value it
+offers for the advisories carrying no reason is what a backfill works from.
+
 The statistics are their own view. They cover the whole corpus, open and done,
 because they describe active work as much as finished work, and they are not a
 property of the done list.

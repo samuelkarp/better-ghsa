@@ -2016,7 +2016,7 @@ test('a filter on a value some rows do not have keeps only those that do', () =>
 
 /**
  * @param {string} key
- * @returns {import('../src/list/table.js').Facet}
+ * @returns {import('../src/list/table.js').Facet<import('../src/list/table.js').TableRow>}
  */
 function facet(key) {
   const found = table.facetFor(key);

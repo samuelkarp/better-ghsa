@@ -27,8 +27,7 @@ One view shows at a time.
 ## What a row shows
 
 The heading reads "Completed" with the number of advisories beside it.
-Advisories are ordered by GHSA identifier ascending. There is no other ordering
-and no filter on this view.
+Advisories are ordered by GHSA identifier ascending. There is no other ordering.
 
 Each row carries:
 
@@ -50,6 +49,27 @@ Each row carries:
 
 Before the first page of results arrives, the list reads "Loading...". A
 finished search that found nothing reads "Not found".
+
+## Filters
+
+Two filter menus sit on the bar above the list, where the open advisory list's
+own filters are: "State" and "Closure reason". The set that belongs to the view
+on screen is the set you see. A menu holding a value reads it in its own label,
+as "State: Closed". "Any" clears that one menu and "Reset" clears both. While a
+filter is keeping rows out, the count beside the heading reads "2 of 5
+advisories".
+
+Each menu offers only the values the rows in front of you carry. "Closure
+reason" also offers "None" when at least one closed advisory that has been read
+carries no reason, which selects exactly the advisories a reason has still to be
+set on. An advisory nothing has been read on passes every filter, because no
+value has been looked up that could exclude it.
+
+"Closure reason" is over closed advisories alone. A published advisory has no
+closure reason, so it matches no value of that menu, "None" included, and it
+shows while that menu is clear.
+
+When the filters keep no rows, the list reads "No matches".
 
 ## Recording a closure reason
 

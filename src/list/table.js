@@ -63,16 +63,21 @@ if (typeof require === 'function') {
  */
 
 /**
- * One value the table holds about an advisory, as a filter control reads it.
- * Every facet enumerates, so every one of them backs a filter.
+ * One value a surface holds about an advisory, as a filter control reads it.
+ * Every facet enumerates, so every one of them backs a filter. The row is the
+ * surface's own: this table's rows here, and the completed view's there.
  *
+ * @template Row
  * @typedef {object} Facet
  * @property {string} key What the control stores.
  * @property {string} label What the filter control reads while it is holding the
  *   table to nothing.
  * @property {readonly string[]} [values] The order its values belong in, for the
  *   ones this reader knows. Anything else follows them alphabetically.
- * @property {(row: TableRow) => string[]} valuesOf What this row holds for the
+ * @property {(row: Row) => boolean} [applies] Whether the facet says anything
+ *   about this row. A row it does not apply to holds none of its values and
+ *   matches none of them, {@link NO_VALUE} included.
+ * @property {(row: Row) => string[]} valuesOf What this row holds for the
  *   facet. Empty where it holds nothing, which a read can still fill in.
  */
 
@@ -160,6 +165,10 @@ if (typeof require === 'function') {
  * @property {(doc: Document) => Element | null} control What it puts on the bar,
  *   beside the toggle that restores GitHub's view. It is built again on every
  *   render, because the bar is.
+ * @property {(doc: Document) => Element | null} [controls] What it filters with,
+ *   which goes on the bar beside the table's own filters, so one strip carries
+ *   every control the page has. It is built again on every render, and the
+ *   surface holds it out of view while another view is showing.
  * @property {(doc: Document, mode: string) => void} show Told the view the
  *   document is now on, after the table has been placed and hidden or shown.
  * @property {(doc: Document, key: string | null) => void} [left] Told which
@@ -660,7 +669,7 @@ if (typeof require === 'function') {
   /**
    * Every value a row holds, as the filter controls read it.
    *
-   * @type {readonly Facet[]}
+   * @type {readonly Facet<TableRow>[]}
    */
   const FACETS = [
     {
@@ -743,8 +752,8 @@ if (typeof require === 'function') {
 
   /**
    * @param {string} key
-   * @returns {Facet | null} the facet that key names, and null for a key this
-   *   reader does not know.
+   * @returns {Facet<TableRow> | null} the facet that key names, and null for a
+   *   key this reader does not know.
    */
   function facetFor(key) {
     return FACETS.find((facet) => facet.key === key) ?? null;
@@ -778,14 +787,17 @@ if (typeof require === 'function') {
    * does not hide a row over a value nobody has looked up yet: such a row passes
    * every filter over a facet a read supplies, and drops out of the ones it
    * turns out not to match once its read lands. A row a read does back and that
-   * holds nothing for the facet passes only {@link NO_VALUE}.
+   * holds nothing for the facet passes only {@link NO_VALUE}, and a row the
+   * facet says nothing about passes no value of it at all.
    *
-   * @param {Facet} facet
-   * @param {TableRow} row
+   * @template {{ read: boolean }} Row
+   * @param {Facet<Row>} facet
+   * @param {Row} row
    * @param {string} wanted
    * @returns {boolean}
    */
   function matchesFilter(facet, row, wanted) {
+    if (facet.applies !== undefined && !facet.applies(row)) return false;
     const held = facet.valuesOf(row);
     if (held.length === 0) return row.read ? wanted === NO_VALUE : true;
     return held.includes(wanted);
@@ -876,8 +888,9 @@ if (typeof require === 'function') {
    * row carrying it leaves, so a read landing cannot take the control out from
    * under the view a maintainer is looking at.
    *
-   * @param {readonly TableRow[]} rows
-   * @param {Facet} facet
+   * @template {{ read: boolean }} Row
+   * @param {readonly Row[]} rows
+   * @param {Facet<Row>} facet
    * @param {string} selected What the filter is holding to, and the empty string
    *   for one holding to nothing.
    * @returns {string[]}
@@ -887,6 +900,7 @@ if (typeof require === 'function') {
     const held = new Set();
     let absent = false;
     for (const row of rows) {
+      if (facet.applies !== undefined && !facet.applies(row)) continue;
       const values = facet.valuesOf(row);
       if (values.length === 0) absent = absent || row.read;
       for (const value of values) held.add(value);
@@ -1180,7 +1194,7 @@ if (typeof require === 'function') {
 
   /**
    * @param {Document} doc
-   * @param {Facet} facet
+   * @param {Facet<TableRow>} facet
    * @param {readonly TableRow[]} rows
    * @param {string} selected
    * @returns {Element[]} what one filter offers: the item that holds the table
@@ -1281,9 +1295,44 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Puts the values the table now holds on offer, leaving what every filter is
-   * holding to alone. A read landing can turn up an owner or a patch state no
-   * row carried before, and the control offers it from then on.
+   * Puts the values one set of filters offers on what its rows now hold,
+   * leaving what each filter is holding to alone. A read landing can turn up an
+   * owner or a patch state no row carried before, and the control offers it
+   * from then on.
+   *
+   * Only a menu whose items changed is rebuilt, and the control itself is never
+   * replaced, so a read landing neither shuts a menu a maintainer is reading
+   * nor moves the one they are pointing at.
+   *
+   * @param {Element} box The controls to bring up to date.
+   * @param {(key: string) => readonly Element[] | null} itemsFor What the menu
+   *   of that facet should offer now, and null for a control the caller does
+   *   not know.
+   * @returns {void}
+   */
+  function syncMenus(box, itemsFor) {
+    for (const control of box.querySelectorAll(`[${FACET_ATTRIBUTE}]`)) {
+      const list = control.querySelector('.SelectMenu-list');
+      if (list === null) continue;
+      const wanted = itemsFor(control.getAttribute(FACET_ATTRIBUTE) ?? '');
+      if (wanted === null) continue;
+      const shown = [...list.querySelectorAll(`[${VALUE_ATTRIBUTE}]`)];
+      const same =
+        shown.length === wanted.length &&
+        shown.every(
+          (each, at) =>
+            each.getAttribute(VALUE_ATTRIBUTE) === wanted[at]?.getAttribute(VALUE_ATTRIBUTE)
+        );
+      if (same) continue;
+      while (list.firstChild !== null) list.removeChild(list.firstChild);
+      list.append(...wanted);
+    }
+  }
+
+  /**
+   * The table's own filters, brought up to date. The bar carries another
+   * surface's filters beside these, and a facet key means what the surface that
+   * drew it says it means, so this reads its own controls and no others.
    *
    * @param {Document} doc
    * @returns {void}
@@ -1292,27 +1341,14 @@ if (typeof require === 'function') {
     const root = doc.getElementById(ROOT_ID);
     const view = views.get(doc);
     if (root === null || view === undefined) return;
+    const box = root.querySelector('.bghsa-list-controls');
+    if (box === null) return;
     const state = viewStateOf(doc);
-    for (const control of root.querySelectorAll(`[${FACET_ATTRIBUTE}]`)) {
-      const facet = facetFor(control.getAttribute(FACET_ATTRIBUTE) ?? '');
-      if (facet === null) continue;
-      const list = control.querySelector('.SelectMenu-list');
-      if (list === null) continue;
-      const selected = state.filters[facet.key] ?? '';
-      const wanted = filterItems(doc, facet, view.rows, selected);
-      const shown = [...list.querySelectorAll(`[${VALUE_ATTRIBUTE}]`)];
-      const same =
-        shown.length === wanted.length &&
-        shown.every(
-          (each, at) =>
-            each.getAttribute(VALUE_ATTRIBUTE) === wanted[at]?.getAttribute(VALUE_ATTRIBUTE)
-        );
-      // Only a menu whose items changed is rebuilt, so a read landing does not
-      // shut a menu a maintainer is reading.
-      if (same) continue;
-      while (list.firstChild !== null) list.removeChild(list.firstChild);
-      list.append(...wanted);
-    }
+    syncMenus(box, (key) => {
+      const facet = facetFor(key);
+      if (facet === null) return null;
+      return filterItems(doc, facet, view.rows, state.filters[key] ?? '');
+    });
   }
 
   /**
@@ -1457,6 +1493,20 @@ if (typeof require === 'function') {
       'd-flex flex-wrap flex-items-center flex-justify-between mb-2 bghsa-list-bar'
     );
     bar.append(buildControls(doc, view.rows, state));
+    // A surface that filters puts its controls here, beside the table's own.
+    // One of the sets is in view at a time, and the surface holding it says
+    // which.
+    for (const surface of [...surfaces]) {
+      if (surface.controls === undefined) continue;
+      /** @type {Element | null} */
+      let filters = null;
+      try {
+        filters = surface.controls(doc);
+      } catch {
+        // A surface that cannot build its filters leaves the bar as it is.
+      }
+      if (filters !== null) bar.append(filters);
+    }
     // The toggles are one group. Each of them switches the same thing, which is
     // which view the page shows, and GitHub words a set of buttons over one
     // thing as a `BtnGroup`. A surface's control is made a member of the group
@@ -2281,6 +2331,10 @@ if (typeof require === 'function') {
     chipsFor,
     NO_VALUE,
     DEFAULT_SORT,
+    menu,
+    menuItem,
+    syncMenus,
+    viewCountText,
     FACETS,
     SORTS,
     facetFor,

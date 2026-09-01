@@ -830,6 +830,305 @@ test('the reason control stands on a closed row and not on a published one', asy
   );
 });
 
+/**
+ * @param {Document} doc
+ * @param {string} facet
+ * @returns {Element} the control holding the completed list to one value of
+ *   that facet. The bar carries the open list's filters beside these, and both
+ *   surfaces have a `state` facet, so the query names whose controls these are.
+ */
+function filterIn(doc, facet) {
+  return one(doc, `#${table.ROOT_ID} .bghsa-done-controls [${table.FACET_ATTRIBUTE}="${facet}"]`);
+}
+
+/**
+ * @param {Element} control
+ * @returns {Element[]} the items its menu offers, in the order it offers them.
+ */
+function itemNodes(control) {
+  return Array.from(control.querySelectorAll(`[${table.VALUE_ATTRIBUTE}]`));
+}
+
+/**
+ * @param {Element} control
+ * @returns {string} what its menu offers, as one line.
+ */
+function itemsOf(control) {
+  return itemNodes(control)
+    .map((item) => (item.textContent ?? '').trim())
+    .join(' | ');
+}
+
+/**
+ * Presses an item the way a maintainer does.
+ *
+ * @param {Document} doc
+ * @param {string} facet
+ * @param {string} value What the item holds the control to.
+ * @returns {void}
+ */
+function pick(doc, facet, value) {
+  for (const item of itemNodes(filterIn(doc, facet))) {
+    if ((item.getAttribute(table.VALUE_ATTRIBUTE) ?? '') !== value) continue;
+    /** @type {HTMLElement} */ (/** @type {unknown} */ (item)).click();
+    return;
+  }
+  throw new Error(`the ${facet} filter offers no ${value === '' ? 'reset item' : value}`);
+}
+
+/**
+ * @param {Document} doc
+ * @returns {string} the identifiers the view is showing, in the order it shows
+ *   them.
+ */
+function shownIds(doc) {
+  return Array.from(doc.querySelectorAll(`#${view.ROOT_ID} li.bghsa-done-row`))
+    .map((row) => row.getAttribute('data-bghsa-ghsa') ?? '')
+    .join(' ');
+}
+
+/**
+ * One advisory read carrying a maintainer's stored closure reason.
+ *
+ * @param {string} ghsaId
+ * @param {string} state
+ * @param {string | null} reason
+ * @returns {import('../src/common/parse-detail.js').ParsedDetail}
+ */
+function ended(ghsaId, state, reason) {
+  return advisory({
+    ref: { ...REF, ghsaId },
+    ghsaId,
+    state,
+    comments:
+      reason === null
+        ? []
+        : [
+            comment({
+              id: '31',
+              author: 'samuelkarp',
+              raw: JSON.stringify({
+                betterGhsa: '1.0',
+                seq: 1,
+                by: 'samuelkarp',
+                at: '2026-04-01T00:00:00Z',
+                closure: { reason },
+              }),
+            }),
+          ],
+  });
+}
+
+test('the filters keep the rows they name and the count follows them', async () => {
+  const first = ghsa('paaa');
+  const second = ghsa('pbbb');
+  const named = ghsa('xaaa');
+  const bare = ghsa('xbbb');
+  const unread = ghsa('xccc');
+  const doc = await page(
+    await corpusOf([
+      member({ ghsaId: first, state: 'published', advisory: ended(first, 'Published', null) }),
+      member({ ghsaId: second, state: 'published', advisory: ended(second, 'Published', null) }),
+      member({ ghsaId: named, state: 'closed', advisory: ended(named, 'Closed', 'duplicate') }),
+      member({ ghsaId: bare, state: 'closed', advisory: ended(bare, 'Closed', null) }),
+      // The crawl found this one and nothing has read it.
+      member({ ghsaId: unread, state: 'closed' }),
+    ])
+  );
+
+  const count = `#${view.ROOT_ID} .bghsa-done-count`;
+  assert.strictEqual(shownIds(doc), [first, second, named, bare, unread].sort().join(' '));
+  assert.strictEqual(textOf(doc, count), '5 advisories', 'the header counts the whole list');
+
+  assert.strictEqual(
+    itemsOf(filterIn(doc, 'state')),
+    'Any | Published | Closed',
+    'the state filter offers the endings the rows are in'
+  );
+  assert.strictEqual(
+    itemsOf(filterIn(doc, 'reason')),
+    `Any | Duplicate | ${table.NO_VALUE}`,
+    'the reason filter offers what the closed rows carry, and the absence of one'
+  );
+
+  pick(doc, 'state', 'Published');
+  assert.strictEqual(shownIds(doc), [first, second].sort().join(' '));
+  assert.strictEqual(
+    textOf(doc, count),
+    '2 of 5 advisories',
+    'the header counts what the filters left'
+  );
+
+  pick(doc, 'state', 'Closed');
+  assert.strictEqual(shownIds(doc), [named, bare, unread].sort().join(' '));
+
+  pick(doc, 'state', '');
+  assert.strictEqual(shownIds(doc), [first, second, named, bare, unread].sort().join(' '));
+  assert.strictEqual(textOf(doc, count), '5 advisories');
+
+  // A published row holds no reason and matches no value of one, so the reason
+  // filter is over the closed advisories alone. A row nothing has read passes
+  // every filter, because no value has been looked up that could exclude it.
+  pick(doc, 'reason', 'Duplicate');
+  assert.strictEqual(shownIds(doc), [named, unread].sort().join(' '));
+
+  pick(doc, 'reason', table.NO_VALUE);
+  assert.strictEqual(
+    shownIds(doc),
+    [bare, unread].sort().join(' '),
+    'the closed advisories a reason has still to be set on'
+  );
+
+  // A press picks a value and shuts the menu it was made in, which is the box
+  // being drawn again from what the filters are now holding the list to.
+  filterIn(doc, 'state').setAttribute('open', '');
+  pick(doc, 'state', 'Closed');
+  assert.ok(!filterIn(doc, 'state').hasAttribute('open'), 'the menu a value was picked in stayed open');
+  assert.strictEqual(
+    textOf(filterIn(doc, 'state'), 'summary'),
+    'State: Closed',
+    'the control reads the value it is holding the list to'
+  );
+  pick(doc, 'state', '');
+
+  // The reset is the way back, and it is offered from the unfiltered list.
+  const reset = one(doc, `#${table.ROOT_ID} .bghsa-done-reset`);
+  assert.strictEqual(reset.hasAttribute('disabled'), false, 'the reset is shut while a filter holds');
+  /** @type {HTMLElement} */ (/** @type {unknown} */ (reset)).click();
+  assert.strictEqual(shownIds(doc), [first, second, named, bare, unread].sort().join(' '));
+  assert.ok(
+    one(doc, `#${table.ROOT_ID} .bghsa-done-reset`).hasAttribute('disabled'),
+    'the reset is offered from the list it goes back to'
+  );
+});
+
+test('a list the filters keep no row of says so', async () => {
+  const published = ghsa('qaaa');
+  const closed = ghsa('qbbb');
+  const doc = await page(
+    await corpusOf([
+      member({
+        ghsaId: published,
+        state: 'published',
+        advisory: ended(published, 'Published', null),
+      }),
+      member({ ghsaId: closed, state: 'closed', advisory: ended(closed, 'Closed', 'duplicate') }),
+    ])
+  );
+
+  // Each filter keeps the row the other drops.
+  pick(doc, 'state', 'Published');
+  pick(doc, 'reason', 'Duplicate');
+  assert.strictEqual(shownIds(doc), '', 'the filters kept a row neither names');
+  assert.strictEqual(
+    textOf(doc, `#${view.ROOT_ID} .bghsa-done-empty`),
+    table.EMPTY_TEXT,
+    'the words the table uses for a filter that kept nothing'
+  );
+});
+
+test("the completed filters sit on the bar with the open list's", async () => {
+  const doc = await page(await corpusOf([member({ ghsaId: ghsa('taaa'), state: 'closed' })]));
+  const bar = one(doc, `#${table.ROOT_ID} .bghsa-list-bar`);
+  assert.ok(bar.querySelector('.bghsa-list-controls') !== null, "the open list's filters left the bar");
+  assert.ok(bar.querySelector('.bghsa-done-controls') !== null, 'the completed filters are not on the bar');
+  assert.strictEqual(
+    doc.querySelector(`#${view.ROOT_ID} .bghsa-done-controls`),
+    null,
+    'the completed filters are inside the view the draw replaces'
+  );
+
+  /**
+   * @param {string} selector
+   * @returns {boolean} whether that control set is in view.
+   */
+  const shows = (selector) =>
+    !one(doc, `#${table.ROOT_ID} ${selector}`).classList.contains(table.HIDDEN_CLASS);
+
+  // One set is in view at a time, and it is the one that filters what is on
+  // screen.
+  assert.deepStrictEqual(
+    [shows('.bghsa-list-controls'), shows('.bghsa-done-controls')],
+    [true, false],
+    'the table is showing'
+  );
+  table.setViewMode(doc, view.MODE);
+  table.applyVisibility(doc);
+  assert.deepStrictEqual(
+    [shows('.bghsa-list-controls'), shows('.bghsa-done-controls')],
+    [false, true],
+    'the completed view is showing'
+  );
+  table.setViewMode(doc, table.VIEW_NATIVE);
+  table.applyVisibility(doc);
+  assert.deepStrictEqual(
+    [shows('.bghsa-list-controls'), shows('.bghsa-done-controls')],
+    [false, false],
+    "GitHub's own view is showing"
+  );
+  table.setViewMode(doc, table.VIEW_TABLE);
+  table.applyVisibility(doc);
+
+  // Both surfaces have a State filter, and now both sets of controls stand in
+  // one root. A read landing in the table brings the table's own filters up to
+  // date and leaves the completed view's alone.
+  const offered = itemsOf(filterIn(doc, 'state'));
+  const read = parseDetail.parseDetail(document(fixture('triage-thread.html')));
+  assert.ok(read !== null, 'the fixture reads as an advisory');
+  await table.applyEntry(doc, TRIAGE_ID, { record: read, observedAt: clockAt, state: 'triage' });
+  assert.strictEqual(
+    itemsOf(filterIn(doc, 'state')),
+    offered,
+    "the completed view's State filter was filled with the table's own values"
+  );
+  assert.strictEqual(offered, 'Any | Closed', `the completed states offered: ${offered}`);
+});
+
+test('a read landing leaves the filter under the maintainer alone', async () => {
+  const read = ghsa('raaa');
+  const arriving = ghsa('rbbb');
+  const doc = await page(
+    await corpusOf([
+      member({ ghsaId: read, state: 'closed', advisory: ended(read, 'Closed', null) }),
+      member({ ghsaId: arriving, state: 'closed' }),
+    ])
+  );
+
+  // The browser opens the menu on the press of its summary.
+  const before = filterIn(doc, 'reason');
+  const item = one(before, `[${table.VALUE_ATTRIBUTE}]`);
+  before.setAttribute('open', '');
+  view.draw(doc);
+
+  const after = filterIn(doc, 'reason');
+  assert.strictEqual(after, before, 'the draw built the control again under the maintainer');
+  assert.strictEqual(
+    one(after, `[${table.VALUE_ATTRIBUTE}]`),
+    item,
+    'the draw built the items of a menu nothing changed again'
+  );
+  assert.ok(after.hasAttribute('open'), 'the draw shut a menu that was open');
+  assert.strictEqual(itemsOf(after), `Any | ${table.NO_VALUE}`);
+
+  // A read that turns up a value the menu does not offer is what changes it,
+  // and it changes the items and not the control they are in.
+  const held = /** @type {import('../src/done/corpus.js').Corpus} */ (view.stateOf(doc).corpus);
+  const landed = /** @type {import('../src/done/corpus.js').CorpusMember} */ (
+    view.memberOf(held, arriving)
+  );
+  landed.advisory = ended(arriving, 'Closed', 'duplicate');
+  held.unread = [];
+  view.draw(doc);
+
+  assert.strictEqual(
+    itemsOf(filterIn(doc, 'reason')),
+    `Any | Duplicate | ${table.NO_VALUE}`,
+    'the value the read turned up is offered'
+  );
+  assert.strictEqual(filterIn(doc, 'reason'), before, 'and the control it is offered in is the same one');
+  assert.ok(filterIn(doc, 'reason').hasAttribute('open'), 'which is still open');
+});
+
 test('the observed cell reads the same words the list rows read', async () => {
   const unread = ghsa('dddd');
   const read = ghsa('dddf');
