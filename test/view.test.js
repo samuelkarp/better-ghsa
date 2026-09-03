@@ -1158,16 +1158,16 @@ test('the observed cell reads the same words the list rows read', async () => {
   );
 });
 
-test('the header tells a list still filling from one that will stay short', async () => {
+test('the header says a list will stay short when nothing is filling it', async () => {
   const members = [member({ ghsaId: ghsa('eeff'), state: 'closed', severity: 'high' })];
   const header = `#${view.ROOT_ID} .bghsa-done-header span.Label`;
 
-  // A corpus assembled inside the walk that is filling it.
+  // A corpus the walk assembled goes on saying it is being filled, and this
+  // page has no collection running. What is missing is not on its way, and the
+  // corpus saying otherwise does not make it so.
   const doc = await page(corpusOf(members, { complete: false, running: true }));
-  assert.deepStrictEqual(textsOf(doc, header), ['Loading...']);
+  assert.deepStrictEqual(textsOf(doc, header), ['Failed to load all advisories']);
 
-  // The pass ended and the walk never reached the last page, so what is missing
-  // is not on its way.
   view.setState(doc, { corpus: corpusOf(members, { complete: false, running: false }) });
   view.draw(doc);
   assert.deepStrictEqual(textsOf(doc, header), ['Failed to load all advisories']);
@@ -1176,6 +1176,263 @@ test('the header tells a list still filling from one that will stay short', asyn
   view.setState(doc, { corpus: corpusOf(members, { complete: true, running: false }) });
   view.draw(doc);
   assert.deepStrictEqual(textsOf(doc, header), []);
+});
+
+test('the header counts what a running crawl has still to read', async () => {
+  const ids = [ghsa('vaaa'), ghsa('vbbb'), ghsa('vccc')];
+  const base = `/${REF.owner}/${REF.repo}/security/advisories`;
+  pages[`${base}?state=published`] = listHtml({
+    state: 'published',
+    ids,
+    counts: { published: 3, closed: 0 },
+  });
+  pages[`${base}?state=closed`] = listHtml({
+    state: 'closed',
+    ids: [],
+    counts: { published: 3, closed: 0 },
+  });
+  for (const id of ids) {
+    pages[detailUrl(id)] = detailHtml({
+      ghsaId: id,
+      state: 'Published',
+      reportedAt: '2026-03-02T00:00:00Z',
+    });
+  }
+  await cache.clear();
+  const doc = await page();
+  /** @type {string[]} */
+  const said = [];
+  const record = async () => {
+    said.push(textsOf(doc, `#${view.ROOT_ID} .bghsa-done-header span.Label`).join('+'));
+  };
+  during[`${base}?state=published`] = record;
+  during[`${base}?state=closed`] = record;
+  for (const id of ids) during[detailUrl(id)] = record;
+  await view.collect(doc, QUEUE_OPTIONS);
+
+  // What the header said while each of those five requests was out. The walk
+  // has no count to give, because it is what finds out how many there are. From
+  // the first read landing the chip counts what the queue has still to read, so
+  // a crawl that is working can be told from one that has stopped. The words
+  // are the ones the open list's own header carries.
+  assert.deepStrictEqual(said, [
+    table.WALKING_TEXT,
+    table.WALKING_TEXT,
+    table.WALKING_TEXT,
+    'Loading (2 left)...',
+    'Loading (1 left)...',
+  ]);
+  assert.deepStrictEqual(
+    textsOf(doc, `#${view.ROOT_ID} .bghsa-done-header span.Label`),
+    [],
+    'the header still says the crawl is running'
+  );
+});
+
+test('the header keeps up while the queue serves the open list', async () => {
+  const done = [ghsa('yaaa'), ghsa('ybbb')];
+  const open = [ghsa('zaaa'), ghsa('zbbb'), ghsa('zccc')];
+  const base = `/${REF.owner}/${REF.repo}/security/advisories`;
+  pages[`${base}?state=published`] = listHtml({
+    state: 'published',
+    ids: done,
+    counts: { published: 2, closed: 0 },
+  });
+  pages[`${base}?state=closed`] = listHtml({ state: 'closed', ids: [], counts: { published: 2, closed: 0 } });
+  for (const id of [...done, ...open]) {
+    pages[detailUrl(id)] = detailHtml({
+      ghsaId: id,
+      state: 'Published',
+      reportedAt: '2026-03-02T00:00:00Z',
+    });
+  }
+  await cache.clear();
+  const doc = await page();
+  const { queue } = table.queueFor(REF, QUEUE_OPTIONS);
+
+  /** @type {string[]} */
+  const said = [];
+  const record = async () => {
+    said.push(textsOf(doc, `#${view.ROOT_ID} .bghsa-done-header span.Label`).join('+'));
+  };
+  during[detailUrl(done[0] ?? '')] = async () => {
+    // The open list's refresh queues its reads through the one queue this
+    // repository has, while this collection is running.
+    await queue.add([...open]);
+    await record();
+  };
+  for (const id of [done[1], ...open]) during[detailUrl(id ?? '')] = record;
+
+  await view.collect(doc, QUEUE_OPTIONS);
+
+  // What the header said while each of those five reads was out: this view's
+  // two advisories, then the open list's three. The number is what the one
+  // queue has still to read, so every read moves it, whichever surface asked
+  // for it, and what is on screen is what is true.
+  assert.deepStrictEqual(said, [
+    table.WALKING_TEXT,
+    'Loading (4 left)...',
+    'Loading (3 left)...',
+    'Loading (2 left)...',
+    'Loading (1 left)...',
+  ]);
+  assert.deepStrictEqual(
+    textsOf(doc, `#${view.ROOT_ID} .bghsa-done-header span.Label`),
+    [],
+    'the header still says the queue has reading to do'
+  );
+});
+
+test('the header stops saying it is loading when the collection is put down', async () => {
+  // GitHub re-renders the frame while a collection is running. A render pass
+  // lands on the page mid-swap, reads no advisory list, and the list surface
+  // tells every surface the page names no repository, which puts the
+  // collection down. The header has to stop saying a collection is running,
+  // because none is and nothing will move it again.
+  const ids = [ghsa('haaa'), ghsa('hbbb'), ghsa('hccc')];
+  const base = `/${REF.owner}/${REF.repo}/security/advisories`;
+  pages[`${base}?state=published`] = listHtml({
+    state: 'published',
+    ids,
+    counts: { published: 3, closed: 0 },
+  });
+  pages[`${base}?state=closed`] = listHtml({ state: 'closed', ids: [], counts: { published: 3 } });
+  for (const id of ids) {
+    pages[detailUrl(id)] = detailHtml({
+      ghsaId: id,
+      state: 'Published',
+      reportedAt: '2026-03-02T00:00:00Z',
+    });
+  }
+  await cache.clear();
+
+  const doc = await page();
+  const held = one(doc, '#repo-content-turbo-frame').innerHTML;
+  doneToggle(doc).click();
+
+  during[detailUrl(ids[1] ?? '')] = async () => {
+    // The frame is empty for a moment, and a pass runs while it is.
+    one(doc, '#repo-content-turbo-frame').innerHTML = '';
+    await table.render(doc);
+    table.ensureRefresh(doc, QUEUE_OPTIONS);
+    // GitHub finishes the swap and the next pass finds the page again.
+    one(doc, '#repo-content-turbo-frame').innerHTML = held;
+    await table.render(doc);
+  };
+
+  await view.collect(doc, QUEUE_OPTIONS);
+  const status = `#${view.ROOT_ID} .bghsa-done-header span.Label`;
+  assert.deepStrictEqual(
+    textsOf(doc, status),
+    [],
+    'the header says a collection is running after it was put down'
+  );
+  assert.strictEqual(view.stateOf(doc).reading, false, 'the view holds a collection that is gone');
+
+  // The collection was put down with a read still queued. It is taken back
+  // here, so what this test left behind is not spent by the next one.
+  const { queue } = table.queueFor(REF, QUEUE_OPTIONS);
+  await queue.load();
+  await queue.run();
+});
+
+test('the header stands from the ask and counts down while the walk waits', async () => {
+  // One queue serves the repository and serves it in order. The open list's
+  // refresh is running when the view is opened, so this collection's walk waits
+  // behind every read the queue already holds, and those reads land while this
+  // view has no corpus and no rows of its own. What the maintainer has to see
+  // through that wait is a number that moves.
+  const open = [ghsa('kaaa'), ghsa('kbbb'), ghsa('kccc'), ghsa('kddd')];
+  const done = [ghsa('laaa')];
+  const base = `/${REF.owner}/${REF.repo}/security/advisories`;
+  pages[`${base}?state=published`] = listHtml({ state: 'published', ids: done, counts: { published: 1 } });
+  pages[`${base}?state=closed`] = listHtml({ state: 'closed', ids: [], counts: { published: 1 } });
+  for (const id of [...open, ...done]) {
+    pages[detailUrl(id)] = detailHtml({ ghsaId: id, state: 'Published', reportedAt: '2026-03-02T00:00:00Z' });
+  }
+  await cache.clear();
+  const doc = await page();
+  const { queue } = table.queueFor(REF, QUEUE_OPTIONS);
+  await queue.load();
+  await queue.add([...open]);
+
+  /** @type {string[]} */
+  const said = [];
+  /** @param {string} at @returns {void} */
+  const record = (at) => {
+    const chip = textsOf(doc, `#${view.ROOT_ID} .bghsa-done-header span.Label`).join('+');
+    const rows = doc.querySelectorAll(`#${view.ROOT_ID} li.bghsa-done-row`).length;
+    const held = view.stateOf(doc).corpus;
+    said.push(`${at}: ${chip === '' ? 'no chip' : chip} rows=${rows} corpus=${held === null ? 'null' : held.members.length}`);
+  };
+  open.forEach((id, at) => {
+    during[detailUrl(id)] = async () => record(`open read ${at + 1}`);
+  });
+  during[detailUrl(done[0] ?? '')] = async () => record('its own read');
+  during[`${base}?state=published`] = async () => record('its own walk');
+
+  // The open list's refresh is already running when the view is opened.
+  const refreshing = queue.run();
+  doneToggle(doc).click();
+  record('the ask');
+  await view.collect(doc, QUEUE_OPTIONS);
+  await refreshing;
+  record('the end');
+
+  // The chip stands from the ask, and every read the queue takes off its list
+  // lowers the count, whether or not this view has a row for it. The walk goes
+  // out once the queue is drained, and from there the collection's own reads
+  // fill the rows.
+  assert.deepStrictEqual(said, [
+    'the ask: Loading (4 left)... rows=0 corpus=null',
+    'open read 1: Loading (4 left)... rows=0 corpus=null',
+    'open read 2: Loading (3 left)... rows=0 corpus=null',
+    'open read 3: Loading (2 left)... rows=0 corpus=null',
+    'open read 4: Loading (1 left)... rows=0 corpus=null',
+    'its own walk: Loading... rows=0 corpus=0',
+    'its own read: Loading... rows=1 corpus=1',
+    'the end: no chip rows=1 corpus=1',
+  ]);
+});
+
+test('the count carries the read the queue has in flight', async () => {
+  // The view is opened while a read is out. Three advisories were queued, one
+  // of them is the request in flight and two are waiting, so what the queue has
+  // left to read is three, and the chip drawn at that moment says three.
+  const open = [ghsa('faaa'), ghsa('fbbb'), ghsa('fccc')];
+  const held = ghsa('gaaa');
+  const base = `/${REF.owner}/${REF.repo}/security/advisories`;
+  pages[`${base}?state=published`] = listHtml({
+    state: 'published',
+    ids: [held],
+    counts: { published: 1 },
+  });
+  pages[`${base}?state=closed`] = listHtml({ state: 'closed', ids: [], counts: { published: 1 } });
+  for (const id of [...open, held]) {
+    pages[detailUrl(id)] = detailHtml({
+      ghsaId: id,
+      state: 'Published',
+      reportedAt: '2026-03-02T00:00:00Z',
+    });
+  }
+  await cache.clear();
+  const doc = await page();
+  const { queue } = table.queueFor(REF, QUEUE_OPTIONS);
+  await queue.load();
+  await queue.add([...open]);
+
+  /** @type {string[]} */
+  const said = [];
+  during[detailUrl(open[0] ?? '')] = async () => {
+    doneToggle(doc).click();
+    said.push(textsOf(doc, `#${view.ROOT_ID} .bghsa-done-header span.Label`).join('+'));
+  };
+
+  const refreshing = queue.run();
+  await view.collect(doc, QUEUE_OPTIONS);
+  await refreshing;
+
+  assert.deepStrictEqual(said, ['Loading (3 left)...'], 'the read in flight went uncounted');
 });
 
 test('the list reads as loading until the first page of the walk lands', async () => {

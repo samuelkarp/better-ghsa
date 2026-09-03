@@ -393,8 +393,17 @@ setting one.
 
 Rows are filterable on state and on closure reason, with a control that clears
 every filter. Those filters stand on the same bar as the open list's, and the
-bar shows the set belonging to the view on screen. The reason filter is over closed advisories, and the value it
+bar shows the set belonging to the view on screen.
+
+While the page is collecting, the view says what the collection is doing: the
+walk, and then how many advisories the queue has still to read. That number
+counts the work of every surface the queue serves and moves as the queue does,
+so a reader can tell a collection that is working from one that has stopped. The reason filter is over closed advisories, and the value it
 offers for the advisories carrying no reason is what a backfill works from.
+The view says a collection is running only while it holds one, so a collection
+put down leaves nothing on the page claiming to be loading, and it says so from
+the moment one is asked for, including while that collection's own walk waits
+behind work the queue already holds.
 
 The statistics are their own view. They cover the whole corpus, open and done,
 because they describe active work as much as finished work, and they are not a

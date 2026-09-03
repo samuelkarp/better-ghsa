@@ -810,6 +810,68 @@ if (typeof require === 'function') {
   }
 
   /**
+   * What the header says about the collection: what it is doing now, or that the
+   * list is short of the two states with nothing further coming.
+   *
+   * What it reports is the collection this document holds. A collection can be
+   * put down under the view, which is what the list surface asks for when a
+   * render finds no advisory list on the page, and a corpus the walk assembled
+   * goes on saying it is being filled after the collection filling it has gone.
+   * Read off the entry, the header says a collection is running while one is,
+   * and says nothing once none is.
+   *
+   * The chip is the open list's own, read off the same queue, so a maintainer
+   * looking at either surface is told the same thing the same way. A walk that
+   * has queued nothing yet says it is loading, because the walk is what finds
+   * out how many there are; a pass reading the advisories the walk found counts
+   * what it has still to read, which is what tells a crawl that is working from
+   * one that has stopped.
+   *
+   * @param {Document} doc
+   * @param {Held} state
+   * @returns {Element | null} the chip, and null where there is nothing to say.
+   */
+  function buildStatus(doc, state) {
+    const table = globalThis.bghsa.table;
+    const collecting = running.get(doc);
+    if (collecting !== undefined) {
+      const left = table.leftToRead(collecting.queue);
+      return table.progressChip(
+        doc,
+        left > 0 ? { phase: 'reading', left } : { phase: 'walking', left: 0 }
+      );
+    }
+    if (state.corpus !== null && !state.corpus.complete) {
+      return globalThis.bghsa.chips.buildChip(doc, { text: FAILED_TEXT });
+    }
+    return null;
+  }
+
+  /**
+   * Writes what the collection is doing where it stands.
+   *
+   * The queue serves the open list as well, and a read of theirs moves what it
+   * has left without moving a row here, so the header is written on its own
+   * and the rows are left as they are. It is how the open list's own header
+   * keeps up with its refresh.
+   *
+   * @param {Document} doc
+   * @returns {void}
+   */
+  function drawStatus(doc) {
+    const header = doc.querySelector(`#${ROOT_ID} .bghsa-done-header`);
+    if (header === null) return;
+    const shown = header.querySelector('span.Label');
+    const wanted = buildStatus(doc, current(doc));
+    if (shown === null) {
+      if (wanted !== null) header.append(wanted);
+      return;
+    }
+    if (wanted === null) shown.remove();
+    else shown.replaceWith(wanted);
+  }
+
+  /**
    * The rows, and what stands where there are none. Reaching the done view
    * starts the collection, so a view with no corpus yet is one whose first page
    * has not landed.
@@ -859,8 +921,8 @@ if (typeof require === 'function') {
     // What the list is of, which is not a statistic: a maintainer reading a row
     // has to be able to tell whether more are on their way, and whether the
     // ones that are missing are coming at all.
-    const status = statusTextOf(state);
-    if (status !== null) header.append(globalThis.bghsa.chips.buildChip(doc, { text: status }));
+    const status = buildStatus(doc, state);
+    if (status !== null) header.append(status);
     root.append(header);
 
     const banner = buildBanner(doc, state.failures);
@@ -1005,11 +1067,17 @@ if (typeof require === 'function') {
       // current under the reader rather than in one jump at the end.
       if (!names(doc, ref)) return;
       const corpus = stateOf(doc).corpus;
-      if (corpus === null) return;
-      const member = memberOf(corpus, ghsaId);
-      if (member === null) return;
-      const advisory = globalThis.bghsa.record.advisoryFrom(entry.record);
-      if (advisory === null) return;
+      const member = corpus === null ? null : memberOf(corpus, ghsaId);
+      const advisory = member === null ? null : globalThis.bghsa.record.advisoryFrom(entry.record);
+      if (corpus === null || member === null || advisory === null) {
+        // Nothing here to fill a row with: the view holds no corpus yet, or the
+        // read is one the queue took for the open list, or the record did not
+        // read back as an advisory. The queue has one fewer to read whichever
+        // it is, and the header says so from the first read after the view
+        // opens, which is well before the walk this collection is waiting on.
+        drawStatus(doc);
+        return;
+      }
       member.advisory = advisory;
       member.observedAt = entry.observedAt;
       corpus.unread = corpus.members
@@ -1032,8 +1100,6 @@ if (typeof require === 'function') {
       draw(doc);
     };
 
-    setState(doc, { reading: true, ref, failures: [] });
-    draw(doc);
     const started = globalThis.bghsa.corpus
       .collect({
         ref,
@@ -1073,12 +1139,23 @@ if (typeof require === 'function') {
         // The repository is not asked about on top of this: a collection the
         // document still holds is the one whose end this is, whichever
         // repository the page has come to name since.
-        if (running.get(doc)?.started !== started) return;
-        running.delete(doc);
-        setState(doc, { reading: false });
+        if (running.get(doc)?.started === started) {
+          running.delete(doc);
+          setState(doc, { reading: false });
+        }
+        // The view is drawn either way. What a collection put down under it
+        // left on the header is what the end of that collection settles, and
+        // where another one has the entry the draw reads that one.
         draw(doc);
       });
+    // The queue is the repository's, and this collection's walk waits its turn
+    // behind whatever the open list's refresh already has on it. The wait is
+    // part of the collection: the entry stands before the view is drawn, so the
+    // header says the view is loading from the moment it is asked and the count
+    // moves with the queue while the walk waits.
     running.set(doc, { key, queue, started });
+    setState(doc, { reading: true, ref, failures: [] });
+    draw(doc);
     return started;
   }
 

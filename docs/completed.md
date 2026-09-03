@@ -50,6 +50,16 @@ Each row carries:
 Before the first page of results arrives, the list reads "Loading...". A
 finished search that found nothing reads "Not found".
 
+A chip beside the heading stands from the moment the view is opened and reads
+"Loading...". Once advisories are being read it counts what is left, as
+"Loading (37 left)...", the same words the open advisory list uses. One queue
+serves both views and serves it in order, so a view opened while the open list
+is refreshing waits its turn: the count follows the queue through that wait,
+counting the open list's advisories as well as this view's, and the rows arrive
+when this view's own walk lands. It moves as reads land, so a read that failed
+shows up as a larger step at the next one. The chip goes when the collection
+ends, and with it when the page puts it down.
+
 ## Filters
 
 Two filter menus sit on the bar above the list, where the open advisory list's

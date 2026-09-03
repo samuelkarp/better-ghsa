@@ -2355,6 +2355,7 @@ if (typeof require === 'function') {
     buildBody,
     refreshBody,
     countTextOf,
+    leftToRead,
     buildOwners,
     nativeControls,
     surfaces,
