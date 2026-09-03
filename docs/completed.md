@@ -110,7 +110,8 @@ advisory thread. Everyone who can read the advisory's conversation sees it, the
 reporter included. Nothing else about the advisory changes.
 
 The row reports what happened underneath the control: "Saving..." while the
-write is in flight, "Saved." when it lands, and an error otherwise. The errors
+write is in flight, "Saved." when it lands, and an error otherwise. A save that
+lands leaves the dropdown on the reason it wrote. The errors
 worth recognizing are "Error: concurrent edits", which means another maintainer
 wrote to that advisory between the read and the write and the change was not
 applied, and "Error: {owner}/{repo} is not on this extension's allowlist.",

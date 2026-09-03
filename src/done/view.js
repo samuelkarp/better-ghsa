@@ -223,13 +223,28 @@ if (typeof require === 'function') {
   const element = globalThis.bghsa.dom.element;
 
   /**
-   * The stored closure reason on one advisory.
+   * The stored closure reason on one advisory, with a write this page has made
+   * standing over the advisory the write was made on.
+   *
+   * The corpus holds each advisory as the crawl read it, and a save from here
+   * writes to GitHub and to the cache without reading the page again, so the
+   * advisory in hand is a page from before the write. `edit.preferred` is the
+   * state the detail panel draws from after one, which is the write's own until
+   * a read catches up with it, so a row here shows the reason a save landed the
+   * way the panel does.
    *
    * @param {import('../common/parse-detail.js').ParsedDetail | null} advisory
    * @returns {string | null}
    */
   function reasonOf(advisory) {
-    return advisory === null ? null : globalThis.bghsa.stats.closureReasonOf(advisory);
+    if (advisory === null) return null;
+    const edit = globalThis.bghsa.edit;
+    const merged = edit.preferred(
+      edit.keyOf(advisory),
+      globalThis.bghsa.merge.mergeSnapshots(advisory.comments)
+    );
+    return globalThis.bghsa.tracking.read(merged.state, globalThis.bghsa.stats.NO_FINGERPRINTS)
+      .closureReason;
   }
 
   /**

@@ -427,6 +427,7 @@ if (typeof require === 'function') {
     TIMINGS,
     UNCOMPUTED,
     monthOf,
+    NO_FINGERPRINTS,
     closureReasonOf,
     firstResponseAt,
     draftAt,

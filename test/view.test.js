@@ -1734,6 +1734,16 @@ test('a reason a maintainer sets reaches GitHub as a state comment', async () =>
     { reason: 'out of scope' },
     `the snapshot GitHub was sent: ${markdown}`
   );
+
+  // The corpus holds the advisory as the crawl read it, which is a page from
+  // before this write. The row shows the reason the write landed.
+  const shown = Array.from(
+    one(doneRow(doc, TRIAGE_ID), 'select.bghsa-done-reason').querySelectorAll('option')
+  )
+    .filter((option) => option.hasAttribute('selected'))
+    .map((option) => option.getAttribute('value'));
+  assert.deepStrictEqual(shown, ['out of scope'], 'the control shows the reason the save wrote');
+
   edit.edits.delete(edit.keyOf(built));
   edit.written.delete(edit.keyOf(built));
   edit.results.delete(edit.keyOf(built));
