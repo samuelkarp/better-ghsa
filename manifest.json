@@ -38,6 +38,7 @@
         "src/common/order.js",
         "src/common/chips.js",
         "src/common/row.js",
+        "src/common/duplicate.js",
         "src/common/members.js",
         "src/common/branches.js",
         "src/common/cache.js",

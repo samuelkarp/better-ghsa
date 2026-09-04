@@ -13,6 +13,7 @@ if (typeof require === 'function') {
   require('../common/derive.js');
   require('../common/order.js');
   require('../common/chips.js');
+  require('../common/duplicate.js');
   require('../common/members.js');
   require('../common/branches.js');
   require('../common/cache.js');
@@ -293,9 +294,11 @@ if (typeof require === 'function') {
    * @param {import('./tracking.js').TrackingView} tracking
    * @param {boolean} embargoOverdue Whether the embargo's lift date has gone by
    *   on an advisory that is not published.
+   * @param {{ owner: string, repo: string } | null} ref The repository this
+   *   advisory belongs to, which is the one a duplicate names an advisory of.
    * @returns {Element[]}
    */
-  function buildTracks(doc, tracking, embargoOverdue) {
+  function buildTracks(doc, tracking, embargoOverdue, ref) {
     /** @type {Element[]} */
     const rows = [];
 
@@ -342,7 +345,12 @@ if (typeof require === 'function') {
       built.body.append(globalThis.bghsa.chips.buildChip(doc, { text: reason }));
       if (tracking.closureDuplicateOf !== null) {
         built.body.append(
-          element(doc, 'span', 'bghsa-since', `of ${tracking.closureDuplicateOf}`)
+          globalThis.bghsa.duplicate.buildDuplicate(
+            doc,
+            'bghsa-since',
+            tracking.closureDuplicateOf,
+            ref
+          )
         );
       }
       rows.push(built.row);
@@ -481,7 +489,9 @@ if (typeof require === 'function') {
     // what a parser missed.
     const dealtWith = settled(advisory);
     if (!dealtWith) panel.append(buildConfirmations(doc, tracking, advisory));
-    for (const track of buildTracks(doc, tracking, embargoOverdue)) panel.append(track);
+    for (const track of buildTracks(doc, tracking, embargoOverdue, advisory.ref)) {
+      panel.append(track);
+    }
     // A dealt-with advisory gets no row and no availability read: what the
     // button offers is only asked once there is a button to offer it.
     if (!dealtWith) panel.append(buildPreserve(doc, advisory));

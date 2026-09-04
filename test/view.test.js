@@ -1607,6 +1607,140 @@ test('the reason an advisory carries is the reason its row shows', async () => {
   assert.deepStrictEqual(chosen, ['not reproducible'], 'the control shows another reason');
 });
 
+test('a row says what its advisory duplicates, and links it where it can', async () => {
+  // The reason alone does not say which advisory this one repeats, so the row
+  // carries the pointer the panel carries and reaches it the same way.
+  const linked = ghsa('dupa');
+  const loose = ghsa('dupb');
+  const pulled = ghsa('dupc');
+
+  /**
+   * @param {string} ghsaId
+   * @param {string} duplicateOf
+   * @returns {import('../src/done/corpus.js').CorpusMember}
+   */
+  const closedAs = (ghsaId, duplicateOf) =>
+    member({
+      ghsaId,
+      state: 'closed',
+      advisory: advisory({
+        ref: { ...REF, ghsaId },
+        ghsaId,
+        state: 'Closed',
+        comments: [
+          comment({
+            id: '81',
+            author: 'samuelkarp',
+            raw: JSON.stringify({
+              betterGhsa: '1.0',
+              seq: 1,
+              by: 'samuelkarp',
+              at: '2026-04-01T00:00:00Z',
+              closure: { reason: 'duplicate', duplicateOf },
+            }),
+          }),
+        ],
+      }),
+    });
+
+  const corpus = corpusOf([
+    closedAs(linked, 'GHSA-cm76-qm8v-3j95'),
+    closedAs(loose, 'the one <prakleumas> filed last March'),
+    closedAs(pulled, 'https://github.com/containerd/containerd/pull/13327'),
+  ]);
+  assert.strictEqual(
+    view.rowsOf(corpus).find((row) => row.ghsaId === linked)?.closureDuplicateOf,
+    'GHSA-cm76-qm8v-3j95',
+    'the row the view builds carries nothing off the advisory'
+  );
+
+  const doc = await page(corpus);
+  const pointer = one(doneRow(doc, linked), '.bghsa-done-duplicate');
+  assert.strictEqual(pointer.textContent?.trim(), 'of GHSA-cm76-qm8v-3j95');
+  assert.strictEqual(
+    one(pointer, 'a').getAttribute('href'),
+    `/${REF.owner}/${REF.repo}/security/advisories/GHSA-cm76-qm8v-3j95`
+  );
+
+  const plain = one(doneRow(doc, loose), '.bghsa-done-duplicate');
+  assert.strictEqual(plain.textContent?.trim(), 'of the one prakleumas filed last March');
+  assert.strictEqual(
+    plain.querySelector('a'),
+    null,
+    'a value nobody can interpret stands as the text it is'
+  );
+
+  // A pull request of another repository, which is how one arrives in practice.
+  const pull = one(doneRow(doc, pulled), '.bghsa-done-duplicate');
+  assert.strictEqual(pull.textContent?.trim(), 'of containerd/containerd#13327');
+  assert.strictEqual(
+    one(pull, 'a').getAttribute('href'),
+    '/containerd/containerd/pull/13327'
+  );
+});
+
+test('the duplicate pointer stands under the reason control', async () => {
+  // Beside the control the pointer adds its own width to the closure cell, and
+  // that cell holds every row's control in one column. Under it, the column
+  // stands where the rows with no pointer keep it.
+  const closed = ghsa('dupd');
+  const doc = await page(
+    await corpusOf([
+      member({
+        ghsaId: closed,
+        state: 'closed',
+        advisory: advisory({
+          ref: { ...REF, ghsaId: closed },
+          ghsaId: closed,
+          state: 'Closed',
+          comments: [
+            comment({
+              id: '82',
+              author: 'samuelkarp',
+              raw: JSON.stringify({
+                betterGhsa: '1.0',
+                seq: 1,
+                by: 'samuelkarp',
+                at: '2026-04-01T00:00:00Z',
+                closure: { reason: 'duplicate', duplicateOf: 'GHSA-cm76-qm8v-3j95' },
+              }),
+            }),
+          ],
+        }),
+      }),
+    ])
+  );
+
+  const closure = one(doneRow(doc, closed), '.bghsa-done-closure');
+  assert.deepStrictEqual(
+    Array.from(closure.children).map((child) => child.getAttribute('class')),
+    [
+      'd-flex flex-items-center bghsa-done-closure-controls',
+      'mt-1 text-small bghsa-done-duplicate-line',
+    ],
+    'the closure cell is the controls on one line and the pointer under them'
+  );
+  const controls = one(closure, '.bghsa-done-closure-controls');
+  assert.ok(
+    controls.querySelector('select.bghsa-done-reason') !== null &&
+      controls.querySelector('button.bghsa-done-save') !== null,
+    'the select and Save share the first line'
+  );
+  assert.strictEqual(
+    controls.querySelector('.bghsa-done-duplicate'),
+    null,
+    'the pointer stands on a line of its own'
+  );
+  // A value with no break in it wraps inside a line the control is wider than,
+  // so the widest thing in the cell is the control.
+  assert.ok(
+    view.STYLE_TEXT.includes('.bghsa-done-duplicate-line {') &&
+      view.STYLE_TEXT.includes('max-width: 12rem') &&
+      view.STYLE_TEXT.includes('overflow-wrap: anywhere'),
+    'no rule bounds the pointer line'
+  );
+});
+
 test('the option for an advisory carrying no reason reads blank', async () => {
   const closed = ghsa('ubbb');
   const doc = await page(

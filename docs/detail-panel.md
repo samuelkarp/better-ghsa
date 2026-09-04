@@ -59,7 +59,11 @@ One row for each value that has been set:
 - "Embargo", reading "No lift date", "Lifts 2026-04-01", or "Overdue since
   2026-04-01".
 - "Closed as", the closure reason, and the advisory it duplicates when the
-  reason is a duplicate.
+  reason is a duplicate. That pointer is a link when it is exactly a GHSA
+  identifier, which reads as an advisory of the repository you are on, or
+  exactly the address of an issue or a pull request on github.com, which reads
+  as "#412" for one of this repository and "owner/repo#412" for one of another.
+  Anything else is shown as it was typed.
 
 ### Original report
 

@@ -39,7 +39,8 @@ Each row carries:
 - A severity chip, unless the row is closed. On a published row it is filled
   with the color GitHub paints that level, because publishing an advisory
   settles its severity.
-- The closure reason control, unless the row is published.
+- The closure reason control, unless the row is published, and under it what
+  the advisory duplicates where one is stored.
 - In its own cell, a state chip: "Published" as a filled green chip and "Closed"
   as a filled purple one, the colors GitHub gives the two endings. A state that
   is neither, which happens when the advisory's own page disagrees with the list
@@ -101,6 +102,15 @@ one reads it at a glance. The rest are:
 
 An advisory carrying a reason this version does not recognize keeps that value
 in the dropdown so a save does not discard it.
+
+An advisory that duplicates another carries that pointer on a line under the
+dropdown, reading "of" and then the value. It is a link when the value is
+exactly a GHSA identifier, which reads as an advisory of the repository you are
+on, or exactly the address of an issue or a pull request on github.com, which
+reads as "#412" for one of this repository and "owner/repo#412" for one of
+another. Anything else is shown as it was typed. A value longer than the line
+wraps inside it, so the dropdown stands in one column down the list. The pointer
+is set from the advisory's own page.
 
 "Save" becomes available once the dropdown has moved away from the value stored
 on the advisory. Putting it back where it started disables the button again.

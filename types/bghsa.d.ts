@@ -19,6 +19,7 @@ interface BghsaNamespace {
   order: typeof import('../src/common/order.js');
   chips: typeof import('../src/common/chips.js');
   row: typeof import('../src/common/row.js');
+  duplicate: typeof import('../src/common/duplicate.js');
   members: typeof import('../src/common/members.js');
   branches: typeof import('../src/common/branches.js');
   cache: typeof import('../src/common/cache.js');

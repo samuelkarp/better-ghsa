@@ -15,6 +15,7 @@ if (typeof require === 'function') {
   require('../common/derive.js');
   require('../common/chips.js');
   require('../common/row.js');
+  require('../common/duplicate.js');
   require('../detail/tracking.js');
   require('../detail/edit.js');
   require('../list/table.js');
@@ -38,6 +39,8 @@ if (typeof require === 'function') {
  * @property {string | null} reporter
  * @property {string | null} closureReason The stored reason, and null where the
  *   advisory carries none or nothing has read it.
+ * @property {string | null} closureDuplicateOf What the advisory duplicates, as
+ *   the maintainer who set the reason wrote it.
  * @property {boolean} read Whether an advisory read backs this row.
  * @property {number | null} observedAt When that read was taken.
  * @property {boolean} writable Whether a reason can be set from here, which
@@ -138,6 +141,12 @@ if (typeof require === 'function') {
     // color reads in either theme, where a fixed one would be wrong in one.
     '.bghsa-done-meta { color: var(--fgColor-muted, currentColor); }',
     '.bghsa-done-observed { color: var(--fgColor-muted, currentColor); white-space: nowrap; }',
+    // The closure reason select carries the longest reason and a Save button
+    // beside it, so the control is wider than this line. A value longer than
+    // the line wraps inside it, and a value with no break in it breaks
+    // anywhere, so the control stays the widest thing in the cell.
+    '.bghsa-done-duplicate-line { color: var(--fgColor-muted, currentColor);' +
+      ' max-width: 12rem; overflow-wrap: anywhere; }',
     '.bghsa-done-empty { color: var(--fgColor-muted, currentColor); }',
     '.bghsa-done-count { color: var(--fgColor-muted, currentColor); }',
     '.bghsa-done-header { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }',
@@ -224,8 +233,9 @@ if (typeof require === 'function') {
   const element = globalThis.bghsa.dom.element;
 
   /**
-   * The stored closure reason on one advisory, with a write this page has made
-   * standing over the advisory the write was made on.
+   * The stored closure of one advisory, its reason and what it duplicates, with
+   * a write this page has made standing over the advisory the write was made
+   * on.
    *
    * The corpus holds each advisory as the crawl read it, and a save from here
    * writes to GitHub and to the cache without reading the page again, so the
@@ -235,17 +245,20 @@ if (typeof require === 'function') {
    * way the panel does.
    *
    * @param {import('../common/parse-detail.js').ParsedDetail | null} advisory
-   * @returns {string | null}
+   * @returns {{ reason: string | null, duplicateOf: string | null }}
    */
-  function reasonOf(advisory) {
-    if (advisory === null) return null;
+  function closureOf(advisory) {
+    if (advisory === null) return { reason: null, duplicateOf: null };
     const edit = globalThis.bghsa.edit;
     const merged = edit.preferred(
       edit.keyOf(advisory),
       globalThis.bghsa.merge.mergeSnapshots(advisory.comments)
     );
-    return globalThis.bghsa.tracking.read(merged.state, globalThis.bghsa.stats.NO_FINGERPRINTS)
-      .closureReason;
+    const held = globalThis.bghsa.tracking.read(
+      merged.state,
+      globalThis.bghsa.stats.NO_FINGERPRINTS
+    );
+    return { reason: held.closureReason, duplicateOf: held.closureDuplicateOf };
   }
 
   /**
@@ -258,6 +271,7 @@ if (typeof require === 'function') {
     if (corpus === null) return [];
     return corpus.members.map((member) => {
       const advisory = member.advisory;
+      const closure = closureOf(advisory);
       const state = advisory?.state ?? member.row.state ?? member.state;
       // The color comes from whichever read supplied the level, so a severity
       // the advisory page has since changed is not painted the old one's color.
@@ -271,7 +285,8 @@ if (typeof require === 'function') {
         severityClass: read === null ? member.row.severityClass : advisory?.severityClass ?? null,
         openedAt: advisory?.reportedAt ?? member.row.openedAt,
         reporter: advisory?.reporter ?? member.row.reporter,
-        closureReason: reasonOf(advisory),
+        closureReason: closure.reason,
+        closureDuplicateOf: closure.duplicateOf,
         read: advisory !== null,
         observedAt: member.observedAt,
         writable: advisory !== null && advisory.ref !== null,
@@ -504,10 +519,13 @@ if (typeof require === 'function') {
    * @param {Document} doc
    * @param {DoneRow} row
    * @param {import('./corpus.js').Corpus | null} corpus
+   * @param {{ owner: string, repo: string } | null} ref The repository the list
+   *   is of, which is the one a duplicate names an advisory of.
    * @returns {Element}
    */
-  function buildClosure(doc, row, corpus) {
-    const box = element(doc, 'div', 'd-flex flex-items-center bghsa-done-closure');
+  function buildClosure(doc, row, corpus, ref) {
+    const box = element(doc, 'div', 'bghsa-done-closure');
+    const controls = element(doc, 'div', 'd-flex flex-items-center bghsa-done-closure-controls');
     const edit = globalThis.bghsa.edit;
     const advisory = corpus === null ? null : (memberOf(corpus, row.ghsaId)?.advisory ?? null);
     const staged =
@@ -571,8 +589,26 @@ if (typeof require === 'function') {
       void setReason(doc, row.ghsaId, value === '' ? null : value);
     });
 
-    box.append(control);
-    box.append(save);
+    controls.append(control);
+    controls.append(save);
+    box.append(controls);
+
+    // What the advisory duplicates stands under the control, on a line held to
+    // a width the control is wider than. The cell holds every row's control in
+    // one column, and a line the control is wider than leaves that column where
+    // it stands whatever a maintainer typed.
+    if (row.closureDuplicateOf !== null) {
+      const line = element(doc, 'div', 'mt-1 text-small bghsa-done-duplicate-line');
+      line.append(
+        globalThis.bghsa.duplicate.buildDuplicate(
+          doc,
+          'bghsa-done-duplicate',
+          row.closureDuplicateOf,
+          ref
+        )
+      );
+      box.append(line);
+    }
     return box;
   }
 
@@ -587,12 +623,14 @@ if (typeof require === 'function') {
    *
    * @param {Document} doc
    * @param {DoneRow} row
-   * @param {import('./corpus.js').Corpus | null} corpus
+   * @param {Held} state What the view holds: the corpus a row reads its note
+   *   from, and the repository a duplicate names an advisory of.
    * @returns {Element}
    */
-  function buildRow(doc, row, corpus) {
+  function buildRow(doc, row, state) {
     const built = globalThis.bghsa.row;
-    const state = stateNameOf(row);
+    const corpus = state.corpus;
+    const ending = stateNameOf(row);
 
     /** @type {import('../common/chips.js').ChipSpec[]} */
     const chips = [];
@@ -600,11 +638,11 @@ if (typeof require === 'function') {
     // and a closed one carries none. Publishing an advisory settles its
     // severity, so the chip is filled there as a confirmed one is on the open
     // list. Nothing is read or stored to decide it: the state is the whole rule.
-    if (row.severityLabel !== null && state !== CLOSED) {
+    if (row.severityLabel !== null && ending !== CLOSED) {
       chips.push({
         text: globalThis.bghsa.chips.sentenceCase(row.severityLabel),
         severityClass: row.severityClass,
-        fill: state === PUBLISHED,
+        fill: ending === PUBLISHED,
       });
     }
 
@@ -619,19 +657,19 @@ if (typeof require === 'function') {
     const cells = [];
     // REQUIREMENTS.md section 10: the reason is a closed advisory's, so a
     // published row carries no control for one.
-    if (state !== PUBLISHED) {
+    if (ending !== PUBLISHED) {
       const closure = built.cell(doc, '');
-      closure.append(buildClosure(doc, row, corpus));
+      closure.append(buildClosure(doc, row, corpus, state.ref));
       cells.push(closure);
     }
 
-    const ending = built.cell(doc, 'bghsa-done-state');
-    if (state !== null) {
-      ending.append(
-        globalThis.bghsa.chips.buildChip(doc, { text: state, tone: stateToneOf(state) })
+    const stateCell = built.cell(doc, 'bghsa-done-state');
+    if (ending !== null) {
+      stateCell.append(
+        globalThis.bghsa.chips.buildChip(doc, { text: ending, tone: stateToneOf(ending) })
       );
     }
-    cells.push(ending);
+    cells.push(stateCell);
     cells.push(
       built.cell(
         doc,
@@ -898,7 +936,7 @@ if (typeof require === 'function') {
       list.append(element(doc, 'li', 'Box-row bghsa-done-empty', empty));
       return list;
     }
-    for (const row of rows) list.append(buildRow(doc, row, state.corpus));
+    for (const row of rows) list.append(buildRow(doc, row, state));
     return list;
   }
 

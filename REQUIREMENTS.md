@@ -186,6 +186,14 @@ advisories that were closed before the extension existed. One of:
 - `no reporter response`
 - `withdrawn by reporter`
 
+The pointer is free text and is stored as it was typed. The advisory detail
+panel and the completed list link it where it is exactly a GHSA identifier or
+exactly the address of an issue or a pull request on github.com, and display it
+as it stands otherwise. An identifier names no repository, so it is read as an
+advisory of the repository being looked at. A repository numbers its issues and
+its pull requests in one sequence, and either reads as GitHub writes one:
+`#412` for one of that repository and `owner/repo#412` for one of another.
+
 ### Derived state
 
 Derived state is read from the advisory detail page and is never stored.

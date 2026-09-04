@@ -592,6 +592,28 @@ test('a closed advisory shows the reason and what it duplicates', async () => {
     closure: { reason: 'duplicate', duplicateOf: 'GHSA-cm76-qm8v-3j95' },
   });
   assert.strictEqual(rowText(built, 'Closed as'), 'Duplicateof GHSA-cm76-qm8v-3j95');
+  // An identifier names no repository, so it is read as an advisory of this
+  // one, which is the advisory page the panel is standing on.
+  assert.strictEqual(
+    built.querySelector('.bghsa-duplicate')?.getAttribute('href'),
+    '/git-utensils/Spoon-Knife/security/advisories/GHSA-cm76-qm8v-3j95'
+  );
+});
+
+test('a duplicate the panel cannot interpret is still readable', async () => {
+  const built = await buildWith(triage, {
+    triage: 'evaluating',
+    closure: { reason: 'duplicate', duplicateOf: 'the one <prakleumas> filed last March' },
+  });
+  assert.strictEqual(
+    rowText(built, 'Closed as'),
+    'Duplicateof the one prakleumas filed last March'
+  );
+  assert.strictEqual(
+    built.querySelector('.bghsa-duplicate'),
+    null,
+    'a value nobody can interpret was drawn as a link'
+  );
 });
 
 test('a chip carrying a stored value is sentence-cased, and a login is not', async () => {
