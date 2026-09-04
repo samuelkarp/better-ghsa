@@ -519,10 +519,10 @@ nothing runs outside a page.
 This depends on undocumented endpoints and on GitHub's DOM, and GitHub's
 changes will break it.
 
-v1 loads in development mode. Distribution to other containerd maintainers is
-in scope at the level of a loadable build and install instructions they can
-follow. Store listings and signing are later work, and the constraints they
-impose are considerations throughout.
+The extension is published on addons.mozilla.org and in the Chrome Web Store,
+and a maintainer installs it from either. It also loads from a clone, which is
+how anyone working on it runs it: the repository contents are the extension,
+and there is no build step.
 
 The Firefox add-on id is `better-ghsa@sbk.wtf` and Firefox 140 is the floor. A
 Manifest V3 extension carries its own add-on id

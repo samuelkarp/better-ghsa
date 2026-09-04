@@ -5,6 +5,8 @@
 A Firefox and Chrome extension that adds triage tracking to GitHub Security
 Advisories for the maintainers who work them.
 
+[![Get Better GHSA for Firefox](docs/store-badge-firefox-172x60.png)](https://addons.mozilla.org/firefox/addon/better-ghsa/) [![Get Better GHSA from the Chrome Web Store](docs/store-badge-chrome-206x58.png)](https://chromewebstore.google.com/detail/better-ghsa/khihhmkhgehggnbjdendcdhkjplcoljm)
+
 ## What it is for
 
 A repository's security advisories arrive as private reports and stay private
@@ -62,8 +64,22 @@ timings over the whole corpus and a CSV export. See
 
 ## Installing it
 
-There is no build step and no store listing. The extension is the repository
-contents, loaded from disk.
+### From a store
+
+Firefox 140 or later: install it from
+[addons.mozilla.org](https://addons.mozilla.org/firefox/addon/better-ghsa/).
+
+Chrome: install it from the
+[Chrome Web Store](https://chromewebstore.google.com/detail/better-ghsa/khihhmkhgehggnbjdendcdhkjplcoljm).
+
+Firefox 140 is the floor. The manifest declares that the extension collects no
+data, in the key Firefox reads from 140 and Firefox for Android reads from 142.
+Earlier versions neither read that declaration nor show it at install.
+
+### From a clone, for working on the extension
+
+The extension is the repository contents, loaded from disk. There is no build
+step.
 
 Firefox 140 or later:
 
@@ -74,10 +90,6 @@ Firefox 140 or later:
 
 A temporary add-on is removed when Firefox closes. These steps are repeated
 each session.
-
-Firefox 140 is the floor. The manifest declares that the extension collects no
-data, in the key Firefox reads from 140 and Firefox for Android reads from 142.
-Earlier versions neither read that declaration nor show it at install.
 
 Chrome:
 
