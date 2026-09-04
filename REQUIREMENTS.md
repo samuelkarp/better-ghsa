@@ -415,9 +415,11 @@ the rating.
 A published advisory has no closure reason, so its row carries no control for
 setting one.
 
-Rows are filterable on state and on closure reason, with a control that clears
-every filter. The reason filter is over closed advisories, and the value it
-offers for the advisories carrying no reason is what a backfill works from.
+Rows are filterable on state, on closure reason, and on severity, with a control
+that clears every filter. The reason filter is over closed advisories, and the
+value it offers for the advisories carrying no reason is what a backfill works
+from. The severity filter is over published advisories, which are the ones whose
+rating publication settled.
 Those filters stand on the same bar as the open list's, and the bar shows the
 set belonging to the view on screen.
 

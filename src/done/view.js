@@ -106,6 +106,9 @@ if (typeof require === 'function') {
   /** What the filter over the two endings reads, as the open list names it. */
   const STATE_LABEL = 'State';
 
+  /** What the filter over the level reads, as the open list names it. */
+  const SEVERITY_LABEL = 'Severity';
+
   /** The state GitHub gives an advisory that was published, as it names it. */
   const PUBLISHED = 'Published';
 
@@ -339,6 +342,11 @@ if (typeof require === 'function') {
    * included. `None` is what a backfill works from: the closed advisories a
    * read backs and no reason has been set on.
    *
+   * The severity is a published advisory's. REQUIREMENTS.md section 10 has
+   * publication settle the rating and a closed advisory carry no severity at
+   * all, and a closed row shows none, so the filter is over the rows that show
+   * one.
+   *
    * @type {readonly import('../list/table.js').Facet<DoneRow>[]}
    */
   const FACETS = [
@@ -358,6 +366,19 @@ if (typeof require === 'function') {
       applies: (row) => stateNameOf(row) === CLOSED,
       valuesOf: (row) =>
         row.closureReason === null ? [] : [globalThis.bghsa.chips.sentenceCase(row.closureReason)],
+    },
+    {
+      key: 'severity',
+      label: SEVERITY_LABEL,
+      // The order the open list offers the levels in, highest first.
+      values: ['Critical', 'High', 'Moderate', 'Low'],
+      applies: (row) => stateNameOf(row) === PUBLISHED,
+      // A level read off a list row arrives lowercased, so it is cased here the
+      // way the chip beside it is cased.
+      valuesOf: (row) =>
+        row.severityLabel === null
+          ? []
+          : [globalThis.bghsa.chips.sentenceCase(row.severityLabel)],
     },
   ];
 

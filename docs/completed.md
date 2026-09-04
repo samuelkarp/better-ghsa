@@ -66,12 +66,12 @@ ends, and with it when the page puts it down.
 
 ## Filters
 
-Two filter menus sit on the bar above the list, where the open advisory list's
-own filters are: "State" and "Closure reason". The set that belongs to the view
-on screen is the set you see. A menu holding a value reads it in its own label,
-as "State: Closed". "Any" clears that one menu and "Reset" clears both. While a
-filter is keeping rows out, the count beside the heading reads "2 of 5
-advisories".
+Three filter menus sit on the bar above the list, where the open advisory list's
+own filters are: "State", "Closure reason", and "Severity". The set that belongs
+to the view on screen is the set you see. A menu holding a value reads it in its
+own label, as "State: Closed". "Any" clears that one menu and "Reset" clears all
+three. While a filter is keeping rows out, the count beside the heading reads
+"2 of 5 advisories".
 
 Each menu offers only the values the rows in front of you carry. "Closure
 reason" also offers "None" when at least one closed advisory that has been read
@@ -82,6 +82,10 @@ value has been looked up that could exclude it.
 "Closure reason" is over closed advisories alone. A published advisory has no
 closure reason, so it matches no value of that menu, "None" included, and it
 shows while that menu is clear.
+
+"Severity" is over published advisories alone. Publishing an advisory settles
+its rating and a closed row shows no severity, so a closed advisory matches no
+value of that menu and shows while it is clear.
 
 When the filters keep no rows, the list reads "No matches".
 

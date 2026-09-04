@@ -1016,6 +1016,41 @@ function ended(ghsaId, state, reason) {
   });
 }
 
+test('the severity filter is over the published rows', async () => {
+  // REQUIREMENTS.md section 10: publication settles the rating and a closed
+  // advisory carries no severity, so a level on a closed row means nothing and
+  // that row falls out of every value of this filter.
+  const high = ghsa('saaa');
+  const low = ghsa('sbbb');
+  const closed = ghsa('sccc');
+  const doc = await page(
+    await corpusOf([
+      member({ ghsaId: high, state: 'published', severity: 'high' }),
+      member({ ghsaId: low, state: 'published', severity: 'low' }),
+      member({ ghsaId: closed, state: 'closed', severity: 'high' }),
+    ])
+  );
+
+  assert.strictEqual(
+    itemsOf(filterIn(doc, 'severity')),
+    'Any | High | Low',
+    'the filter offers the levels the published rows carry, highest first'
+  );
+
+  pick(doc, 'severity', 'High');
+  assert.strictEqual(
+    shownIds(doc),
+    high,
+    'a closed row carrying the same level was kept by it'
+  );
+
+  pick(doc, 'severity', 'Low');
+  assert.strictEqual(shownIds(doc), low);
+
+  pick(doc, 'severity', '');
+  assert.strictEqual(shownIds(doc), [high, low, closed].join(' '));
+});
+
 test('the filters keep the rows they name and the count follows them', async () => {
   const first = ghsa('paaa');
   const second = ghsa('pbbb');
