@@ -43,19 +43,51 @@ if (typeof require === 'function') {
   }
 
   /**
-   * What the waiting chip reads and how it is colored. The text is the waiting
-   * state the default order derives, so both surfaces say the one thing the
-   * advisory is waiting on. Never reviewed and blocked on us are both work
-   * nobody has done and take danger. The other two take attention.
+   * How the derived waiting state is colored. Never reviewed and blocked on us
+   * are both work nobody has done and take danger. The other two take
+   * attention.
    *
-   * @param {import('./order.js').WaitingEntry} entry
+   * @param {string} state What `order.waitingStateOf` derived.
    * @returns {Chip}
    */
-  function waitingChip(entry) {
+  function derivedChip(state) {
     const order = globalThis.bghsa.order;
-    const state = order.waitingStateOf(entry);
     const undone = state === order.GROUPS.NEVER_REVIEWED || state === order.GROUPS.BLOCKED_ON_US;
     return { text: sentenceCase(state), tone: undone ? 'danger' : 'attention' };
+  }
+
+  /**
+   * What the waiting chips read and how they are colored, which both surfaces
+   * take from here so a row and the panel behind it say the same thing.
+   *
+   * A stored triage value is the maintainer's own reading of where the advisory
+   * stands, and it parts `evaluating` from `awaiting maintainer input`, which
+   * the derived state holds together under blocked on us. So where one is
+   * stored it carries the chip, in the tone its own classification gives it:
+   * what a maintainer owes is loud, what the reporter owes is quieter.
+   *
+   * The derived chip stands beside it while the derivation still has something
+   * the value does not say, which is never reviewed and new activity. Blocked
+   * on us and blocked on the reporter are the classification of the value
+   * itself, so they drop where a value is stored and stand where none is: a
+   * row is owed a waiting chip either way.
+   *
+   * @param {import('./order.js').WaitingEntry} entry
+   * @returns {Chip[]} the derived chip first, where it is drawn.
+   */
+  function waitingChips(entry) {
+    const order = globalThis.bghsa.order;
+    const state = order.waitingStateOf(entry);
+    const triage = typeof entry.triage === 'string' ? entry.triage : '';
+    const blocked = order.classifyTriage(triage);
+    /** @type {Chip[]} */
+    const built = [];
+    const unsaid = state === order.GROUPS.NEVER_REVIEWED || state === order.GROUPS.NEW_ACTIVITY;
+    if (blocked === null || unsaid) built.push(derivedChip(state));
+    if (blocked !== null) {
+      built.push({ text: sentenceCase(triage), tone: blocked === 'us' ? 'danger' : 'attention' });
+    }
+    return built;
   }
 
   /**
@@ -193,7 +225,7 @@ if (typeof require === 'function') {
     FILL_CLASS,
     FILL_RULES,
     buildChip,
-    waitingChip,
+    waitingChips,
     DRAFT_STATE,
     PATCH_IN_REVIEW,
     NO_PATCH,

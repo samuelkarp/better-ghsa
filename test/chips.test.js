@@ -166,8 +166,14 @@ async function panelChips(advisory) {
   });
 }
 
-/** Every text the waiting chip can read. */
-const WAITING_TEXTS = order.WAITING_STATES.map(chips.sentenceCase);
+/**
+ * Every text a waiting chip can read: the four states the default order
+ * derives, and the three values a maintainer can store.
+ */
+const WAITING_TEXTS = [
+  ...order.WAITING_STATES.map(chips.sentenceCase),
+  ...schema.TRIAGE_VALUES.map(chips.sentenceCase),
+];
 
 /** Every text the patch chip can read. */
 const PATCH_TEXTS = [chips.PATCH_IN_REVIEW, chips.NO_PATCH, chips.PATCH_UNKNOWN];
@@ -197,10 +203,29 @@ function shown(chip) {
 }
 
 /**
- * Four waiting states, each from a fixture and the stored state that produces
- * it. One state would pass on a coincidence: two surfaces that both said
+ * @param {RenderedChip[]} rendered
+ * @returns {string} every waiting chip the surface carried, in the order it
+ *   carried them. A surface carrying none reads as the empty string, so a
+ *   missing chip is a difference and not an absent comparison.
+ */
+function waitingLine(rendered) {
+  return rendered
+    .filter((chip) => WAITING_TEXTS.includes(chip.text))
+    .map(shown)
+    .join(' | ');
+}
+
+/**
+ * Every waiting reading, each from a fixture and the stored state that produces
+ * it. One reading would pass on a coincidence: two surfaces that both said
  * `Blocked on us` whatever they read would agree on that row and disagree on
  * every other.
+ *
+ * A stored triage value carries the chip, because it is what the maintainer who
+ * set it said about the advisory, and it parts `evaluating` from `awaiting
+ * maintainer input`, which the derivation holds together. The derived chip
+ * stands beside it while the derivation still holds something the value does
+ * not say.
  */
 const WAITING_CASES = [
   {
@@ -211,12 +236,17 @@ const WAITING_CASES = [
   {
     name: 'a stored triage value handing the advisory back',
     advisory: () => TRIAGE,
-    expected: 'Blocked on the reporter[attention]',
+    expected: 'Awaiting reporter[attention]',
   },
   {
     name: 'a stored triage value keeping the advisory with us',
     advisory: () => withState(TRIAGE, { triage: 'evaluating' }),
-    expected: 'Blocked on us[danger]',
+    expected: 'Evaluating[danger]',
+  },
+  {
+    name: 'a maintainer who was asked for something',
+    advisory: () => withState(TRIAGE, { triage: 'awaiting maintainer input' }),
+    expected: 'Awaiting maintainer input[danger]',
   },
   {
     name: 'an advisory no member has touched',
@@ -229,22 +259,19 @@ const WAITING_CASES = [
       ...TRIAGE,
       timeline: TRIAGE.timeline.filter((event) => event.actor !== 'samuelkarp'),
     }),
-    expected: 'New activity[attention]',
+    expected: 'New activity[attention] | Awaiting reporter[attention]',
   },
 ];
 
 for (const one of WAITING_CASES) {
   test(`the list row and the panel agree on the waiting chip: ${one.name}`, async () => {
     const advisory = one.advisory();
-    const fromList = oneOf(await listChips(advisory), WAITING_TEXTS, 'the list row');
-    const fromPanel = oneOf(await panelChips(advisory), WAITING_TEXTS, 'the panel');
+    const fromList = waitingLine(await listChips(advisory));
+    const fromPanel = waitingLine(await panelChips(advisory));
+    assert.ok(fromList === one.expected, `the list row read ${fromList}, wanted ${one.expected}`);
     assert.ok(
-      shown(fromList) === one.expected,
-      `the list row read ${shown(fromList)}, wanted ${one.expected}`
-    );
-    assert.ok(
-      shown(fromPanel) === shown(fromList),
-      `the panel read ${shown(fromPanel)} where the list row read ${shown(fromList)}`
+      fromPanel === fromList,
+      `the panel read ${fromPanel} where the list row read ${fromList}`
     );
   });
 }

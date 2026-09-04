@@ -14,9 +14,12 @@ does.
 
 A chip for what the advisory is waiting on, the same one its row carries on
 [the advisory list](advisory-list.md), so the reason it sits where it does in
-the queue is the first thing its page says: "Never reviewed", "New activity",
-"Blocked on us", or "Blocked on the reporter". Published and closed advisories
-carry none.
+the queue is the first thing its page says. Where a triage value is stored the
+chip is that value, and where none is it is the derived reading, "Never
+reviewed", "New activity", or "Blocked on us". Both appear, the derived one
+first, when the derived reading says something the value does not. The stored
+value also has its own row below, under "Triage", with how long it has been
+held. Published and closed advisories carry no waiting chip.
 
 On a draft advisory, a chip for the patch: "Patch in review" when the private
 fork holds an open pull request, "No patch yet" when it does not, "Unknown" when

@@ -42,15 +42,33 @@ Nothing has been read to say what else holds.
 
 ## The chips
 
-**Waiting.** What the advisory is waiting on, derived from the thread and the
-timeline.
+**Waiting.** What the advisory is waiting on. Where a triage value is stored,
+the chip is that value, sentence-cased: "Evaluating", "Awaiting reporter",
+"Awaiting maintainer input". Where none is, the chip is what the thread and the
+timeline say:
 
 - "Never reviewed": no org member has commented on it or acted on it.
 - "New activity": the newest comment from someone outside the org is newer than
   anything a maintainer said or did.
-- "Blocked on us": the stored triage value is one a maintainer has to move.
-- "Blocked on the reporter": the stored triage value is one the reporter has to
-  move.
+- "Blocked on us": neither of those holds and nothing says where the advisory
+  stands.
+
+A row carries both chips when the derived reading says something the stored
+value does not, which is "Never reviewed" and "New activity". The derived chip
+comes first:
+
+    [New activity] [Evaluating] [No patch yet] [High]
+
+The two values a maintainer has to move, "Evaluating" and "Awaiting maintainer
+input", are one derived reading, so the row says which of them was set.
+
+The color says which side owes the next move. "Never reviewed", "Blocked on us",
+"Evaluating" and "Awaiting maintainer input" are what a maintainer owes and take
+the louder color; "New activity" and "Awaiting reporter" take the quieter one.
+
+The filter menu and the order run off the derived reading, so a row reading
+"Evaluating" or "Awaiting maintainer input" filters and sorts under "Blocked on
+us", and a row reading "Awaiting reporter" under "Blocked on the reporter".
 
 **Patch**, on draft advisories. "Patch in review" when the advisory's private
 fork holds an open pull request, "No patch yet" when it does not, and "Unknown"

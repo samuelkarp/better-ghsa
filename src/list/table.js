@@ -546,7 +546,7 @@ if (typeof require === 'function') {
 
     // The waiting state is what an advisory read says, so it is absent until one
     // has been read. Nothing on the list page names it.
-    if (row.read) chips.push(globalThis.bghsa.chips.waitingChip(row));
+    if (row.read) chips.push(...globalThis.bghsa.chips.waitingChips(row));
 
     // The patch chip stands on a draft and on no other. An advisory in triage
     // has not been accepted, so no patch is owed for it yet and its absence

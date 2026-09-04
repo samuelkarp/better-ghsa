@@ -291,13 +291,14 @@ confirmed reads as unconfirmed, the same as one nobody has confirmed, because
 the maintainer's next act is the same either way.
 
 The panel shows what a maintainer has to act on. It carries the same waiting
-state chip the list row carries, from the same derivation, so the reason an
-advisory sits where it does on the list is the first thing its page says. On a
-draft advisory it carries the patch chip too. It does not restate what the
-advisory page already carries, which is why severity and the CVE stay off it,
-and it does not list the snapshots it read. A
-snapshot from an untrusted author is marked on that comment in the thread,
-where section 4's author role labels already are.
+chips the list row carries, built from the same code, so the reason an advisory
+sits where it does on the list is the first thing its page says. The panel also
+carries the stored triage value in its own row, with how long it has been held,
+so an advisory carrying one names it twice. On a draft advisory it carries the
+patch chip too. It does not restate what the advisory page already carries,
+which is why severity and the CVE stay off it, and it does not list the
+snapshots it read. A snapshot from an untrusted author is marked on that
+comment in the thread, where section 4's author role labels already are.
 
 The extension writes nothing to GitHub beyond its two comment types. It does
 not change `summary`, `description`, severity, advisory state, or any other
@@ -316,6 +317,21 @@ waiting state, the patch state including backport progress, the confirmation
 state of text and scoring, the CVE state, the severity marked as confirmed or
 unconfirmed, and the embargo. A confirmed severity is filled with the color
 GitHub paints that level. Each row shows the time its data was observed.
+
+The waiting chip is the stored triage value where one is set, sentence-cased,
+and the derived waiting state where none is. The derived state stands as a chip
+of its own, before it, while it says something the value does not: never
+reviewed and new activity. Blocked on us and blocked on the reporter are the
+classification of the value itself, so they are drawn only where no value is
+stored. Each chip takes the color of the side that owes the next move, so
+evaluating and awaiting maintainer input read as what a maintainer owes and
+awaiting reporter as what the reporter owes.
+
+Two triage values carry one derived state, and the chip parts them: a row says
+whether a maintainer is evaluating the report or waiting on another maintainer.
+
+Filtering and ordering read the derived state, so a row showing a triage value
+filters and sorts under the derived state that value classifies to.
 
 Rows are filterable on waiting, severity, owner, state, patch, backports, and
 embargo, with a control that clears every filter. They are sortable by the

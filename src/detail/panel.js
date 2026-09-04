@@ -87,9 +87,9 @@ if (typeof require === 'function') {
   /**
    * The chip row, which is visible whatever else the panel shows.
    *
-   * The waiting state and the patch state are the two chips the list row leads
-   * with, and they are built here from the same code, so the reason an advisory
-   * sits where it does on the list is what its own page says first. The patch
+   * The waiting chips and the patch state are what the list row leads with, and
+   * they are built here from the same code, so the reason an advisory sits
+   * where it does on the list is what its own page says first. The patch
    * chip stands on a draft and on no other, which is the list's rule: an
    * advisory in triage has not been accepted, so no patch is owed for it yet.
    * An advisory that is published or closed has no list row and no waiting
@@ -114,12 +114,12 @@ if (typeof require === 'function') {
       header.append(globalThis.bghsa.chips.buildChip(doc, { text: UNKNOWN, tone: 'attention' }));
     }
     if (!settled(advisory)) {
-      const waiting = globalThis.bghsa.chips.waitingChip({
+      const waiting = globalThis.bghsa.chips.waitingChips({
         neverReviewed: derived.neverReviewed,
         newActivity: derived.newActivity,
         triage: tracking.triage,
       });
-      header.append(globalThis.bghsa.chips.buildChip(doc, waiting));
+      for (const chip of waiting) header.append(globalThis.bghsa.chips.buildChip(doc, chip));
     }
     if (advisory.state === DRAFT_STATE) {
       const patch = globalThis.bghsa.chips.patchChip(

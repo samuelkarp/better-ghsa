@@ -260,7 +260,7 @@ test('a cached advisory read fills the triage row', async () => {
   const chips = chipLine(row);
   assert.ok(
     chips ===
-      'Blocked on the reporter[Label--secondary bghsa-tone-attention] |' +
+      'Awaiting reporter[Label--secondary bghsa-tone-attention] |' +
         ' Backports 1 of 1[Label--secondary] |' +
         ' High, unconfirmed[Label--orange bghsa-dim] |' +
         ' Embargo lifts 2026-09-30[Label--secondary bghsa-tone-attention]',
@@ -424,7 +424,7 @@ test('the patch chips stand on a draft and the state chip stays dimmed', async (
   });
   assert.ok(
     chipsIn(triage) ===
-      'Blocked on the reporter[Label--secondary bghsa-tone-attention] |' +
+      'Awaiting reporter[Label--secondary bghsa-tone-attention] |' +
         ' Backports 0 of 1[Label--secondary bghsa-tone-attention] |' +
         ' High, unconfirmed[Label--orange bghsa-dim] |' +
         ' Embargo lifts 2026-09-30[Label--secondary bghsa-tone-attention]',
@@ -699,21 +699,50 @@ test('a chip stands for a condition that holds and is absent when it does not', 
   const none = chipsOf();
   assert.ok(none === '', `a row with nothing to say: ${none}`);
 
+  // A stored value is read off the advisory's own page, so a row nothing has
+  // been read on carries no waiting chip whatever it holds.
+  const unread = chipsOf({ triage: 'evaluating' });
+  assert.ok(unread === '', `a row nothing has been read on: ${unread}`);
+
   const reviewed = chipsOf({ read: true, neverReviewed: true });
   assert.ok(reviewed === 'Never reviewed[danger]', `never reviewed: ${reviewed}`);
 
   const activity = chipsOf({ read: true, newActivity: true });
   assert.ok(activity === 'New activity[attention]', `new activity: ${activity}`);
 
-  const blocked = chipsOf({ read: true, triage: 'evaluating' });
-  assert.ok(blocked === 'Blocked on us[danger]', `what a maintainer owes is loud: ${blocked}`);
+  const blocked = chipsOf({ read: true });
+  assert.ok(
+    blocked === 'Blocked on us[danger]',
+    `a row nobody has triaged still says which side it waits on: ${blocked}`
+  );
+
+  const evaluating = chipsOf({ read: true, triage: 'evaluating' });
+  assert.ok(
+    evaluating === 'Evaluating[danger]',
+    `what a maintainer owes is loud: ${evaluating}`
+  );
+
+  // The two values a maintainer owes the next move on read apart, which is what
+  // a row saying `Blocked on us` for both of them cannot do.
+  const asked = chipsOf({ read: true, triage: 'awaiting maintainer input' });
+  assert.ok(
+    asked === 'Awaiting maintainer input[danger]',
+    `a maintainer was asked for something: ${asked}`
+  );
 
   const reporter = chipsOf({ read: true, triage: 'awaiting reporter' });
   assert.ok(
-    reporter === 'Blocked on the reporter[attention]',
+    reporter === 'Awaiting reporter[attention]',
     `what the reporter owes is quieter: ${reporter}`
   );
 
+  // What the reporter did since the value was set is not in the value, so both
+  // chips stand, the derivation first.
+  const both = chipsOf({ read: true, newActivity: true, triage: 'evaluating' });
+  assert.ok(
+    both === 'New activity[attention] | Evaluating[danger]',
+    `a reporter who spoke while a maintainer was evaluating: ${both}`
+  );
 });
 
 test('the severity chip marks the unconfirmed case and no other', () => {
