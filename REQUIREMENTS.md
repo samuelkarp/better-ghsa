@@ -442,6 +442,20 @@ property of the done list.
 Counts and ratios: advisories by closure reason, by state, by severity, and by
 month.
 
+The closure reason count is over the advisories that have ended, and it counts
+how each one ended. A publication is an ending of its own and is counted as its
+own value. A close is counted under the reason it was closed for, and under the
+value for no reason where nobody has set one, which is what a backfill works
+from. That value is an ending like any other: it is counted with the rest and
+holds a share of its own, where on every other count a member holding no value
+stands outside the shares. An advisory in triage or in draft has not ended and
+is counted in none of it.
+
+A publication is named by the list page. A closure reason needs the advisory's
+own page, so a closed advisory nobody has read is counted nowhere in it: its
+reason is unknown, and reading that as no reason set would inflate the share a
+backfill works from.
+
 Timing, reconstructed from page-observable events:
 
 - Time to first response, measured to the first comment by an org member that

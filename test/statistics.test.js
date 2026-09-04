@@ -5,6 +5,7 @@ const assert = require('node:assert');
 const { parseHTML, DOMParser } = require('linkedom');
 
 const cache = require('../src/common/cache.js');
+const schema = require('../src/common/schema.js');
 const parseList = require('../src/common/parse-list.js');
 const table = require('../src/list/table.js');
 const stats = require('../src/done/stats.js');
@@ -107,7 +108,8 @@ function pageOf(html) {
  *
  * @typedef {object} Named
  * @property {string} ghsaId
- * @property {string} [severity]
+ * @property {string | null} [severity] Null for a row GitHub painted no
+ *   severity chip on, which is what a count with no value for a member reads.
  * @property {string} [openedAt]
  */
 
@@ -136,12 +138,14 @@ function listHtml(page) {
     .join('');
   const rows = page.rows
     .map((row) => {
-      const severity = row.severity ?? 'High';
+      const severity = row.severity === null ? null : (row.severity ?? 'High');
       return (
         '<div class="Box-row Box-row--drag-hide">' +
         `<a class="Link--primary" href="${base}/${row.ghsaId}">Title ${row.ghsaId}</a>` +
         `<span class="tooltipped" aria-label="${label} advisory"></span>` +
-        `<span class="Label" title="Severity: ${severity}">${severity}</span>` +
+        (severity === null
+          ? ''
+          : `<span class="Label" title="Severity: ${severity}">${severity}</span>`) +
         '<span class="opened-by">opened <relative-time datetime="' +
         `${row.openedAt ?? '2026-03-02T00:00:00Z'}"></relative-time>` +
         ' by <a class="author" href="/prakleumas">prakleumas</a></span>' +
@@ -169,6 +173,7 @@ function listHtml(page) {
  *   severity?: string,
  *   reportedAt?: string,
  *   timeline?: readonly { at: string, text: string }[],
+ *   closureReason?: string,
  * }} fields
  * @returns {unknown}
  */
@@ -192,7 +197,30 @@ function stored(fields) {
     cveSelection: null,
     descriptionOriginal: null,
     descriptionRevision: null,
-    comments: [],
+    comments:
+      fields.closureReason === undefined
+        ? []
+        : [
+            {
+              id: '91',
+              elementId: 'advisory-comment-91',
+              author: 'samuelkarp',
+              role: 'Member',
+              roles: ['Member'],
+              at: '2026-04-06T00:00:00Z',
+              trusted: true,
+              text: '',
+              stateComment: schema.readSnapshot(
+                JSON.stringify({
+                  betterGhsa: '1.0',
+                  seq: 1,
+                  by: 'samuelkarp',
+                  at: '2026-04-06T00:00:00Z',
+                  closure: { reason: fields.closureReason },
+                })
+              ),
+            },
+          ],
     timeline: (fields.timeline ?? []).map((event, index) => ({
       id: `event-${index}`,
       actor: 'samuelkarp',
@@ -230,6 +258,7 @@ function ghsa(suffix) {
  *     severity?: string,
  *     reportedAt?: string,
  *     timeline?: readonly { at: string, text: string }[],
+ *     closureReason?: string,
  *   }[],
  *   crawl?: readonly ('open' | 'done')[],
  *   showing?: string,
@@ -434,10 +463,15 @@ test('the statistics are over the whole corpus, open and done', async () => {
     ['2026-03 3 60%', '2026-04 2 40%'],
     'and so does the month'
   );
-  assert.deepStrictEqual(
-    countLines(doc, 'reason'),
-    ['None 5 —'],
-    'no advisory here carries a stored closure reason'
+  // The list is how a finished advisory finished. Three of these five are still
+  // being worked, so they are in none of it; the published one ended by being
+  // published, and the closed one ended with nobody having given a reason,
+  // which is an ending of its own and holds a share like any other.
+  assert.deepStrictEqual(countLines(doc, 'reason'), ['Published 1 50%', 'None 1 50%']);
+  assert.strictEqual(
+    textOf(doc, `#${statistics.ROOT_ID} [data-bghsa-count="reason"] .bghsa-stats-meta`),
+    '2 of 2',
+    'the endings are counted over the advisories that ended'
   );
 
   assert.deepStrictEqual(
@@ -448,6 +482,57 @@ test('the statistics are over the whole corpus, open and done', async () => {
   assert.strictEqual(
     textOf(doc, `#${statistics.ROOT_ID} [data-bghsa-timing="accept"] .bghsa-stats-meta`),
     '1 of 5'
+  );
+});
+
+test('the endings list counts a close with no reason and omits one nobody read', async () => {
+  // Five advisories, one of each thing an ending can be. REQUIREMENTS.md
+  // section 10 omits a metric where the event it needs is not observable, so
+  // the closed advisory no read backs is counted nowhere: nothing has been read
+  // to say what reason it carries.
+  const open = ghsa('kaaa');
+  const publishedId = ghsa('kbbb');
+  const named = ghsa('kccc');
+  const bare = ghsa('kddd');
+  const unread = ghsa('keee');
+  const { doc } = await repository({
+    owner: 'stats-endings',
+    states: {
+      // This one carries no severity chip, so the severity count holds no value
+      // for it and draws the row a count holds for the members carrying none.
+      triage: [{ ghsaId: open, severity: null }],
+      published: [{ ghsaId: publishedId }],
+      closed: [{ ghsaId: named }, { ghsaId: bare }, { ghsaId: unread }],
+    },
+    reads: [
+      { ghsaId: publishedId, state: 'Published' },
+      { ghsaId: named, state: 'Closed', closureReason: 'duplicate' },
+      { ghsaId: bare, state: 'Closed' },
+    ],
+    crawl: ['open', 'done'],
+  });
+
+  statsToggle(doc).click();
+  await statistics.load(doc);
+
+  assert.deepStrictEqual(countLines(doc, 'reason'), [
+    'Duplicate 1 33%',
+    'Published 1 33%',
+    'None 1 33%',
+  ]);
+  assert.strictEqual(
+    textOf(doc, `#${statistics.ROOT_ID} [data-bghsa-count="reason"] .bghsa-stats-meta`),
+    '3 of 3',
+    'the advisory nobody read is inside the endings'
+  );
+
+  // The other counts are unchanged by that. A severity nobody set is an absence
+  // to them: it stands outside the shares, which are over the four that carried
+  // one, and it is marked as holding none.
+  assert.deepStrictEqual(countLines(doc, 'severity'), ['High 4 100%', 'None 1 —']);
+  assert.strictEqual(
+    textOf(doc, `#${statistics.ROOT_ID} [data-bghsa-count="severity"] .bghsa-stats-meta`),
+    '4 of 5'
   );
 });
 

@@ -88,14 +88,25 @@ if (typeof require === 'function') {
   ];
 
   /**
-   * The counts the view draws, in the order it draws them, and how each is
-   * ordered inside itself. A month reads in time order; everything else reads
-   * commonest first, which is what a ratio is looked at for.
+   * The counts the view draws, in the order it draws them, how each is ordered
+   * inside itself, and what the members carrying no value are to it. A month
+   * reads in time order; everything else reads commonest first, which is what a
+   * ratio is looked at for.
    *
-   * @type {readonly { key: string, name: string, by: 'count' | 'value' }[]}
+   * `missingCounts` says the members carrying no value are an answer of their
+   * own. An advisory closed with nobody giving a reason ended that way, so it
+   * is counted with the rest and holds a share of its own. On every other count
+   * a member carrying no value stands outside the shares.
+   *
+   * @type {readonly {
+   *   key: string,
+   *   name: string,
+   *   by: 'count' | 'value',
+   *   missingCounts?: boolean,
+   * }[]}
    */
   const COUNT_GROUPS = [
-    { key: 'reason', name: 'Closure reason', by: 'count' },
+    { key: 'reason', name: 'Closure reason', by: 'count', missingCounts: true },
     { key: 'state', name: 'State', by: 'count' },
     { key: 'severity', name: 'Severity', by: 'count' },
     { key: 'month', name: 'Month', by: 'value' },
@@ -412,14 +423,18 @@ if (typeof require === 'function') {
    * One count, as a list of its own sized to what it holds.
    *
    * @param {Document} doc
-   * @param {{ key: string, name: string, by: 'count' | 'value' }} group
+   * @param {{ key: string, name: string, by: 'count' | 'value', missingCounts?: boolean }} group
    * @param {import('../done/stats.js').Tally} tally
    * @returns {Element}
    */
   function buildTally(doc, group, tally) {
     const box = element(doc, 'div', 'Box mb-3 bghsa-stats-list');
     box.setAttribute('data-bghsa-count', group.key);
-    box.append(buildHeader(doc, group.name, `${tally.counted} of ${tally.corpus}`));
+    // What every share below is over. Where the members carrying no value are
+    // an answer of their own they are in it, and where they are an absence the
+    // shares are over the members that carried a value, which is `tally.ratios`.
+    const over = group.missingCounts === true ? tally.counted + tally.missing : tally.counted;
+    box.append(buildHeader(doc, group.name, `${over} of ${tally.corpus}`));
 
     const list = element(doc, 'ul', 'bghsa-stats-rows');
     const entries = Object.entries(tally.counts).sort((left, right) =>
@@ -433,14 +448,19 @@ if (typeof require === 'function') {
           doc,
           globalThis.bghsa.chips.sentenceCase(value),
           String(count),
-          formatRatio(tally.ratios[value] ?? 0)
+          formatRatio(count / over)
         )
       );
     }
     if (tally.missing > 0) {
       // The members carrying no value are counted where the reader can see
       // them, so a ratio over the rest is not read as a ratio over the corpus.
-      const line = buildLine(doc, 'None', String(tally.missing), '—');
+      const line = buildLine(
+        doc,
+        'None',
+        String(tally.missing),
+        group.missingCounts === true ? formatRatio(tally.missing / over) : '—'
+      );
       line.classList.add('bghsa-stats-missing');
       list.append(line);
     }

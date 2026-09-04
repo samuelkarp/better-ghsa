@@ -27,8 +27,10 @@ if (typeof require === 'function') {
  * @property {Record<string, number>} ratios Each count over `counted`.
  * @property {number} counted
  * @property {number} missing
- * @property {number} corpus
- * @property {number} unread
+ * @property {number} corpus The members this count is over, which is every
+ *   member the crawl found except where the count is over part of the corpus.
+ * @property {number} unread How many members the count could not read, which
+ *   are outside `corpus` where the count is over what it could read.
  */
 
 /**
@@ -60,7 +62,7 @@ if (typeof require === 'function') {
  * @property {Record<string, number | null>} expected What GitHub's own state
  *   tabs counted.
  * @property {Record<string, Tally>} counts By `reason`, `state`, `severity`,
- *   and `month`.
+ *   and `month`. `reason` is over the advisories that have ended.
  * @property {Record<string, Timing>} timings By the keys in {@link TIMINGS}.
  * @property {Record<string, string>} uncomputed The section 10 timings this
  *   reader does not compute, each naming why. A caller displays these as
@@ -88,6 +90,12 @@ if (typeof require === 'function') {
    * set the instant every timing here is measured to.
    */
   const DRAFT_EVENT = /^accepted this report\b/;
+
+  /** The state of an advisory a maintainer published, as the crawl names it. */
+  const PUBLISHED_STATE = 'published';
+
+  /** The state of an advisory a maintainer closed, as the crawl names it. */
+  const CLOSED_STATE = 'closed';
 
   /**
    * What a timeline event reads when an advisory is closed.
@@ -363,6 +371,17 @@ if (typeof require === 'function') {
    * read where one backs it and from the list row otherwise, because the list
    * page carries all three. The closure reason and the timings need the read.
    *
+   * The reason count is over the advisories that have ended, and it counts how
+   * each one ended: a publication is an ending of its own, and a close is the
+   * reason it was closed for, or none where nobody has set one. An advisory in
+   * triage or draft has not ended and is counted in none of it.
+   *
+   * A publication is named by the list page, so a published advisory is counted
+   * whether or not a read backs it. A closure reason needs the read.
+   * REQUIREMENTS.md section 10 omits a metric where the event it needs is not
+   * observable, so a closed advisory nobody has read is counted nowhere:
+   * nothing has been read to say what reason it carries. `unread` counts them.
+   *
    * @param {import('./corpus.js').Corpus} held
    * @returns {Summary}
    */
@@ -370,7 +389,11 @@ if (typeof require === 'function') {
     const over = { corpus: held.members.length, unread: held.unread.length };
 
     /** @type {(string | null)[]} */
-    const reasons = [];
+    const endings = [];
+    /** How many advisories ended in a way this reader can name. */
+    let ended = 0;
+    /** How many closed advisories no read backs, whose ending nobody can name. */
+    let unreadEndings = 0;
     /** @type {(string | null)[]} */
     const states = [];
     /** @type {(string | null)[]} */
@@ -388,9 +411,19 @@ if (typeof require === 'function') {
 
     for (const member of held.members) {
       const advisory = member.advisory;
-      reasons.push(advisory === null ? null : closureReasonOf(advisory));
       const state = advisory?.state ?? member.row.state ?? member.state;
-      states.push(state === null ? null : state.toLowerCase());
+      const named = state === null ? null : state.toLowerCase();
+      states.push(named);
+      if (named === PUBLISHED_STATE) {
+        ended += 1;
+        endings.push(PUBLISHED_STATE);
+      } else if (named === CLOSED_STATE) {
+        if (advisory === null) unreadEndings += 1;
+        else {
+          ended += 1;
+          endings.push(closureReasonOf(advisory));
+        }
+      }
       severities.push(advisory?.severity ?? member.row.severity);
       months.push(monthOf(advisory?.reportedAt ?? member.row.openedAt));
       firstResponses.push(durationOf(advisory, firstResponseAt));
@@ -405,7 +438,7 @@ if (typeof require === 'function') {
       complete: held.complete,
       expected: held.expected,
       counts: {
-        reason: tally(reasons, over),
+        reason: tally(endings, { corpus: ended, unread: unreadEndings }),
         state: tally(states, over),
         severity: tally(severities, over),
         month: tally(months, over),
@@ -422,6 +455,8 @@ if (typeof require === 'function') {
 
   const exported = {
     DRAFT_EVENT,
+    PUBLISHED_STATE,
+    CLOSED_STATE,
     CLOSE_EVENT,
     PUBLISH_EVENT,
     TIMINGS,

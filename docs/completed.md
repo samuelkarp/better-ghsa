@@ -178,6 +178,16 @@ count, and a percentage of the counted advisories. Advisories carrying no value
 for that section appear as a "None" row with a count and no percentage. Months
 are UTC, as `YYYY-MM`.
 
+"Closure reason" is how a finished advisory finished, so it is over the
+published and closed advisories and its "N of M" counts those. "Published" is a
+row of it, beside each reason a closed advisory was closed for. "None" is the
+closed advisories that have been read and given no reason, which is the set a
+backfill works from; on this section alone that row is counted with the rest and
+carries a percentage of its own. An advisory in triage or in draft has not ended
+and is in none of it. Neither is a closed advisory nobody has read: nothing has
+been read to say what reason it carries, so counting it under "None" would
+overstate that row.
+
 ### Timings
 
 Four sections, each measured from the time the report was opened: "Time to

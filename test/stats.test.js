@@ -586,11 +586,77 @@ test('the corpus is counted by closure reason, state, severity, and month', () =
 
   assert.deepStrictEqual({ ...summary.counts.month?.counts }, { '2026-03': 2, '2026-04': 2 });
 
-  assert.deepStrictEqual({ ...summary.counts.reason?.counts }, { 'not a vulnerability': 2 });
+  // Every advisory here has ended, two by being closed for a reason and two by
+  // being published, so the endings account for the whole of it.
+  assert.deepStrictEqual(
+    { ...summary.counts.reason?.counts },
+    { 'not a vulnerability': 2, published: 2 }
+  );
+  assert.strictEqual(summary.counts.reason?.counted, 4);
+  assert.strictEqual(summary.counts.reason?.corpus, 4);
+  assert.strictEqual(summary.counts.reason?.missing, 0);
+  assert.strictEqual(
+    summary.counts.reason?.unread,
+    0,
+    'the list page names a publication, so the published advisory nobody read still ended'
+  );
+  assert.strictEqual(summary.counts.reason?.ratios['not a vulnerability'], 0.5);
+});
+
+test('the endings are counted over the advisories that ended', () => {
+  // A published advisory ended by being published and a closed one ended for
+  // the reason it was closed for. A closed advisory nobody has given a reason
+  // ended without one, and is the count a backfill works from. An advisory in
+  // triage or in draft has not ended, and is in none of it: counting one under
+  // no reason would say a report still being worked was closed without one.
+  const summary = stats.summarize(
+    corpusOf([
+      member({ ghsaId: 'GHSA-aaaa-aaaa-aaaa', state: 'triage' }),
+      member({ ghsaId: 'GHSA-bbbb-bbbb-bbbb', state: 'draft' }),
+      member({ ghsaId: 'GHSA-cccc-cccc-cccc', state: 'published' }),
+      // Closed and never read. Nothing has been read to say what reason it
+      // carries.
+      member({ ghsaId: 'GHSA-ffff-ffff-ffff', state: 'closed' }),
+      member({
+        ghsaId: 'GHSA-dddd-dddd-dddd',
+        state: 'closed',
+        advisory: advisory({
+          state: 'Closed',
+          comments: [
+            comment({
+              author: 'samuelkarp',
+              role: 'Member',
+              at: '2026-03-03T00:00:00Z',
+              state: CLOSED_AS('duplicate'),
+            }),
+          ],
+        }),
+      }),
+      member({
+        ghsaId: 'GHSA-eeee-eeee-eeee',
+        state: 'closed',
+        advisory: advisory({ state: 'Closed' }),
+      }),
+    ])
+  );
+
+  assert.strictEqual(summary.corpus, 6, 'the corpus is every advisory the crawl found');
+  assert.deepStrictEqual({ ...summary.counts.reason?.counts }, { published: 1, duplicate: 1 });
   assert.strictEqual(summary.counts.reason?.counted, 2);
-  assert.strictEqual(summary.counts.reason?.missing, 2, 'one with no reason, one unread');
+  assert.strictEqual(
+    summary.counts.reason?.missing,
+    1,
+    'the closed advisory nobody has given a reason'
+  );
+  assert.strictEqual(
+    summary.counts.reason?.corpus,
+    3,
+    'the two still being worked, or the one nobody read, were counted as endings'
+  );
+  // REQUIREMENTS.md section 10: a metric is omitted where the event it needs is
+  // not observable. A close nobody has read is such a member, and reading it as
+  // a close with no reason set would inflate the share a backfill works from.
   assert.strictEqual(summary.counts.reason?.unread, 1);
-  assert.strictEqual(summary.counts.reason?.ratios['not a vulnerability'], 1);
 });
 
 test('a closure reason this reader does not interpret is counted as it stands', () => {
