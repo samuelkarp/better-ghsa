@@ -486,7 +486,7 @@ The extension locates the elements it needs with targeted queries and does not
 validate the whole page structure.
 
 When it cannot read something, it displays what it can, marks the result
-incomplete, and shows a banner.
+incomplete, and shows a banner naming what it could not read.
 
 When it cannot fully verify what it is looking at, it refuses to write and
 shows a banner. A wrong read shows a stale value that the observation time

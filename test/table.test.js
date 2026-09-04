@@ -1368,7 +1368,10 @@ test('a refresh that could not read everything stops saying it is running', asyn
     href: `https://github.com${base}?state=triage`,
   });
 
-  assert.ok(summary !== null && summary.read.failed === 1, 'the missing page was read');
+  assert.ok(
+    summary !== null && summary.read.failed.length === 1,
+    'the missing page was read'
+  );
   assert.strictEqual(progressText(doc), null, 'the header still said a refresh was running');
 });
 

@@ -523,7 +523,7 @@ test('a failed read caches nothing and the pass carries on', async () => {
   await queue.add([ghsa('aaaa'), ghsa('bbbb')]);
   const summary = await queue.run();
 
-  assert.ok(summary.failed === 1, `${summary.failed} reads failed`);
+  assert.deepStrictEqual(summary.failed, [ghsa('aaaa')], 'the read that failed is named');
   assert.ok(summary.fetched === 1, `${summary.fetched} advisories were fetched`);
   assert.deepStrictEqual(failures, [`${ghsa('aaaa')}: GitHub answered 404.`]);
   assert.ok(
@@ -558,7 +558,7 @@ test('a cache write that fails still delivers what was fetched', async () => {
   const summary = await queue.run();
 
   assert.ok(summary.fetched === 2, `${summary.fetched} advisories were fetched`);
-  assert.ok(summary.failed === 0, `${summary.failed} reads were reported failed`);
+  assert.deepStrictEqual(summary.failed, [], 'a read was reported failed');
   assert.deepStrictEqual(failures, [], 'a fetch that answered 200 was reported a failure');
   assert.deepStrictEqual(reported, [`${ghsa('aaaa')}:triage`, `${ghsa('bbbb')}:triage`]);
 });
@@ -600,7 +600,7 @@ test('a request that never answers fails and the pass carries on', { timeout: 50
 
   assert.ok(summary.complete, 'the pass did not finish');
   assert.ok(!queue.isRunning(), 'the queue reported itself still running');
-  assert.ok(summary.failed === 1, `${summary.failed} reads failed`);
+  assert.deepStrictEqual(summary.failed, [ghsa('aaaa')], 'the read that failed is named');
   assert.ok(summary.fetched === 1, `${summary.fetched} advisories were fetched`);
   assert.ok(
     failures.length === 1 && String(failures[0]).includes('did not answer within 25 ms'),
@@ -640,7 +640,11 @@ test('a failure listener that throws does not end the pass', async () => {
   const summary = await queue.run();
 
   assert.ok(summary.complete, 'the pass did not finish');
-  assert.ok(summary.failed === 2, `${summary.failed} reads failed`);
+  assert.deepStrictEqual(
+    summary.failed,
+    [ghsa('aaaa'), ghsa('bbbb')],
+    'the reads that failed are named'
+  );
   assert.ok(summary.fetched === 1, `${summary.fetched} advisories were fetched`);
   assert.deepStrictEqual(heard, [ghsa('aaaa'), ghsa('bbbb'), ghsa('cccc')]);
 });

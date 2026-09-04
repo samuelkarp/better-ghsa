@@ -123,8 +123,8 @@ if (typeof require === 'function') {
 
   /**
    * The verb every failure on this surface carries: the header's own, the line
-   * for a list page the walk could not take, and the line counting the
-   * advisories no read landed for.
+   * for a list page the walk could not take, and the line for an advisory no
+   * read landed for.
    */
   const FAILED_PREFIX = 'Failed to load';
 
@@ -1187,9 +1187,8 @@ if (typeof require === 'function') {
       .then((collected) => {
         if (names(doc, ref)) {
           setState(doc, { corpus: collected.corpus });
-          const failed = collected.read.failed;
-          if (failed > 0) {
-            noteFailure(`${FAILED_PREFIX} ${globalThis.bghsa.table.countTextOf(failed)}`);
+          for (const ghsaId of collected.read.failed) {
+            noteFailure(`${FAILED_PREFIX} ${ghsaId}`);
           }
         }
         return collected.corpus;

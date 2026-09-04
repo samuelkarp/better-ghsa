@@ -149,9 +149,11 @@ Navigating to another repository stops the walk after the request already in
 flight. Progress is kept, so returning resumes where it stopped.
 
 Failures are named above the rows: "Failed to load {url}" for each list page
-that could not be read, and "Failed to load {N} advisories" counting the
-advisory pages that never arrived. A walk that finished without reaching the
-last page shows "Failed to load all advisories" beside the heading.
+that could not be read, and "Failed to load {GHSA id}" for each advisory page
+that never arrived. The lines cover the reading this opening of the view did,
+so a later opening that reads everything shows no banner. A walk that finished
+without reaching the last page shows "Failed to load all advisories" beside the
+heading.
 
 ## The statistics view
 

@@ -34,14 +34,16 @@ if (typeof require === 'function') {
 
 /**
  * The counts are what this queue has done since it was created, which is one
- * page load's worth of work.
+ * page load's worth of work. `failed` names the advisories the pass that
+ * returned it could not read, and only those: a pass a page going away stopped
+ * leaves its own failures for the next page load to read again.
  *
  * @typedef {object} QueueSummary
  * @property {number} fetched Advisories read over the network.
  * @property {number} skipped Advisories the cache already held within the
  *   staleness threshold, whether they were dropped when they were queued or
  *   when their turn came.
- * @property {number} failed Advisories whose read failed.
+ * @property {string[]} failed The advisories whose read failed in this pass.
  * @property {string[]} remaining Advisories left when the pass returned, which
  *   is empty unless it was stopped.
  * @property {boolean} complete Whether the queue emptied.
@@ -295,7 +297,6 @@ if (typeof require === 'function') {
     let stopped = false;
     let fetched = 0;
     let skipped = 0;
-    let failures = 0;
 
     /**
      * What this queue has been asked to do, in the order it was asked. One
@@ -671,6 +672,11 @@ if (typeof require === 'function') {
 
     /** @returns {Promise<QueueSummary>} */
     async function pass() {
+      // What this pass could not read, which is what it answers with. The
+      // queue's own list outlives a pass a page going away stopped, and an
+      // advisory on it is one the next pass reads again.
+      /** @type {string[]} */
+      const failures = [];
       while (!stopped) {
         const ghsaId = pending.shift();
         if (ghsaId === undefined) break;
@@ -702,7 +708,7 @@ if (typeof require === 'function') {
         inFlight = null;
         if (entry === null) {
           if (!failed.includes(ghsaId)) failed.push(ghsaId);
-          failures += 1;
+          if (!failures.includes(ghsaId)) failures.push(ghsaId);
         } else {
           if (!done.includes(ghsaId)) done.push(ghsaId);
           fetched += 1;

@@ -2232,19 +2232,22 @@ test('a page or a read the crawl could not take shows a banner', async () => {
   const closedUrl = `${base}?state=closed`;
   const readable = ghsa('pppp');
   const unreadable = ghsa('qqqq');
+  const alsoUnreadable = ghsa('rrrr');
   pages[`${base}?state=published`] = listHtml({
     state: 'published',
-    ids: [readable, unreadable],
-    counts: { published: 2, closed: 0 },
+    ids: [readable, unreadable, alsoUnreadable],
+    counts: { published: 3, closed: 0 },
   });
   pages[detailUrl(readable)] = detailHtml({
     ghsaId: readable,
     state: 'Published',
     reportedAt: '2026-03-02T00:00:00Z',
   });
-  // The closed list page and one advisory are the pages GitHub does not answer.
+  // The closed list page and two advisories are the pages GitHub does not
+  // answer.
   delete pages[closedUrl];
   delete pages[detailUrl(unreadable)];
+  delete pages[detailUrl(alsoUnreadable)];
   await cache.clear();
 
   const doc = await page();
@@ -2253,7 +2256,7 @@ test('a page or a read the crawl could not take shows a banner', async () => {
 
   const banner = one(doc, `#${view.ROOT_ID} .bghsa-done-banner`);
   const lines = textsOf(banner, '.bghsa-done-failure');
-  assert.strictEqual(lines.length, 2, `the failures named: ${lines.join(' | ')}`);
+  assert.strictEqual(lines.length, 3, `the failures named: ${lines.join(' | ')}`);
   assert.strictEqual(
     banner.textContent ?? '',
     lines.join(''),
@@ -2264,10 +2267,119 @@ test('a page or a read the crawl could not take shows a banner', async () => {
     `the list page that failed is named: ${lines.join(' | ')}`
   );
   assert.ok(
-    lines.includes('Failed to load 1 advisory'),
-    `the read that failed is counted: ${lines.join(' | ')}`
+    lines.includes(`Failed to load ${unreadable}`) &&
+      lines.includes(`Failed to load ${alsoUnreadable}`),
+    `each advisory whose read failed is named: ${lines.join(' | ')}`
   );
   assert.deepStrictEqual(view.stateOf(doc).failures, lines, 'the view holds what it drew');
+});
+
+test('a second collection names the reads that failed in it', async () => {
+  const base = `/${REF.owner}/${REF.repo}/security/advisories`;
+  const readable = ghsa('ssss');
+  const unreadable = ghsa('tttt');
+  for (const state of ['published', 'closed']) {
+    pages[`${base}?state=${state}`] = listHtml({
+      state,
+      ids: state === 'published' ? [readable, unreadable] : [],
+      counts: { published: 2, closed: 0 },
+    });
+  }
+  pages[detailUrl(readable)] = detailHtml({
+    ghsaId: readable,
+    state: 'Published',
+    reportedAt: '2026-03-02T00:00:00Z',
+  });
+  delete pages[detailUrl(unreadable)];
+  await cache.clear();
+
+  const doc = await page();
+  assert.ok((await view.collect(doc)) !== null, 'the first collection ran');
+  assert.deepStrictEqual(
+    view.stateOf(doc).failures,
+    [`Failed to load ${unreadable}`],
+    'the first collection named the read that failed'
+  );
+
+  // GitHub answers the advisory this time, so the second collection has no
+  // failure of its own. The queue is the same one, and it holds what the pass
+  // before it could not read.
+  pages[detailUrl(unreadable)] = detailHtml({
+    ghsaId: unreadable,
+    state: 'Published',
+    reportedAt: '2026-03-03T00:00:00Z',
+  });
+  assert.ok((await view.collect(doc)) !== null, 'the second collection ran');
+  assert.deepStrictEqual(view.stateOf(doc).failures, [], 'the second collection named a failure');
+  assert.strictEqual(
+    doc.querySelector(`#${view.ROOT_ID} .bghsa-done-banner`),
+    null,
+    'a collection that read everything drew a banner'
+  );
+});
+
+test('a collection that resumes names only what it could not read', async () => {
+  const failing = ghsa('zdzd');
+  const other = ghsa('zeze');
+  pages[listUrl(REF, 'published')] = listHtml({
+    state: 'published',
+    ids: [failing, other],
+    counts: { published: 2, closed: 0 },
+  });
+  pages[listUrl(REF, 'closed')] = listHtml({
+    state: 'closed',
+    ids: [],
+    counts: { published: 2, closed: 0 },
+  });
+  pages[detailUrl(other)] = detailHtml({
+    ghsaId: other,
+    state: 'Published',
+    reportedAt: '2026-03-02T00:00:00Z',
+  });
+  delete pages[detailUrl(failing)];
+  await cache.clear();
+
+  const doc = await page();
+  // The maintainer follows a link out of the list while the advisory GitHub
+  // will not answer is in flight. The pass stops there, with the other
+  // advisory still to read and the failure in the progress the next page load
+  // takes back.
+  during[detailUrl(failing)] = async () => {
+    await moveTo(doc, MOVED, [ghsa('zaaa')]);
+    table.ensureRefresh(doc, QUEUE_OPTIONS);
+  };
+  await view.collect(doc, QUEUE_OPTIONS);
+  const { queue } = table.queueFor(REF, QUEUE_OPTIONS);
+  assert.deepStrictEqual(
+    queue.progress().failed,
+    [failing],
+    'the stopped pass kept no record of the read that failed'
+  );
+
+  // The maintainer comes back, and GitHub answers the advisory it refused.
+  pages[detailUrl(failing)] = detailHtml({
+    ghsaId: failing,
+    state: 'Published',
+    reportedAt: '2026-03-03T00:00:00Z',
+  });
+  await moveTo(doc, REF, [failing, other]);
+  assert.ok((await view.collect(doc, QUEUE_OPTIONS)) !== null, 'the collection ran');
+
+  assert.deepStrictEqual(
+    view.stateOf(doc).failures,
+    [],
+    'an advisory the collection read is named as one it could not'
+  );
+  assert.strictEqual(
+    doc.querySelector(`#${view.ROOT_ID} .bghsa-done-banner`),
+    null,
+    'a collection that read everything drew a banner'
+  );
+  assert.deepStrictEqual(
+    view.stateOf(doc).corpus?.unread,
+    [],
+    'the advisory the banner would name is drawn unread'
+  );
 });
 
 /** The repository a soft navigation moves to in the tests below. */
