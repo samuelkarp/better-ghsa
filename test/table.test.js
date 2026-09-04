@@ -183,6 +183,23 @@ function chipLine(row) {
 }
 
 /**
+ * @param {Element} row
+ * @returns {string[]} what each cell beside the main column holds, in the order
+ *   the row draws them. The main column is the first child, so the cells are
+ *   what follows it.
+ */
+function cellsOf(row) {
+  return Array.from(row.children)
+    .slice(1)
+    .map((cell) => {
+      if (cell.querySelector('.bghsa-list-owners') !== null) return 'owners';
+      if (cell.classList.contains('bghsa-list-state')) return 'state';
+      if (cell.classList.contains('bghsa-list-observed')) return 'observed';
+      return cell.getAttribute('class') ?? '';
+    });
+}
+
+/**
  * @param {Document} doc
  * @returns {Element[]} the extension's rows.
  */
@@ -288,6 +305,16 @@ test('a cached advisory read fills the triage row', async () => {
 
   const observed = textOf(row, '.bghsa-list-observed');
   assert.ok(observed === 'Observed 2026-08-26 10:00 UTC', `observed: ${observed}`);
+});
+
+test('the cells beside a row are the owners, the state, and the observation', async () => {
+  const doc = listPage('list-page-triage.html');
+  await render(doc, { [keyFor('GHSA-jmvx-2wfw-xfgj')]: entryOf(TRIAGE_RECORD, 'triage') });
+
+  // The completed list ends on the same two cells, so the state and the
+  // observation stand in one place across both views.
+  const row = /** @type {Element} */ (tableRows(doc)[0]);
+  assert.deepStrictEqual(cellsOf(row), ['owners', 'state', 'observed']);
 });
 
 test('an owner login is encoded the same way in the link and the avatar', () => {

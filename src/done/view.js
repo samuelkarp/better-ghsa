@@ -14,6 +14,7 @@ if (typeof require === 'function') {
   require('../common/record.js');
   require('../common/derive.js');
   require('../common/chips.js');
+  require('../common/row.js');
   require('../detail/tracking.js');
   require('../detail/edit.js');
   require('../list/table.js');
@@ -393,20 +394,6 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The line GitHub's own row carries under the title.
-   *
-   * @param {DoneRow} row
-   * @returns {string}
-   */
-  function metaTextOf(row) {
-    const parts = [row.ghsaId];
-    const opened = globalThis.bghsa.text.formatDate(row.openedAt);
-    if (opened !== null) parts.push(`opened ${opened}`);
-    if (row.reporter !== null) parts.push(`by ${row.reporter}`);
-    return parts.join(' ');
-  }
-
-  /**
    * The stored state of one advisory, and everything a save from here needs. It
    * is `edit.contextFor`, which is what the panel builds from on the advisory's
    * own page, with the render pass this surface runs. The advisory it reads is
@@ -590,8 +577,13 @@ if (typeof require === 'function') {
   }
 
   /**
-   * One row. It carries none of the classes `parse-list` keys on, so a re-read of
-   * the page cannot take it for one of GitHub's.
+   * One row: the title, the line under it, the severity, and then the reason,
+   * the state, and when this row's data was read.
+   *
+   * The three cells are in the order the open list puts its own three in, so a
+   * maintainer moving between the two views finds the state and the observation
+   * in the same place. The state chip stands in a cell of its own carrying the
+   * color of the ending the advisory came to.
    *
    * @param {Document} doc
    * @param {DoneRow} row
@@ -599,66 +591,65 @@ if (typeof require === 'function') {
    * @returns {Element}
    */
   function buildRow(doc, row, corpus) {
-    const item = element(doc, 'li', 'Box-row d-flex flex-items-start bghsa-done-row');
-    item.setAttribute('data-bghsa-ghsa', row.ghsaId);
-
-    const main = element(doc, 'div', 'flex-auto lh-condensed');
-    const link = element(
-      doc,
-      'a',
-      'Link--primary v-align-middle no-underline h4',
-      row.title ?? row.ghsaId
-    );
-    if (row.href !== null) link.setAttribute('href', row.href);
-    main.append(link);
-    main.append(element(doc, 'div', 'mt-1 text-small bghsa-done-meta', metaTextOf(row)));
-
-    // The state chip carries the color of the ending the advisory came to, and
-    // the severity chip GitHub's own color for the level.
-    const chips = element(doc, 'div', 'mt-1 bghsa-done-chips');
+    const built = globalThis.bghsa.row;
     const state = stateNameOf(row);
-    if (state !== null) {
-      chips.append(globalThis.bghsa.chips.buildChip(doc, { text: state, tone: stateToneOf(state) }));
-    }
+
+    /** @type {import('../common/chips.js').ChipSpec[]} */
+    const chips = [];
     // REQUIREMENTS.md section 10: the severity stands on a published advisory
     // and a closed one carries none. Publishing an advisory settles its
     // severity, so the chip is filled there as a confirmed one is on the open
     // list. Nothing is read or stored to decide it: the state is the whole rule.
     if (row.severityLabel !== null && state !== CLOSED) {
-      const text = globalThis.bghsa.chips.sentenceCase(row.severityLabel);
-      chips.append(
-        globalThis.bghsa.chips.buildChip(doc, {
-          text,
-          severityClass: row.severityClass,
-          fill: state === PUBLISHED,
-        })
-      );
+      chips.push({
+        text: globalThis.bghsa.chips.sentenceCase(row.severityLabel),
+        severityClass: row.severityClass,
+        fill: state === PUBLISHED,
+      });
     }
-    main.append(chips);
 
+    /** @type {Element[]} */
+    const lines = [];
     const note = noteFor(row, corpus);
     if (note !== null) {
-      main.append(element(doc, 'div', 'mt-1 text-small bghsa-done-note', note.message));
+      lines.push(element(doc, 'div', 'mt-1 text-small bghsa-done-note', note.message));
     }
-    item.append(main);
 
+    /** @type {Element[]} */
+    const cells = [];
     // REQUIREMENTS.md section 10: the reason is a closed advisory's, so a
     // published row carries no control for one.
     if (state !== PUBLISHED) {
-      const closure = element(doc, 'div', 'pl-2 flex-shrink-0');
+      const closure = built.cell(doc, '');
       closure.append(buildClosure(doc, row, corpus));
-      item.append(closure);
+      cells.push(closure);
     }
 
-    item.append(
-      element(
+    const ending = built.cell(doc, 'bghsa-done-state');
+    if (state !== null) {
+      ending.append(
+        globalThis.bghsa.chips.buildChip(doc, { text: state, tone: stateToneOf(state) })
+      );
+    }
+    cells.push(ending);
+    cells.push(
+      built.cell(
         doc,
-        'div',
-        'pl-2 flex-shrink-0 text-small bghsa-done-observed',
+        'text-small bghsa-done-observed',
         globalThis.bghsa.table.observedTextOf(row)
       )
     );
-    return item;
+
+    return built.buildRow(doc, {
+      prefix: 'bghsa-done',
+      ghsaId: row.ghsaId,
+      href: row.href,
+      title: row.title ?? row.ghsaId,
+      meta: built.metaTextOf(row),
+      chips,
+      lines,
+      cells,
+    });
   }
 
   /**

@@ -31,11 +31,14 @@ N advisories" while a filter is hiding rows.
   reporter's login, in the form `GHSA-xxxx-xxxx-xxxx opened 2026-03-14 by
   someone`.
 - Beneath that, the chips.
-- In its own cell, GitHub's state: "Triage" or "Draft".
 - The owners, as profile pictures linking to each account, in the style of issue
   assignees. Absent when nobody owns the advisory.
+- In its own cell, GitHub's state: "Triage" or "Draft".
 - "Observed" and the time this extension last read that advisory's own page, in
   UTC. A row whose advisory has never been read reads "Not read".
+
+The state and the observation stand in the last two cells here and on the
+completed view, which draws its rows from the same builder.
 
 An unread row carries no chips beyond the severity GitHub's own markup supplied.
 Nothing has been read to say what else holds.

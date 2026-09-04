@@ -221,16 +221,61 @@ function chipLine(row) {
 
 /**
  * @param {Element} row
- * @returns {string[]} how each chip under one row's title is colored: every
- *   class on it other than `Label`, in the order it carries them.
+ * @returns {string} the state chip, which stands in a cell of its own beside
+ *   the title, and an empty string on a row carrying none.
  */
-function chipColors(row) {
-  return Array.from(row.querySelectorAll('.bghsa-done-chips span.Label')).map((label) =>
+function stateLine(row) {
+  return textsOf(row, '.bghsa-done-state span.Label').join(' ');
+}
+
+/**
+ * @param {Element} node
+ * @param {string} selector
+ * @returns {string[]} how each chip that selector finds is colored: every class
+ *   on it other than `Label`, in the order it carries them.
+ */
+function colorsOf(node, selector) {
+  return Array.from(node.querySelectorAll(selector)).map((label) =>
     (label.getAttribute('class') ?? '')
       .split(/\s+/)
       .filter((name) => name !== '' && name !== 'Label')
       .join(' ')
   );
+}
+
+/**
+ * @param {Element} row
+ * @returns {string[]} how each chip under one row's title is colored.
+ */
+function chipColors(row) {
+  return colorsOf(row, '.bghsa-done-chips span.Label');
+}
+
+/**
+ * @param {Element} row
+ * @returns {string[]} how the state chip in its own cell is colored.
+ */
+function stateColors(row) {
+  return colorsOf(row, '.bghsa-done-state span.Label');
+}
+
+/**
+ * @param {Element} row
+ * @param {string} prefix What the surface drawing the row names its own parts.
+ * @returns {string[]} what each cell beside the main column holds, in the order
+ *   the row draws them. The main column is the first child, so the cells are
+ *   what follows it.
+ */
+function cellsOf(row, prefix) {
+  return Array.from(row.children)
+    .slice(1)
+    .map((cell) => {
+      if (cell.querySelector(`.bghsa-${prefix}-closure`) !== null) return 'reason';
+      if (cell.querySelector(`.bghsa-${prefix}-owners`) !== null) return 'owners';
+      if (cell.classList.contains(`bghsa-${prefix}-state`)) return 'state';
+      if (cell.classList.contains(`bghsa-${prefix}-observed`)) return 'observed';
+      return cell.getAttribute('class') ?? '';
+    });
 }
 
 /**
@@ -552,9 +597,14 @@ test('the done view is reached from a toggle beside the one for GitHub', async (
     [...published, ...closed].sort()
   );
   assert.deepStrictEqual(
-    Array.from(rows).map(chipLine),
-    ['Published High', 'Published High', 'Closed'],
+    Array.from(rows).map(stateLine),
+    ['Published', 'Published', 'Closed'],
     'each row says which done state it is in'
+  );
+  assert.deepStrictEqual(
+    Array.from(rows).map(chipLine),
+    ['High', 'High', ''],
+    'and carries its severity under the title'
   );
   assert.strictEqual(
     textOf(doc, `#${view.ROOT_ID} .bghsa-done-count`),
@@ -732,37 +782,83 @@ test('the state chip is colored by the ending and the severity by GitHub', async
     ])
   );
 
-  assert.deepStrictEqual(chipLine(doneRow(doc, painted)), 'Published Low');
+  assert.deepStrictEqual(stateLine(doneRow(doc, painted)), 'Published');
+  assert.deepStrictEqual(chipLine(doneRow(doc, painted)), 'Low');
+  assert.deepStrictEqual(
+    stateColors(doneRow(doc, painted)),
+    ['Label--secondary bghsa-tone-success'],
+    'a published advisory reads green'
+  );
   assert.deepStrictEqual(
     chipColors(doneRow(doc, painted)),
-    ['Label--secondary bghsa-tone-success', 'Label--orange bghsa-fill'],
-    'a published advisory reads green beside a severity filled in its own color'
+    ['Label--orange bghsa-fill'],
+    'beside a severity filled in its own color'
   );
 
-  assert.deepStrictEqual(chipLine(doneRow(doc, read)), 'Published Moderate');
+  assert.deepStrictEqual(stateLine(doneRow(doc, read)), 'Published');
+  assert.deepStrictEqual(chipLine(doneRow(doc, read)), 'Moderate');
   assert.deepStrictEqual(
     chipColors(doneRow(doc, read)),
-    ['Label--secondary bghsa-tone-success', 'Label--warning bghsa-fill'],
+    ['Label--warning bghsa-fill'],
     'the severity color comes from whichever read supplied the level'
   );
 
   assert.deepStrictEqual(
     chipColors(doneRow(doc, bare)),
-    ['Label--secondary bghsa-tone-success', 'Label--secondary bghsa-fill'],
+    ['Label--secondary bghsa-fill'],
     'a severity GitHub carried no modifier on'
   );
 
-  assert.deepStrictEqual(chipLine(doneRow(doc, neither)), 'Triage Low');
+  assert.deepStrictEqual(stateLine(doneRow(doc, neither)), 'Triage');
+  assert.deepStrictEqual(chipLine(doneRow(doc, neither)), 'Low');
+  assert.deepStrictEqual(
+    stateColors(doneRow(doc, neither)),
+    ['Label--secondary'],
+    'a state that is neither ending takes no color'
+  );
   assert.deepStrictEqual(
     chipColors(doneRow(doc, neither)),
-    ['Label--secondary', 'Label--secondary'],
-    'a state that is neither ending takes no color and no fill'
+    ['Label--secondary'],
+    'and its severity takes no fill'
   );
 
   // A chip carrying a color no rule defines draws as though it carried none.
   for (const name of ['bghsa-tone-done', 'bghsa-tone-success', 'bghsa-fill']) {
     assert.ok(view.STYLE_TEXT.includes(`.${name} {`), `no rule defines .${name}`);
   }
+});
+
+test("a completed row carries the line GitHub's own row carried", async () => {
+  // The open list draws this line from the same builder, so the two lists
+  // cannot come to say a report was opened on different days.
+  const closed = ghsa('ceec');
+  const doc = await page(
+    await corpusOf([member({ ghsaId: closed, state: 'closed', openedAt: '2026-03-14T00:00:00Z' })])
+  );
+
+  assert.strictEqual(
+    textOf(doneRow(doc, closed), '.bghsa-done-meta'),
+    `${closed} opened 2026-03-14 by prakleumas`
+  );
+});
+
+test('both lists put the state and the observation in their last two cells', async () => {
+  // The two rows are drawn by one builder: a maintainer moving between the
+  // open list and the completed one finds the state and the observation in the
+  // same place on both.
+  const closed = ghsa('cbcb');
+  const doc = await page(await corpusOf([member({ ghsaId: closed, state: 'closed' })]));
+
+  assert.deepStrictEqual(
+    cellsOf(doneRow(doc, closed), 'done'),
+    ['reason', 'state', 'observed'],
+    'the completed row'
+  );
+  assert.deepStrictEqual(
+    cellsOf(one(doc, `#${table.ROOT_ID} li.bghsa-list-row`), 'list'),
+    ['state', 'observed'],
+    'and the open row behind it'
+  );
 });
 
 test('the severity chip stands on a published row and not on a closed one', async () => {
@@ -777,16 +873,17 @@ test('the severity chip stands on a published row and not on a closed one', asyn
     ])
   );
 
-  assert.strictEqual(chipLine(doneRow(doc, published)), 'Published High');
+  assert.strictEqual(stateLine(doneRow(doc, published)), 'Published');
+  assert.strictEqual(chipLine(doneRow(doc, published)), 'High');
   assert.deepStrictEqual(
-    chipColors(doneRow(doc, closed)),
+    stateColors(doneRow(doc, closed)),
     ['Label--secondary bghsa-tone-done'],
-    'a closed advisory reads purple, and that chip is the only one it carries'
+    'a closed advisory reads purple'
   );
   assert.strictEqual(
     chipLine(doneRow(doc, closed)),
-    'Closed',
-    'a closed advisory carries its severity'
+    '',
+    'and carries no severity under its title'
   );
 });
 

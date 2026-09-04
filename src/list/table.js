@@ -14,6 +14,7 @@ if (typeof require === 'function') {
   require('../common/derive.js');
   require('../common/order.js');
   require('../common/chips.js');
+  require('../common/row.js');
   require('../common/cache.js');
   require('../common/fetch.js');
   require('../common/crawl.js');
@@ -918,22 +919,6 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The line GitHub's own row carries under the title. The table replaces those
-   * rows, so it carries what they carried.
-   *
-   * @param {TableRow} row
-   * @returns {string}
-   */
-  function metaTextOf(row) {
-    const parts = [];
-    if (row.ghsaId !== null) parts.push(row.ghsaId);
-    const opened = globalThis.bghsa.text.formatDate(row.openedAt);
-    if (opened !== null) parts.push(`opened ${opened}`);
-    if (row.reporter !== null) parts.push(`by ${row.reporter}`);
-    return parts.join(' ');
-  }
-
-  /**
    * The size an owner icon is drawn at.
    * `testdata/published-containerd.html` shows GitHub drawing a collaborator
    * avatar at 20 pixels from a source asked for at `s=40`, so the image is
@@ -1003,36 +988,29 @@ if (typeof require === 'function') {
   }
 
   /**
-   * One row: the title as a link, the line GitHub's row carried, the chips, the
-   * state, the owners, and when this row's data was read.
+   * One row: the title as a link, the line GitHub's row carried, the chips, and
+   * then the owners, the state, and when this row's data was read.
    *
-   * The row carries none of the classes `parse-list` keys on, so a re-read of
-   * the page cannot take it for one of GitHub's.
+   * The three cells are in the order the completed list puts its own three in,
+   * so a maintainer moving between the two views finds the state and the
+   * observation in the same place.
    *
    * @param {Document} doc
    * @param {TableRow} row
    * @returns {Element}
    */
   function buildRow(doc, row) {
-    const item = element(doc, 'li', 'Box-row d-flex flex-items-start bghsa-list-row');
-    if (row.ghsaId !== null) item.setAttribute('data-bghsa-ghsa', row.ghsaId);
+    const built = globalThis.bghsa.row;
 
-    const main = element(doc, 'div', 'flex-auto lh-condensed');
-    const link = element(
-      doc,
-      'a',
-      'Link--primary v-align-middle no-underline h4',
-      row.title ?? row.ghsaId ?? 'Advisory'
-    );
-    if (row.href !== null) link.setAttribute('href', row.href);
-    main.append(link);
-    main.append(element(doc, 'div', 'mt-1 text-small bghsa-list-meta', metaTextOf(row)));
-    const chips = element(doc, 'div', 'mt-1 bghsa-list-chips');
-    for (const spec of chipsFor(row)) chips.append(globalThis.bghsa.chips.buildChip(doc, spec));
-    main.append(chips);
-    item.append(main);
+    /** @type {Element[]} */
+    const cells = [];
+    if (row.owners.length > 0) {
+      const owners = built.cell(doc, '');
+      owners.append(buildOwners(doc, row.owners));
+      cells.push(owners);
+    }
 
-    const state = element(doc, 'div', 'pl-2 flex-shrink-0 bghsa-list-state');
+    const state = built.cell(doc, 'bghsa-list-state');
     if (row.state !== null) {
       // The state chip says what state the advisory is in and nothing else, so
       // it is dimmed whatever else the row holds: color never carries a fact a
@@ -1040,23 +1018,18 @@ if (typeof require === 'function') {
       // beside the title.
       state.append(globalThis.bghsa.chips.buildChip(doc, { text: row.state }));
     }
-    item.append(state);
+    cells.push(state);
+    cells.push(built.cell(doc, 'text-small bghsa-list-observed', observedTextOf(row)));
 
-    if (row.owners.length > 0) {
-      const owners = element(doc, 'div', 'pl-2 flex-shrink-0');
-      owners.append(buildOwners(doc, row.owners));
-      item.append(owners);
-    }
-
-    item.append(
-      element(
-        doc,
-        'div',
-        'pl-2 flex-shrink-0 text-small bghsa-list-observed',
-        observedTextOf(row)
-      )
-    );
-    return item;
+    return built.buildRow(doc, {
+      prefix: 'bghsa-list',
+      ghsaId: row.ghsaId,
+      href: row.href,
+      title: row.title ?? row.ghsaId ?? 'Advisory',
+      meta: built.metaTextOf(row),
+      chips: chipsFor(row),
+      cells,
+    });
   }
 
   /**
