@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Better GHSA",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Triage state for GitHub security advisories, kept in a comment on the advisory.",
   "icons": {
     "16": "src/icons/icon-16.png",
