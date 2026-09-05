@@ -8,7 +8,6 @@ const cache = require('../src/common/cache.js');
 const schema = require('../src/common/schema.js');
 const parseList = require('../src/common/parse-list.js');
 const table = require('../src/list/table.js');
-const stats = require('../src/done/stats.js');
 const csv = require('../src/done/csv.js');
 const view = require('../src/done/view.js');
 const statistics = require('../src/stats/statistics.js');

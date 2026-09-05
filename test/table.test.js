@@ -9,7 +9,6 @@ const { parseHTML, DOMParser } = require('linkedom');
 const parseList = require('../src/common/parse-list.js');
 const parseDetail = require('../src/common/parse-detail.js');
 const cache = require('../src/common/cache.js');
-const order = require('../src/common/order.js');
 const table = require('../src/list/table.js');
 const fetchQueue = require('../src/common/fetch.js');
 

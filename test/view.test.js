@@ -1968,7 +1968,7 @@ test('a reason a maintainer sets reaches GitHub as a state comment', async () =>
   /** @type {URLSearchParams[]} */
   const posted = [];
   const outcome = await view.setReason(doc, TRIAGE_ID, 'out of scope', {
-    fetch: async (url, init) => {
+    fetch: async (_url, init) => {
       if ((init.method ?? 'GET') === 'GET') return { status: 200, text: async () => page_html };
       const body = /** @type {URLSearchParams} */ (/** @type {unknown} */ (init.body));
       posted.push(body);
@@ -2099,7 +2099,7 @@ test('a press that changes no reason writes nothing and draws no note', async ()
   /** @type {string[]} */
   const calls = [];
   const outcome = await view.setReason(doc, TRIAGE_ID, stored, {
-    fetch: async (url, init) => {
+    fetch: async (_url, init) => {
       calls.push(init.method ?? 'GET');
       return { status: 200, text: async () => page_html };
     },

@@ -70,9 +70,6 @@ const DRAFT_COMMENT = 'advisory-comment-282849';
 /** The most recent member action the draft fixture carries. */
 const MEMBER_ACTION = '2026-08-25T22:20:26Z';
 
-/** A seed a unit test hands the stamp, far enough from `AT` to tell apart. */
-const SEED = '2026-08-05T09:30:00Z';
-
 /** What the fetch stand-in answers the page request with. */
 const PAGE_HTML = '<<the advisory page>>';
 

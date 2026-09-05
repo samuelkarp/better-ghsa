@@ -42,9 +42,6 @@ function document(markup) {
 /** The advisory the fixtures come from, which is on the allowlist. */
 const REF = { owner: 'git-utensils', repo: 'Spoon-Knife', ghsaId: 'GHSA-jmvx-2wfw-xfgj' };
 
-/** That advisory's repository, as the allowlist names it. */
-const REPO = `${REF.owner}/${REF.repo}`;
-
 /** The one parse of each large fixture in this file. */
 const triageDoc = fixture('triage-thread.html');
 const editDoc = fixture('edit-form.html');

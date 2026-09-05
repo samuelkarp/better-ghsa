@@ -54,7 +54,6 @@ function detail(doc, name) {
 }
 
 /** The one parse of each large fixture in this file. */
-const triageDoc = fixture('triage-thread.html');
 const draft = detail(fixture('draft.html'), 'draft.html');
 
 /** The advisory the fixtures come from, which is on the allowlist. */
