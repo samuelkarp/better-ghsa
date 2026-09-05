@@ -521,6 +521,22 @@ async function settle(turns = 40) {
   }
 }
 
+/**
+ * A navigation redraw is debounced by `RENDER_DELAY_MS`, so a fixed number of
+ * event-loop turns can finish before the new surface appears.
+ *
+ * @param {() => boolean} reached Whether the expected state has appeared.
+ * @param {number} [limitMs] Maximum time to wait.
+ * @returns {Promise<void>} resolves when `reached` returns true or the limit
+ *   elapses.
+ */
+async function waitFor(reached, limitMs = 2_000) {
+  const until = Date.now() + limitMs;
+  while (!reached() && Date.now() < until) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 test('every manifest content script loads in one shared scope', async () => {
   /** @type {string[]} */
   const rejections = [];
@@ -871,7 +887,7 @@ test('a move between the advisory pages leaves one control', async () => {
   assert.strictEqual(controls(sandbox), 1, 'the advisory list carries no one control');
 
   navigate(sandbox, { pathname: ADVISORY, frame: fixture('triage-thread.html') });
-  await settle();
+  await waitFor(() => sandbox.document.getElementById(sandbox.bghsa.panel.PANEL_ID) !== null);
   assert.ok(
     sandbox.document.getElementById(sandbox.bghsa.panel.PANEL_ID) !== null,
     `the panel never landed; the page carries ${names(sandbox).join(', ') || 'nothing'}`
@@ -884,7 +900,7 @@ test('a move between the advisory pages leaves one control', async () => {
   );
 
   navigate(sandbox, { pathname: ADVISORY_LIST, frame: fixture('list-page-triage.html') });
-  await settle();
+  await waitFor(() => sandbox.document.getElementById(sandbox.bghsa.table.ROOT_ID) !== null);
   assert.ok(
     sandbox.document.getElementById(sandbox.bghsa.table.ROOT_ID) !== null,
     `the table never landed; the page carries ${names(sandbox).join(', ') || 'nothing'}`
