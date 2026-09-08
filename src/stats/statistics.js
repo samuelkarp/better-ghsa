@@ -357,7 +357,6 @@ if (typeof require === 'function') {
    * @returns {Element}
    */
   function buildOver(doc, halves) {
-    const table = globalThis.bghsa.table;
     // Every chip here is dimmed: color is kept for where the work stands, and
     // what a count is over is not that.
     const chips = globalThis.bghsa.chips;

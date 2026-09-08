@@ -25,7 +25,6 @@ function parseFixture(name) {
 /** The one parse of each large fixture in this file. */
 const triageDoc = parseFixture('triage-thread.html');
 const draftDoc = parseFixture('draft.html');
-const publishedDoc = parseFixture('published-containerd.html');
 
 /**
  * @param {Document} doc

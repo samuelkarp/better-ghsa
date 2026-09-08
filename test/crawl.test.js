@@ -6,7 +6,6 @@ const { parseHTML } = require('linkedom');
 
 const cache = require('../src/common/cache.js');
 const parseList = require('../src/common/parse-list.js');
-const queues = require('../src/common/fetch.js');
 const crawls = require('../src/common/crawl.js');
 
 // A stand-in for `browser.storage.local`. Two crawls sharing one of these are
@@ -18,32 +17,6 @@ const REF = { owner: 'git-utensils', repo: 'Spoon-Knife' };
 
 const MINUTE = 60 * 1000;
 const DAY = 24 * 60 * MINUTE;
-
-/**
- * A clock a test moves by hand, and the wait a queue uses with it. Waiting moves
- * the clock and returns at once, so a walk of many pages costs no time and the
- * intervals are still exact.
- *
- * @param {number} [start]
- */
-function fakeClock(start = 0) {
-  let at = start;
-  /** @type {number[]} */
-  const waits = [];
-  return {
-    waits,
-    now: () => at,
-    /** @param {number} ms */
-    advance: (ms) => {
-      at += ms;
-    },
-    /** @param {number} ms */
-    wait: async (ms) => {
-      waits.push(ms);
-      at += ms;
-    },
-  };
-}
 
 /**
  * @param {string} suffix
