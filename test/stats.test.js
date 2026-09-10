@@ -263,6 +263,33 @@ test('an advisory closed twice is measured to the close that first resolved it',
   assert.strictEqual(stats.durationOf(held, stats.closeAt), 10904 * 1000);
 });
 
+test('the last close and the last publication are read beside the first', () => {
+  // Two readers over one timeline: the timings measure to the ending an
+  // advisory first reached, and the completed list shows the one it is sitting
+  // in.
+  const closed = advisory({
+    reportedAt: '2026-08-24T16:19:16Z',
+    timeline: [
+      event({ at: '2026-08-26T19:21:00Z', text: 'brackenhollow closed this Aug 26, 2026' }),
+      event({ at: '2026-08-24T19:21:00Z', text: 'brackenhollow closed this Aug 24, 2026' }),
+    ],
+  });
+  assert.strictEqual(stats.lastCloseAt(closed), Date.parse('2026-08-26T19:21:00Z'));
+  assert.strictEqual(stats.closeAt(closed), Date.parse('2026-08-24T19:21:00Z'));
+  assert.strictEqual(stats.lastPublishAt(closed), null, 'and nothing published it');
+
+  const published = advisory({
+    reportedAt: '2026-08-24T16:19:16Z',
+    timeline: [
+      event({ at: '2026-08-25T19:21:00Z', text: 'brackenhollow published this advisory' }),
+      event({ at: '2026-08-27T19:21:00Z', text: 'brackenhollow published this advisory' }),
+    ],
+  });
+  assert.strictEqual(stats.lastPublishAt(published), Date.parse('2026-08-27T19:21:00Z'));
+  assert.strictEqual(stats.publishAt(published), Date.parse('2026-08-25T19:21:00Z'));
+  assert.strictEqual(stats.lastCloseAt(published), null, 'and nothing closed it');
+});
+
 test('a title carrying a maintainer act sets no timing', () => {
   // The reporter writes the advisory's title, and a `changed the title` event
   // repeats it into the timeline, so every one of these phrases is text the

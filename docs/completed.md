@@ -27,15 +27,23 @@ One view shows at a time.
 ## What a row shows
 
 The heading reads "Completed" with the number of advisories beside it.
-Advisories are ordered by GHSA identifier ascending. There is no other ordering.
+Advisories are ordered by the instant each one ended, newest first: a closed
+advisory by its last close and a published one by its last publication, so an
+advisory closed, reopened, and closed again ends at the close it is sitting in.
+Two that ended on one day are ordered by the time of day, which the row does not
+show. An advisory with no ending stands below every advisory that has one, in
+GHSA identifier order. An advisory has no ending where nothing has read it, and
+where a read of it finds no close or publication matching the state it is in.
 
 Each row carries:
 
 - The advisory title, as a link. An advisory whose title has not been read shows
   its GHSA identifier instead.
 - A line beneath it with the GHSA identifier, the date the report was opened,
-  and the reporter's login, in the form `GHSA-xxxx-xxxx-xxxx opened 2026-03-14
-  by someone`. Any part that has not been read is left out.
+  the reporter's login, and the date the advisory ended, in the form
+  `GHSA-xxxx-xxxx-xxxx opened 2026-03-14 by someone closed 2026-08-02`. A
+  published advisory reads `published` there in place of `closed`. Any part
+  that has not been read is left out.
 - A severity chip, unless the row is closed. On a published row it is filled
   with the color GitHub paints that level, because publishing an advisory
   settles its severity.
@@ -204,7 +212,8 @@ What these can see bounds what they mean. First response is the earliest comment
 by an org member that this extension did not write, so a maintainer who answered
 by email or who acted without commenting is invisible to it. Acceptance,
 closure, and publication are read from the wording of the advisory's timeline
-events.
+events, and a timing runs to the first such event: an advisory closed,
+reopened, and closed again is measured to the close that first resolved it.
 
 ### Export
 

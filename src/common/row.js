@@ -17,6 +17,9 @@ if (typeof require === 'function') {
  * @property {string | null} ghsaId
  * @property {string | null} openedAt
  * @property {string | null} reporter
+ * @property {string | null} [ending] How the advisory ended, as the line names
+ *   it. A list of advisories that have not ended holds none.
+ * @property {string | number | null} [endedAt] When it ended.
  */
 
 /**
@@ -46,7 +49,11 @@ if (typeof require === 'function') {
 
   /**
    * The line GitHub's own row carries under the title. The lists replace those
-   * rows, so they carry what those rows carried.
+   * rows, so they carry what those rows carried, and a list whose advisories
+   * have ended names the ending after it.
+   *
+   * Every part is left out where nothing read it, the ending clause with the
+   * rest: it stands only where both the word and the instant are known.
    *
    * @param {RowMeta} row
    * @returns {string}
@@ -57,6 +64,9 @@ if (typeof require === 'function') {
     const opened = globalThis.bghsa.text.formatDate(row.openedAt);
     if (opened !== null) parts.push(`opened ${opened}`);
     if (row.reporter !== null) parts.push(`by ${row.reporter}`);
+    const ending = row.ending ?? null;
+    const ended = globalThis.bghsa.text.formatDate(row.endedAt ?? null);
+    if (ending !== null && ended !== null) parts.push(`${ending} ${ended}`);
     return parts.join(' ');
   }
 

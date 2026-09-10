@@ -239,6 +239,25 @@ if (typeof require === 'function') {
   }
 
   /**
+   * @param {import('../common/parse-detail.js').ParsedDetail} advisory
+   * @param {RegExp} phrase Which timeline event is being looked for, read the
+   *   way {@link DRAFT_EVENT} is.
+   * @returns {number | null} when that event last happened, and null where the
+   *   timeline records it no time this reader can read.
+   */
+  function latestEvent(advisory, phrase) {
+    /** @type {number | null} */
+    let latest = null;
+    for (const event of advisory.timeline) {
+      if (!globalThis.bghsa.derive.eventIs(event, phrase)) continue;
+      const at = instantOf(event.at);
+      if (at === null) continue;
+      if (latest === null || at > latest) latest = at;
+    }
+    return latest;
+  }
+
+  /**
    * When the advisory entered draft, which is when a maintainer accepted the
    * report.
    *
@@ -279,6 +298,34 @@ if (typeof require === 'function') {
    */
   function publishAt(advisory) {
     return earliestEvent(advisory, PUBLISH_EVENT);
+  }
+
+  /**
+   * The last close on the timeline, which is when an advisory that is closed
+   * now became closed. An advisory closed, reopened, and closed again reads
+   * here to the close it is sitting in.
+   *
+   * This is the instant a reader is shown the advisory ended at, and
+   * {@link closeAt} is the one the section 10 timings are measured to.
+   *
+   * @param {import('../common/parse-detail.js').ParsedDetail} advisory
+   * @returns {number | null} the instant, and null where the timeline records
+   *   no close.
+   */
+  function lastCloseAt(advisory) {
+    return latestEvent(advisory, CLOSE_EVENT);
+  }
+
+  /**
+   * The last publication on the timeline, read the way {@link lastCloseAt} is,
+   * and paired with {@link publishAt} the same way.
+   *
+   * @param {import('../common/parse-detail.js').ParsedDetail} advisory
+   * @returns {number | null} the instant, and null where the timeline records
+   *   no publication.
+   */
+  function lastPublishAt(advisory) {
+    return latestEvent(advisory, PUBLISH_EVENT);
   }
 
   /**
@@ -468,6 +515,8 @@ if (typeof require === 'function') {
     draftAt,
     closeAt,
     publishAt,
+    lastCloseAt,
+    lastPublishAt,
     durationOf,
     tally,
     timing,

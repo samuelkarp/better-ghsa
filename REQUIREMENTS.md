@@ -415,6 +415,15 @@ the rating.
 A published advisory has no closure reason, so its row carries no control for
 setting one.
 
+Rows are ordered by the instant each advisory ended, newest first: a closed
+advisory by its close and a published one by its publication. The ending is the
+last event of that kind, so an advisory closed, reopened, and closed again ends
+at the close it is sitting in. The line beneath the title names that ending and
+the date of it. An advisory with no ending stands below every advisory that has
+one, in GHSA identifier order. An advisory has no ending where nothing has read
+it, and where a read of it finds no close or publication matching the state it
+is in.
+
 Rows are filterable on state, on closure reason, and on severity, with a control
 that clears every filter. The reason filter is over closed advisories, and the
 value it offers for the advisories carrying no reason is what a backfill works
@@ -467,6 +476,8 @@ Timing, reconstructed from page-observable events:
 - Time to publish.
 
 Closing and publishing are two different endings and are measured separately.
+Each timing is measured to the first such event, and the done list orders by
+the last.
 
 A timing says how many advisories it could not measure and why, as a row of its
 own beside the counts: an advisory with no response, one never accepted, one

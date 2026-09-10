@@ -428,6 +428,22 @@ function advisory(fields) {
 }
 
 /**
+ * One timeline event in the shape the parser produces. Only a person acts on an
+ * advisory, so the text opens with a login and the phrase follows it.
+ *
+ * @param {{ at: string, text: string }} fields
+ * @returns {import('../src/common/parse-detail.js').TimelineEvent}
+ */
+function event(fields) {
+  return {
+    id: `event-${fields.at}`,
+    actor: 'samuelkarp',
+    at: fields.at,
+    text: `samuelkarp ${fields.text}`,
+  };
+}
+
+/**
  * @param {{
  *   ghsaId: string,
  *   state: string,
@@ -839,6 +855,291 @@ test("a completed row carries the line GitHub's own row carried", async () => {
   assert.strictEqual(
     textOf(doneRow(doc, closed), '.bghsa-done-meta'),
     `${closed} opened 2026-03-14 by prakleumas`
+  );
+});
+
+test('a completed row names the day the advisory ended after that line', async () => {
+  // Closing and publishing are two endings and the line names the one the
+  // advisory came to. The third row is read and its timeline holds neither, so
+  // the clause is left out the way every other unread part of the line is.
+  const closed = ghsa('cfca');
+  const published = ghsa('cfcb');
+  const neither = ghsa('cfcc');
+  const doc = await page(
+    await corpusOf([
+      member({
+        ghsaId: closed,
+        state: 'closed',
+        openedAt: '2026-03-14T00:00:00Z',
+        advisory: advisory({
+          ghsaId: closed,
+          state: 'Closed',
+          timeline: [event({ at: '2026-08-02T09:00:00Z', text: 'closed this as not planned' })],
+        }),
+      }),
+      member({
+        ghsaId: published,
+        state: 'published',
+        openedAt: '2026-03-14T00:00:00Z',
+        advisory: advisory({
+          ghsaId: published,
+          state: 'Published',
+          timeline: [event({ at: '2026-08-02T09:00:00Z', text: 'published this advisory' })],
+        }),
+      }),
+      member({
+        ghsaId: neither,
+        state: 'closed',
+        openedAt: '2026-03-14T00:00:00Z',
+        advisory: advisory({ ghsaId: neither, state: 'Closed' }),
+      }),
+    ])
+  );
+
+  assert.strictEqual(
+    textOf(doneRow(doc, closed), '.bghsa-done-meta'),
+    `${closed} opened 2026-03-14 by prakleumas closed 2026-08-02`,
+    'a closed row'
+  );
+  assert.strictEqual(
+    textOf(doneRow(doc, published), '.bghsa-done-meta'),
+    `${published} opened 2026-03-14 by prakleumas published 2026-08-02`,
+    'a published row'
+  );
+  assert.strictEqual(
+    textOf(doneRow(doc, neither), '.bghsa-done-meta'),
+    `${neither} opened 2026-03-14 by prakleumas`,
+    'a row whose ending nothing named'
+  );
+});
+
+test('the ending a completed row takes is the one its state names', async () => {
+  // An advisory closed, reopened, and published carries both endings on its
+  // timeline, and its state is what says which of the two ended it. The line
+  // names the publication, and the row sorts by the publication: above an
+  // advisory closed after that close and before that publication.
+  //
+  // The third was crawled while it was closed and reopened after that, so its
+  // state names neither ending while its timeline still holds the close. The
+  // state is what the row goes by, so the row takes no ending: the line carries
+  // no ending clause, and the row stands below both rows that have one, though
+  // its close falls between their two endings.
+  const closed = ghsa('eaaa');
+  const reopened = ghsa('ebbb');
+  const revived = ghsa('eccc');
+  const doc = await page(
+    await corpusOf([
+      member({
+        ghsaId: closed,
+        state: 'closed',
+        openedAt: '2026-03-14T00:00:00Z',
+        advisory: advisory({
+          ghsaId: closed,
+          state: 'Closed',
+          timeline: [event({ at: '2026-06-15T09:00:00Z', text: 'closed this as not planned' })],
+        }),
+      }),
+      member({
+        ghsaId: reopened,
+        state: 'published',
+        openedAt: '2026-03-14T00:00:00Z',
+        advisory: advisory({
+          ghsaId: reopened,
+          state: 'Published',
+          timeline: [
+            event({ at: '2026-05-01T09:00:00Z', text: 'closed this as not planned' }),
+            event({ at: '2026-08-02T09:00:00Z', text: 'published this advisory' }),
+          ],
+        }),
+      }),
+      member({
+        ghsaId: revived,
+        state: 'closed',
+        openedAt: '2026-03-14T00:00:00Z',
+        advisory: advisory({
+          ghsaId: revived,
+          state: 'Triage',
+          timeline: [event({ at: '2026-07-01T09:00:00Z', text: 'closed this as not planned' })],
+        }),
+      }),
+    ])
+  );
+
+  assert.strictEqual(
+    textOf(doneRow(doc, reopened), '.bghsa-done-meta'),
+    `${reopened} opened 2026-03-14 by prakleumas published 2026-08-02`,
+    'the publication it ended at, and not the close it came back from'
+  );
+  assert.strictEqual(
+    textOf(doneRow(doc, revived), '.bghsa-done-meta'),
+    `${revived} opened 2026-03-14 by prakleumas`,
+    'no ending on the row whose state names neither'
+  );
+  assert.strictEqual(
+    shownIds(doc),
+    [reopened, closed, revived].join(' '),
+    'sorted by that publication, and the row with no ending below both'
+  );
+});
+
+test('a completed row takes the last of the endings its state names', async () => {
+  // An advisory closed, reopened, and closed again holds two closes, and the
+  // one that ended it is the second. The row reads that close and sorts by it,
+  // where the timings measure to the first. The rule is one rule, so a
+  // timeline carrying two publications reads the last of those the same way.
+  //
+  // The three between them run the two orderings against each other. By the
+  // last of each ending they come out reopened, republished, once; by the
+  // first they come out once, reopened, republished.
+  const reopened = ghsa('gaaa');
+  const republished = ghsa('gbbb');
+  const once = ghsa('gccc');
+  const doc = await page(
+    await corpusOf([
+      member({
+        ghsaId: reopened,
+        state: 'closed',
+        openedAt: '2026-03-14T00:00:00Z',
+        advisory: advisory({
+          ghsaId: reopened,
+          state: 'Closed',
+          timeline: [
+            event({ at: '2026-05-01T09:00:00Z', text: 'closed this as not planned' }),
+            event({ at: '2026-08-02T09:00:00Z', text: 'closed this as not planned' }),
+          ],
+        }),
+      }),
+      member({
+        ghsaId: republished,
+        state: 'published',
+        openedAt: '2026-03-14T00:00:00Z',
+        advisory: advisory({
+          ghsaId: republished,
+          state: 'Published',
+          timeline: [
+            event({ at: '2026-04-10T09:00:00Z', text: 'published this advisory' }),
+            event({ at: '2026-07-20T09:00:00Z', text: 'published this advisory' }),
+          ],
+        }),
+      }),
+      member({
+        ghsaId: once,
+        state: 'closed',
+        openedAt: '2026-03-14T00:00:00Z',
+        advisory: advisory({
+          ghsaId: once,
+          state: 'Closed',
+          timeline: [event({ at: '2026-06-15T09:00:00Z', text: 'closed this as not planned' })],
+        }),
+      }),
+    ])
+  );
+
+  assert.strictEqual(
+    textOf(doneRow(doc, reopened), '.bghsa-done-meta'),
+    `${reopened} opened 2026-03-14 by prakleumas closed 2026-08-02`,
+    'the close it is sitting in, and not the close it came back from'
+  );
+  assert.strictEqual(
+    textOf(doneRow(doc, republished), '.bghsa-done-meta'),
+    `${republished} opened 2026-03-14 by prakleumas published 2026-07-20`,
+    'the last publication on the timeline'
+  );
+  assert.strictEqual(
+    shownIds(doc),
+    [reopened, republished, once].join(' '),
+    'ordered by those two endings, and not by the first of each'
+  );
+});
+
+test('advisories that ended on one day are ordered by the time of day', async () => {
+  // The row shows the day, and the order is by the instant beneath it. The
+  // corpus hands its members over by identifier and the identifiers here run
+  // the other way, so the evening close standing first is this view's
+  // ordering. Two closes at one instant tie, and a tie keeps that identifier
+  // order.
+  const morning = ghsa('faaa');
+  const evening = ghsa('fbbb');
+  const alsoEvening = ghsa('fccc');
+
+  /**
+   * @param {string} ghsaId
+   * @param {string} at
+   * @returns {import('../src/done/corpus.js').CorpusMember}
+   */
+  const closedAt = (ghsaId, at) =>
+    member({
+      ghsaId,
+      state: 'closed',
+      openedAt: '2026-03-14T00:00:00Z',
+      advisory: advisory({
+        ghsaId,
+        state: 'Closed',
+        timeline: [event({ at, text: 'closed this as not planned' })],
+      }),
+    });
+
+  const doc = await page(
+    await corpusOf([
+      closedAt(morning, '2026-08-02T01:00:00Z'),
+      closedAt(evening, '2026-08-02T20:00:00Z'),
+      closedAt(alsoEvening, '2026-08-02T20:00:00Z'),
+    ])
+  );
+
+  assert.strictEqual(
+    shownIds(doc),
+    [evening, alsoEvening, morning].join(' '),
+    'the later instant first, and the close it ties with after it by identifier'
+  );
+  assert.strictEqual(
+    textOf(doneRow(doc, morning), '.bghsa-done-meta'),
+    `${morning} opened 2026-03-14 by prakleumas closed 2026-08-02`,
+    'the one day all three of them show'
+  );
+});
+
+test('the completed list is ordered by the instant each advisory ended', async () => {
+  // The members arrive in the identifier order the corpus holds them in, and
+  // that order is the reverse of the endings, so what comes out can only be
+  // the ordering this view puts on them. The two endings are mixed, because a
+  // publication is an ending as much as a close is.
+  const first = ghsa('daaa');
+  const second = ghsa('dbbb');
+  const third = ghsa('dccc');
+  const noEvent = ghsa('dddd');
+  const unread = ghsa('deee');
+
+  /**
+   * @param {string} ghsaId
+   * @param {string} state
+   * @param {string} at
+   * @param {string} text
+   * @returns {import('../src/done/corpus.js').CorpusMember}
+   */
+  const endedOn = (ghsaId, state, at, text) =>
+    member({
+      ghsaId,
+      state: state.toLowerCase(),
+      advisory: advisory({ ghsaId, state, timeline: [event({ at, text })] }),
+    });
+
+  const doc = await page(
+    await corpusOf([
+      endedOn(first, 'Closed', '2026-01-05T09:00:00Z', 'closed this as not planned'),
+      endedOn(second, 'Published', '2026-04-09T09:00:00Z', 'published this advisory'),
+      endedOn(third, 'Closed', '2026-08-02T09:00:00Z', 'closed this as not planned'),
+      // Read, and its timeline records no ending, so it has no instant to sort
+      // by any more than a member nothing has read has.
+      member({ ghsaId: noEvent, state: 'closed', advisory: advisory({ ghsaId: noEvent, state: 'Closed' }) }),
+      member({ ghsaId: unread, state: 'closed' }),
+    ])
+  );
+
+  assert.strictEqual(
+    shownIds(doc),
+    [third, second, first, noEvent, unread].join(' '),
+    'the newest ending first, and the rows with none below them by identifier'
   );
 });
 

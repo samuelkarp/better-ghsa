@@ -37,6 +37,12 @@ if (typeof require === 'function') {
  *   level.
  * @property {string | null} openedAt
  * @property {string | null} reporter
+ * @property {string | null} ending How the advisory ended, as the line under
+ *   the title names it, and null wherever {@link endedAt} is.
+ * @property {number | null} endedAt When the advisory ended: a closed
+ *   advisory's last close and a published one's last publication. Null where no
+ *   advisory read backs the row, where the timeline records no such event, and
+ *   where the state is neither ending.
  * @property {string | null} closureReason The stored reason, and null where the
  *   advisory carries none or nothing has read it.
  * @property {string | null} closureDuplicateOf What the advisory duplicates, as
@@ -265,17 +271,61 @@ if (typeof require === 'function') {
   }
 
   /**
-   * One row per corpus member, in the order the corpus holds them.
+   * When the advisory ended, and the word the line under the title names that
+   * ending by. Closing and publishing are the two endings REQUIREMENTS.md
+   * section 10 measures separately, and a row takes the one its state names.
+   *
+   * The last such event is the instant, so an advisory closed, reopened, and
+   * closed again reads the close it is sitting in. The statistics measure to
+   * the earliest of them, because a duration runs to when the advisory first
+   * reached that ending; a row says when it ended.
+   *
+   * The instant is off the timeline, so it needs an advisory read. A member no
+   * read backs has no ending here, and neither has one whose timeline records
+   * no such event or whose state is neither ending.
+   *
+   * @param {string | null} state The state the row shows, as either page named
+   *   it.
+   * @param {import('../common/parse-detail.js').ParsedDetail | null} advisory
+   * @returns {{ ending: string | null, endedAt: number | null }}
+   */
+  function endingOf(state, advisory) {
+    /** @type {{ ending: string | null, endedAt: number | null }} */
+    const none = { ending: null, endedAt: null };
+    if (advisory === null) return none;
+    const name = state === null ? null : globalThis.bghsa.chips.sentenceCase(state);
+    if (name === CLOSED) {
+      const at = globalThis.bghsa.stats.lastCloseAt(advisory);
+      return at === null ? none : { ending: 'closed', endedAt: at };
+    }
+    if (name === PUBLISHED) {
+      const at = globalThis.bghsa.stats.lastPublishAt(advisory);
+      return at === null ? none : { ending: 'published', endedAt: at };
+    }
+    return none;
+  }
+
+  /**
+   * One row per corpus member, ordered by the instant the advisory ended,
+   * newest first. A row whose ending is unknown stands below every row whose
+   * ending is known, in the identifier order the corpus holds. Two rows that
+   * ended at one instant hold that same identifier order.
+   *
+   * The order is this view's own. `corpus.js` holds its members by identifier
+   * so that two collections of one corpus come out the same way, and the
+   * statistics are over that same corpus, so the rows are sorted here and the
+   * corpus is left as it stands.
    *
    * @param {import('./corpus.js').Corpus | null} corpus
    * @returns {DoneRow[]}
    */
   function rowsOf(corpus) {
     if (corpus === null) return [];
-    return corpus.members.map((member) => {
+    const rows = corpus.members.map((member) => {
       const advisory = member.advisory;
       const closure = closureOf(advisory);
       const state = advisory?.state ?? member.row.state ?? member.state;
+      const ending = endingOf(state, advisory);
       // The color comes from whichever read supplied the level, so a severity
       // the advisory page has since changed is not painted the old one's color.
       const read = advisory?.severityLabel ?? advisory?.severity ?? null;
@@ -288,12 +338,22 @@ if (typeof require === 'function') {
         severityClass: read === null ? member.row.severityClass : advisory?.severityClass ?? null,
         openedAt: advisory?.reportedAt ?? member.row.openedAt,
         reporter: advisory?.reporter ?? member.row.reporter,
+        ending: ending.ending,
+        endedAt: ending.endedAt,
         closureReason: closure.reason,
         closureDuplicateOf: closure.duplicateOf,
         read: advisory !== null,
         observedAt: member.observedAt,
         writable: advisory !== null && advisory.ref !== null,
       };
+    });
+    // A sort that holds equal keys in the order they arrived leaves the rows
+    // with no ending in the identifier order the corpus handed them over in.
+    return rows.sort((left, right) => {
+      if (left.endedAt === right.endedAt) return 0;
+      if (left.endedAt === null) return 1;
+      if (right.endedAt === null) return -1;
+      return right.endedAt - left.endedAt;
     });
   }
 
