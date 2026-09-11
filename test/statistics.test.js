@@ -696,6 +696,50 @@ test('the export is the whole corpus, written here in the page', async () => {
   );
 });
 
+test('pressing the export writes the file', async () => {
+  // The press is the only way the corpus leaves the page. Everything under it
+  // is asserted above; this is the button reaching it.
+  const { doc } = await repository({
+    owner: 'stats-press',
+    states: { triage: [{ ghsaId: ghsa('rrrr') }] },
+    crawl: ['open', 'done'],
+  });
+
+  statsToggle(doc).click();
+  await statistics.load(doc);
+
+  /** @type {unknown[]} */
+  const parts = [];
+  class FakeBlob {
+    /** @param {unknown[]} pieces */
+    constructor(pieces) {
+      parts.push(...pieces);
+    }
+  }
+  const heldBlob = globalThis.Blob;
+  const heldMake = globalThis.URL.createObjectURL;
+  const heldDrop = globalThis.URL.revokeObjectURL;
+  /** @type {string[]} */
+  const dropped = [];
+  globalThis.Blob = /** @type {typeof globalThis.Blob} */ (/** @type {unknown} */ (FakeBlob));
+  globalThis.URL.createObjectURL = () => 'blob:https://github.com/pressed';
+  globalThis.URL.revokeObjectURL = (url) => dropped.push(url);
+  try {
+    const button = /** @type {HTMLElement} */ (
+      /** @type {unknown} */ (one(doc, `#${statistics.ROOT_ID} button.bghsa-stats-export`))
+    );
+    button.click();
+    assert.strictEqual(parts.length, 1, 'the press wrote no file');
+    const lines = /** @type {string} */ (parts[0]).split('\r\n');
+    assert.strictEqual(lines[0], csv.COLUMNS.join(','));
+    assert.ok((lines[1] ?? '').startsWith(ghsa('rrrr')), `the file holds: ${lines[1]}`);
+  } finally {
+    globalThis.Blob = heldBlob;
+    globalThis.URL.createObjectURL = heldMake;
+    globalThis.URL.revokeObjectURL = heldDrop;
+  }
+});
+
 test('the statistics say a crawl is filling the corpus they are over', async () => {
   const { doc } = await repository({
     owner: 'stats-reading',
