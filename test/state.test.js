@@ -55,6 +55,9 @@ const DRAFT_REF = { owner: 'git-utensils', repo: 'Spoon-Knife', ghsaId: 'GHSA-5h
 /** The highest ordering claim the triage fixture carries. */
 const OBSERVED = 7;
 
+/** The claim the state comment the signed-in maintainer wrote carries. */
+const OWN_SEQ = 3;
+
 /** The write time every test stamps, so the snapshot it expects is exact. */
 const AT = '2026-08-26T11:00:00Z';
 
@@ -226,6 +229,43 @@ function signIn(page, login) {
   link.setAttribute('href', `/${login}`);
   const image = link.querySelector('img[alt]');
   if (image !== null) image.setAttribute('alt', `@${login}`);
+}
+
+/**
+ * Turns the advisory's second state comment into a rival: an org member's,
+ * written by `login`, claiming the sequence the signed-in maintainer's own
+ * comment claims. The advisory then carries two snapshots at one number, which
+ * is what the login settles.
+ *
+ * @param {Document} page
+ * @param {string} login The account the rival comment reads as.
+ * @returns {void}
+ */
+function rival(page, login) {
+  const group = page.querySelector(`#advisory-comment-${OTHER_ID}`);
+  if (group === null) throw new Error('the fixture carries a second state comment');
+  for (const link of group.querySelectorAll('a.author')) link.setAttribute('href', `/${login}`);
+  for (const badge of group.querySelectorAll('span.Label')) {
+    if (badge.closest('.comment-body') === null) badge.textContent = 'Member';
+  }
+  const snapshot = JSON.stringify(
+    {
+      betterGhsa: '1.0',
+      seq: OWN_SEQ,
+      by: login,
+      at: '2026-08-25T19:00:00Z',
+      triage: 'evaluating',
+      triageSince: '2026-08-25T19:00:00Z',
+      owners: [login],
+      confirmed: {},
+      backports: [],
+    },
+    null,
+    2
+  );
+  for (const fence of group.querySelectorAll('.highlight-source-json pre')) {
+    fence.textContent = snapshot;
+  }
 }
 
 test('a write edits the state comment the signed-in maintainer wrote', async () => {
@@ -414,6 +454,43 @@ test('a comment other than the one that held state refuses the write', async () 
   assert.strictEqual(outcome.ok, false);
   assert.strictEqual(outcome.reason, 'superseded');
   assert.strictEqual(calls.length, 1, 'a comment request went out');
+});
+
+test('a rival claiming one sequence takes the state, and the write it refuses', async () => {
+  // REQUIREMENTS.md section 3 settles two snapshots claiming one sequence by
+  // the author's login. This is the move the sequence number cannot show: the
+  // panel loaded holding state, a rival save landed at the same number, and the
+  // highest claim on the advisory is where the panel left it. The two halves
+  // put the rival's login on either side of the maintainer's, so a tie settled
+  // the other way fails one of them rather than agreeing with both.
+  const taken = triagePage();
+  rival(taken, 'yaroslavk');
+  const refused = await run(taken, {
+    loadedSeq: OWN_SEQ,
+    loadedHolder: { commentId: OWN_ID, by: 'samuelkarp' },
+    changes: { triage: 'evaluating' },
+  });
+  assert.ok(refused.outcome.ok === false, 'the write went out over the rival snapshot');
+  assert.strictEqual(refused.outcome.reason, 'superseded');
+  assert.strictEqual(refused.calls.length, 1, 'a comment request went out');
+  assert.strictEqual(refused.outcome.snapshot, null);
+  // The panel reloads holding the snapshot that took the state from it.
+  assert.strictEqual(refused.outcome.merged?.source?.id, OTHER_ID);
+  assert.strictEqual(refused.outcome.merged?.observedSeq, OWN_SEQ);
+
+  const held = triagePage();
+  rival(held, 'prakleumas');
+  const written = await run(held, {
+    loadedSeq: OWN_SEQ,
+    loadedHolder: { commentId: OWN_ID, by: 'samuelkarp' },
+    changes: { triage: 'evaluating' },
+  });
+  assert.ok(written.outcome.ok === true, `the write failed: ${written.outcome.message}`);
+  assert.strictEqual(written.outcome.merged?.source?.id, OWN_ID);
+  assert.ok(
+    /** @type {Record<string, unknown>} */ (written.outcome.snapshot).seq === OWN_SEQ + 1,
+    'the write did not outrank the tie it wrote over'
+  );
 });
 
 test('the state a write of this panel left behind is not a rival', async () => {
