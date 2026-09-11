@@ -163,6 +163,19 @@ test('a readable seq with an invalid payload is excluded and takes a confirmatio
   assert.strictEqual(merged.source?.id, '12');
   assert.strictEqual(merged.observedSeq, 9);
   assert.strictEqual(merged.nextSeq, 10, 'the next write does not outrank the excluded snapshot');
+
+  // Two of them, and the reader is owed a warning on each comment rather than
+  // on the first one it met. They come back in the order the comments stand in.
+  const both = merge.mergeSnapshots([
+    source('11', 'samuelkarp', true, '{"betterGhsa":"1.0","seq":9,"by":"samuelkarp","owners":"x"}'),
+    source('12', 'dmcgowan', true, '{"betterGhsa":"1.0","seq":4,"by":"dmcgowan","backports":3}'),
+  ]);
+  assert.deepStrictEqual(
+    both.warnings.map((warning) => `${warning.kind} ${warning.commentId}`),
+    ['invalid payload 11', 'invalid payload 12']
+  );
+  assert.strictEqual(both.state, null, 'a snapshot the reader would not take held state');
+  assert.strictEqual(both.confirmationRequired, true);
 });
 
 test('a schema major this reader does not know puts the advisory read-only', () => {
@@ -177,6 +190,24 @@ test('a schema major this reader does not know puts the advisory read-only', () 
 
   const known = merge.mergeSnapshots([source('11', 'samuelkarp', true, snapshotJson(4, 'x'))]);
   assert.strictEqual(known.readOnly, false);
+});
+
+test('one snapshot in a newer schema puts the whole advisory read-only', () => {
+  // The reader cannot say what the newer snapshot claims, and it may be the
+  // current one. Everything this reader can read is still shown, and nothing is
+  // written over a claim it cannot see.
+  const merged = merge.mergeSnapshots([
+    source('11', 'samuelkarp', true, snapshotJson(4, 'samuelkarp', 'evaluating')),
+    source('12', 'dmcgowan', true, '{"betterGhsa":"2.0","seq":5,"by":"dmcgowan"}'),
+  ]);
+  assert.strictEqual(merged.readOnly, true, 'the advisory took a write over an unread claim');
+  assert.strictEqual(merged.state?.['triage'], 'evaluating', 'the readable snapshot was dropped');
+  assert.strictEqual(merged.source?.id, '11');
+  assert.strictEqual(merged.observedSeq, 5, 'the unread claim did not order the advisory');
+  assert.deepStrictEqual(
+    merged.warnings.map((warning) => warning.kind),
+    ['unsupported schema']
+  );
 });
 
 test('a snapshot on a schema this reader cannot read is not judged by its fields', () => {
