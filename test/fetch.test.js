@@ -759,6 +759,36 @@ test('a list page read leaves the claim the next page load waits out', async () 
   assert.deepStrictEqual(second.at, [1000], 'a crawl page read did not bound the next queue');
 });
 
+test('every request carries the session and asks GitHub rather than the cache', async () => {
+  // A request without the page's own credentials goes out logged out, and
+  // GitHub answers it with a list and a page that hold no private advisory. A
+  // request served from the browser cache is the poll reading its own earlier
+  // answer back.
+  const clock = fakeClock(0);
+  const storage = fakeStorage();
+  /** @type {RequestInit[]} */
+  const inits = [];
+  const queue = queues.createQueue(
+    options(clock, storage, {
+      fetch: async (_url, init) => {
+        inits.push(init);
+        return { status: 200, text: async () => '<html></html>' };
+      },
+    })
+  );
+  await queue.add([ghsa('aaaa')]);
+  await queue.run();
+  await queue.page(LIST_URL);
+
+  assert.strictEqual(inits.length, 2, 'the advisory read and the list page read both went out');
+  for (const init of inits) {
+    assert.strictEqual(init.method, 'GET');
+    assert.strictEqual(init.credentials, 'same-origin');
+    assert.strictEqual(init.cache, 'no-store');
+    assert.ok(init.signal !== undefined, 'the request cannot be abandoned');
+  }
+});
+
 test('a list page GitHub refused comes back with the status and no body', async () => {
   const clock = fakeClock(0);
   const storage = fakeStorage();
