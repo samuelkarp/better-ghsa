@@ -319,6 +319,13 @@ test('pressing Remove takes the repository out of storage and off the page', asy
 
   const button = document.querySelector('#list button[data-entry="containerd/containerd"]');
   assert.ok(button !== null, 'the row carries no control that removes it');
+  // Every row's control reads Remove, so the name is what tells one from the
+  // next for a reader moving between them by control alone.
+  assert.strictEqual(
+    button.getAttribute('aria-label'),
+    'Remove containerd/containerd',
+    'the control does not name the repository it removes'
+  );
   button.dispatchEvent(new window.Event('click', { bubbles: true }));
   // The press reads and writes storage, so the page catches up a turn later.
   await new Promise((resolve) => setTimeout(resolve, 0));
