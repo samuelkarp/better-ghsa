@@ -648,6 +648,57 @@ test('parse-list cannot read the table the extension inserts', async () => {
   assert.ok(matched === 0, `nodes in the table the parser would read: ${matched}`);
 });
 
+test('the CVE a row carries is the one the advisory read names', async () => {
+  // The list row is where a maintainer sees that an advisory has a CVE, or has
+  // asked for one. The chip is built from the row's field, so a field the read
+  // does not fill leaves the table silent on every advisory that has one.
+  /** @type {Array<[string, Record<string, unknown>, string | null]>} */
+  const wanted = [
+    ['GHSA-aaaa-aaaa-aaaa', { cveId: 'CVE-2026-12345' }, 'CVE-2026-12345'],
+    [
+      'GHSA-bbbb-bbbb-bbbb',
+      {
+        cveId: null,
+        timeline: [
+          { id: null, actor: 'samuelkarp', at: '2026-08-20T00:00:00Z', text: 'samuelkarp requested a CVE' },
+        ],
+      },
+      'CVE requested',
+    ],
+    ['GHSA-cccc-cccc-cccc', { cveId: null, cveSelection: 'not_applicable' }, 'CVE not applicable'],
+    ['GHSA-dddd-dddd-dddd', { cveId: null, cveSelection: null }, null],
+  ];
+
+  const storage = fakeStorage();
+  cache.setStorage(storage);
+  try {
+    for (const [ghsaId, fields] of wanted) {
+      const held = /** @type {Record<string, unknown>} */ (TRIAGE_RECORD);
+      await cache.putAdvisory({ ...REF, ghsaId }, { ...held, ghsaId, ...fields }, {
+        storage,
+        at: OBSERVED,
+      });
+    }
+    /** @type {import('../src/common/parse-list.js').ParsedList} */
+    const parsed = {
+      ...REF,
+      rows: wanted.map(([ghsaId]) => listRow(String(ghsaId), '2026-08-01T00:00:00Z')),
+      tabs: [],
+      selectedState: 'triage',
+      next: null,
+      openCount: wanted.length,
+    };
+    const view = await table.readView(parsed, { at: AT });
+    for (const [ghsaId, , cve] of wanted) {
+      const row = view.rows.find((each) => each.ghsaId === ghsaId);
+      assert.ok(row?.read === true, `${ghsaId} was not read`);
+      assert.strictEqual(row?.cve, cve, `${ghsaId} carries another CVE`);
+    }
+  } finally {
+    cache.setStorage(null);
+  }
+});
+
 test('the default order puts the longest waiting first', async () => {
   /** @type {import('../src/common/parse-list.js').ParsedList} */
   const parsed = {
