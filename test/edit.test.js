@@ -1979,6 +1979,70 @@ test('a link opened somewhere else leaves the panel where it is', async () => {
 });
 
 /**
+ * A click carrying what the pointer held: a button other than the primary one,
+ * or a modifier key.
+ *
+ * @param {Document} doc
+ * @param {Record<string, unknown>} held
+ * @returns {Event}
+ */
+function pointer(doc, held) {
+  const event = cancelable(doc, 'click');
+  for (const [name, value] of Object.entries(held)) {
+    Object.defineProperty(event, name, { value, configurable: true });
+  }
+  return event;
+}
+
+test('a click the browser answers elsewhere leaves the panel where it is', async () => {
+  forget();
+  const { page } = pair('triage-thread.html');
+  const { editor } = await editorFor(page);
+  const link = page.createElement('a');
+  link.setAttribute('href', '/git-utensils/Spoon-Knife/security/advisories');
+  page.body?.append(link);
+  const file = page.createElement('a');
+  file.setAttribute('href', '/git-utensils/Spoon-Knife/archive/main.zip');
+  file.setAttribute('download', '');
+  page.body?.append(file);
+  let asked = 0;
+  const disarm = edit.armNavigationWarning(page, {
+    confirm: () => {
+      asked += 1;
+      return true;
+    },
+  });
+  try {
+    choose(control(editor, 'select.bghsa-triage'), 'evaluating');
+    // Each of these opens the link somewhere else, so the panel and the change
+    // in it are still in front of the maintainer.
+    const elsewhere = {
+      'the middle button': { button: 1 },
+      'command held': { metaKey: true },
+      'control held': { ctrlKey: true },
+      'shift held': { shiftKey: true },
+      'alt held': { altKey: true },
+    };
+    for (const [what, held] of Object.entries(elsewhere)) {
+      link.dispatchEvent(pointer(page, held));
+      assert.strictEqual(asked, 0, `${what} asked about leaving`);
+    }
+    // A download takes the file and leaves the page showing.
+    file.dispatchEvent(cancelable(page, 'click'));
+    assert.strictEqual(asked, 0, 'a download asked about leaving');
+
+    // The same link pressed with nothing held is the departure this warns on.
+    link.dispatchEvent(cancelable(page, 'click'));
+    assert.strictEqual(asked, 1, 'a plain press did not ask about leaving');
+  } finally {
+    disarm();
+    link.remove();
+    file.remove();
+    forget();
+  }
+});
+
+/**
  * The panel on an advisory page holding a change in a control that was never
  * saved, which is what a maintainer leaves behind by walking away from it.
  *
