@@ -495,23 +495,6 @@ function setAllowlist(sandbox, entries) {
 }
 
 /**
- * Waits for the page to reach GitHub. The work a page load starts runs on the
- * clock, not on a fixed number of turns: the queue holds its requests to one a
- * second, so how many turns pass before the first one goes out is not fixed.
- *
- * @param {Record<string, any>} sandbox
- * @param {number} [limitMs] How long to wait before giving up on one.
- * @returns {Promise<void>} settled once a request has gone out, or once the
- *   bound has passed with none.
- */
-async function asksGitHub(sandbox, limitMs = 20_000) {
-  const until = Date.now() + limitMs;
-  while (sandbox.asked.length === 0 && Date.now() < until) {
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-}
-
-/**
  * @param {number} [turns] How many turns of the event loop to give the page.
  * @returns {Promise<void>} settled once the work a pass started has run.
  */
@@ -522,13 +505,15 @@ async function settle(turns = 40) {
 }
 
 /**
- * A navigation redraw is debounced by `RENDER_DELAY_MS`, so a fixed number of
- * event-loop turns can finish before the new surface appears.
+ * Waits for a state the page reaches on the clock. A navigation redraw is
+ * debounced by `RENDER_DELAY_MS` and the request queue holds its requests to
+ * one a second, so how many event-loop turns pass before either lands is not
+ * fixed, and a count of turns can run out first.
  *
  * @param {() => boolean} reached Whether the expected state has appeared.
  * @param {number} [limitMs] Maximum time to wait.
  * @returns {Promise<void>} resolves when `reached` returns true or the limit
- *   elapses.
+ *   elapses. The assertion that follows names the state that never arrived.
  */
 async function waitFor(reached, limitMs = 2_000) {
   const until = Date.now() + limitMs;
@@ -706,7 +691,9 @@ test('a page on a listed repository asks GitHub for that repository', async () =
     frame: fixture('list-page-triage.html'),
   });
   assert.deepStrictEqual(loadScripts(sandbox), []);
-  await asksGitHub(sandbox);
+  // The queue holds its requests to one a second, so the first one out can be
+  // several seconds behind the load that asked for it.
+  await waitFor(() => sandbox.asked.length > 0, 20_000);
 
   assert.ok(
     sandbox.asked.length > 0,
