@@ -9,7 +9,9 @@ const { parseHTML, DOMParser } = require('linkedom');
 const parseList = require('../src/common/parse-list.js');
 const parseDetail = require('../src/common/parse-detail.js');
 const cache = require('../src/common/cache.js');
+const schema = require('../src/common/schema.js');
 const table = require('../src/list/table.js');
+const chips = require('../src/common/chips.js');
 const fetchQueue = require('../src/common/fetch.js');
 
 const allowlist = require('../src/common/allowlist.js');
@@ -304,6 +306,68 @@ test('a cached advisory read fills the triage row', async () => {
 
   const observed = textOf(row, '.bghsa-list-observed');
   assert.ok(observed === 'Observed 2026-08-26 10:00 UTC', `observed: ${observed}`);
+});
+
+/**
+ * The same record with a scoring confirmation added to the snapshot one comment
+ * holds. The snapshot is stored as the JSON text of the comment, so the
+ * confirmation goes in there, where a maintainer's own write would have put it.
+ *
+ * @param {unknown} record
+ * @param {string} commentId Which comment's snapshot gains it.
+ * @param {Record<string, string>} scoring
+ * @returns {unknown}
+ */
+function withScoringConfirmed(record, commentId, scoring) {
+  const copy = /** @type {import('../src/common/parse-detail.js').ParsedDetail} */ (
+    structuredClone(/** @type {object} */ (record))
+  );
+  const comment = copy.comments.find((entry) => entry.id === commentId);
+  if (comment === undefined || comment.stateComment === null) {
+    throw new Error(`no snapshot on comment ${commentId}`);
+  }
+  const snapshot = JSON.parse(comment.stateComment.raw);
+  snapshot.confirmed.scoring = scoring;
+  comment.stateComment.raw = JSON.stringify(snapshot, null, 2);
+  return copy;
+}
+
+test('a severity a maintainer confirmed reads confirmed on a cached row', async () => {
+  const stored = /** @type {import('../src/common/parse-detail.js').ParsedDetail} */ (
+    TRIAGE_RECORD
+  );
+  // A scoring confirmation binds to the severity selection and the vector
+  // together, and it is the trusted comment's snapshot that carries it: the
+  // Member's, id 282847.
+  const record = withScoringConfirmed(TRIAGE_RECORD, '282847', {
+    by: 'samuelkarp',
+    at: '2026-08-25T18:04:11Z',
+    fp: await schema.scoringFingerprint(stored.severityField, stored.cvssV3),
+  });
+
+  const doc = listPage('list-page-triage.html');
+  await render(doc, { [keyFor('GHSA-jmvx-2wfw-xfgj')]: entryOf(record, 'triage') });
+
+  // The row is built from the stored copy of the advisory, so the confirmation
+  // is read against the two values that copy carries.
+  //
+  // The confirmation rides on the severity chip and on no other, so it is that
+  // chip this reads: the one the row marks as the severity's. It carries the
+  // level alone, painted in the advisory's own severity color, and the chips
+  // beside it are left to the cached read above.
+  const row = /** @type {Element} */ (tableRows(doc)[0]);
+  const severity = Array.from(
+    one(row, '.bghsa-list-chips').querySelectorAll(
+      `span.Label[${chips.SUBJECT_ATTRIBUTE}="${chips.SEVERITY_SUBJECT}"]`
+    )
+  ).map(
+    (label) => `${(label.textContent ?? '').replace(/\s+/g, ' ').trim()}[${chipColor(label)}]`
+  );
+  assert.ok(
+    severity.length === 1 && severity[0] === 'High[Label--orange bghsa-fill]',
+    `the severity chip with the scoring confirmed: ${severity.join(' | ')}` +
+      ` (every chip on the row: ${chipLine(row)})`
+  );
 });
 
 test('the cells beside a row are the owners, the state, and the observation', async () => {

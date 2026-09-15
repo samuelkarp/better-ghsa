@@ -21,11 +21,12 @@ if (typeof require === 'function') {
  * A chip as a surface draws it: what a producer here says, and what the surface
  * knows on top of it.
  *
- * @typedef {Chip & { severityClass?: string | null, dim?: boolean, fill?: boolean }} ChipSpec
+ * @typedef {Chip & { severityClass?: string | null, dim?: boolean, fill?: boolean,
+ *   subject?: string }} ChipSpec
  *   `severityClass` is the `Label--` modifiers GitHub painted the advisory's
  *   own severity chip with, which stands in for the neutral one, `dim` holds a
- *   chip back from its full color while keeping its hue, and `fill` paints that
- *   color as the chip's own fill.
+ *   chip back from its full color while keeping its hue, `fill` paints that
+ *   color as the chip's own fill, and `subject` names what the chip is about.
  */
 
 (() => {
@@ -167,6 +168,20 @@ if (typeof require === 'function') {
       ' border-color: var(--bgColor-success-emphasis, #1f883d); }',
   ];
 
+  /**
+   * The attribute naming what a chip is about, carried by a chip whose spec
+   * says. It is what points at one chip among the several a surface draws,
+   * where the words and the color are the reader's business and not a handle.
+   *
+   * `parseDetail.EXTENSION_CHIP_ATTRIBUTE` is a different mark for a different
+   * job: it tells a re-read of the advisory page that a chip beside a comment
+   * header is the extension's own and not a role badge.
+   */
+  const SUBJECT_ATTRIBUTE = 'data-bghsa-chip';
+
+  /** What the advisory's severity chip names itself. */
+  const SEVERITY_SUBJECT = 'severity';
+
   /** What holds a chip back from its full color while keeping its hue. */
   const DIM_CLASS = 'bghsa-dim';
 
@@ -197,6 +212,10 @@ if (typeof require === 'function') {
    * fill, then the dimming. A surface that builds one by hand is a surface that
    * can disagree with the others about what a chip is.
    *
+   * A spec naming a subject also carries {@link SUBJECT_ATTRIBUTE}. A chip
+   * naming none carries nothing extra, so what a chip reads and how it is
+   * painted are untouched either way.
+   *
    * @param {Document} doc
    * @param {ChipSpec} spec
    * @returns {Element}
@@ -208,6 +227,7 @@ if (typeof require === 'function') {
     if (spec.dim === true) classes.push(DIM_CLASS);
     const node = doc.createElement('span');
     node.className = classes.join(' ');
+    if (spec.subject !== undefined) node.setAttribute(SUBJECT_ATTRIBUTE, spec.subject);
     if (spec.fill !== true) {
       node.textContent = spec.text;
       return node;
@@ -221,6 +241,8 @@ if (typeof require === 'function') {
   const exported = {
     sentenceCase,
     TONE_RULES,
+    SUBJECT_ATTRIBUTE,
+    SEVERITY_SUBJECT,
     DIM_CLASS,
     FILL_CLASS,
     FILL_RULES,

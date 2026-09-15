@@ -724,6 +724,7 @@ if (typeof require === 'function') {
         text: globalThis.bghsa.chips.sentenceCase(row.severityLabel),
         severityClass: row.severityClass,
         fill: ending === PUBLISHED,
+        subject: globalThis.bghsa.chips.SEVERITY_SUBJECT,
       });
     }
 

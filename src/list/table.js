@@ -574,6 +574,7 @@ if (typeof require === 'function') {
         severityClass: row.severityClass,
         dim: !row.severityConfirmed,
         fill: row.severityConfirmed,
+        subject: globalThis.bghsa.chips.SEVERITY_SUBJECT,
       });
     }
 
