@@ -2338,3 +2338,61 @@ test('a save that landed leaves the list building the row from what it wrote', a
     forget();
   }
 });
+
+test('a refused edit exposes copyable structural diagnostics without page data', async () => {
+  forget();
+  const page = fixture('triage-thread.html');
+  const remote = fixture('triage-thread.html');
+  for (const field of remote.querySelectorAll('[name="repository_advisory_comment[bodyVersion]"]')) {
+    field.remove();
+  }
+  for (const field of remote.querySelectorAll('[name="authenticity_token"]')) {
+    field.setAttribute('value', 'SYNTHETIC-SECRET-TOKEN');
+  }
+  const talk = session(remote);
+  const contextOptions = { fetch: talk.fetch, parseDocument: talk.parseDocument };
+  const first = await editorFor(page, contextOptions);
+  choose(control(first.editor, 'select.bghsa-triage'), 'evaluating');
+  const outcome = await edit.save(first.context);
+  assert.strictEqual(outcome.reason, 'no-token');
+  assert.strictEqual(talk.posts().length, 0);
+  const next = await editorFor(page, contextOptions);
+  assert.strictEqual(text(control(next.editor, '.bghsa-save-result')), 'Error: unexpected edit form fields');
+  const details = control(next.editor, 'details.bghsa-diagnostic');
+  assert.strictEqual(details.hasAttribute('open'), false);
+  assert.strictEqual(text(control(details, 'summary')), 'Diagnostic details');
+  const report = control(details, 'pre').textContent;
+  assert.strictEqual(report, [
+    'Extension: unknown',
+    'Operation: edit tracking comment',
+    'Diagnostic: edit-form-missing-fields',
+    'Missing: repository_advisory_comment[bodyVersion]',
+    'Comment POST sent: no',
+  ].join('\n'));
+  assert.ok(!report?.includes('SYNTHETIC-SECRET-TOKEN'));
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  /** @type {string[]} */
+  const copied = [];
+  let reject = false;
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: { clipboard: { writeText: async (/** @type {string} */ value) => {
+      if (reject) throw new Error('clipboard unavailable');
+      copied.push(value);
+    } } },
+  });
+  try {
+    press(next.editor, '.bghsa-copy-diagnostic');
+    await until(() => text(control(details, '.bghsa-copy-status')) === 'Copied.');
+    assert.deepStrictEqual(copied, [report]);
+    reject = true;
+    press(next.editor, '.bghsa-copy-diagnostic');
+    await until(() => text(control(details, '.bghsa-copy-status')).startsWith('Unable to copy.'));
+    assert.strictEqual(control(details, 'pre').textContent, report);
+    assert.strictEqual(control(details, 'button').hasAttribute('disabled'), false);
+  } finally {
+    if (previous !== undefined) Object.defineProperty(globalThis, 'navigator', previous);
+    else Reflect.deleteProperty(globalThis, 'navigator');
+    forget();
+  }
+});

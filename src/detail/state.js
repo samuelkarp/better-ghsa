@@ -25,6 +25,7 @@ if (typeof require === 'function') {
 
 /**
  * @typedef {object} StateWriteResult
+ * @property {import('../common/write.js').WriteDiagnostic} [diagnostic]
  * @property {boolean} ok
  * @property {string | null} reason One of `allowlist`, `in-flight`, `fetch`,
  *   `mismatch`, `unreadable`, `stale`, `superseded`, `read-only`,
@@ -547,7 +548,10 @@ if (typeof require === 'function') {
 
     const { merged, snapshot, landed, fresh } = read;
     if (!outcome.ok || run === null || landed === null || snapshot === null || merged === null) {
-      return refused(outcome.reason, outcome.status, outcome.message, merged, fresh);
+      return {
+        ...refused(outcome.reason, outcome.status, outcome.message, merged, fresh),
+        ...(outcome.diagnostic === undefined ? {} : { diagnostic: outcome.diagnostic }),
+      };
     }
     return settled(outcome, snapshot, merged, { advisory: landed(), readAt: run.readAt });
   }

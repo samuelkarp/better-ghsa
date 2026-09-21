@@ -132,6 +132,14 @@ While a save is in flight every control is disabled and the panel reads
 - "Error: failed to save", "Error: failed to validate save", and the rest of the
   failure messages. Nothing the extension could confirm was written.
 
+When an existing tracking comment's edit form is missing a required field,
+"Error: unexpected edit form fields" includes a collapsed "Diagnostic details"
+section. "Copy diagnostic" copies the extension version, operation, diagnostic
+code, missing field names, and whether a comment POST was sent. It contains no
+form values or advisory content. If copying fails, the details remain visible
+for manual copying. These details are kept in the page, not sent anywhere by the
+extension.
+
 ## Untrusted and unreadable state
 
 A snapshot counts toward the advisory's state only when GitHub badges its author

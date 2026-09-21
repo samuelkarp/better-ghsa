@@ -6,6 +6,7 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
 if (typeof require === 'function') {
   require('../common/dom.js');
   require('../common/text.js');
+  require('../common/storage.js');
   require('../common/schema.js');
   require('../common/write.js');
   require('../common/merge.js');
@@ -141,7 +142,7 @@ if (typeof require === 'function') {
   /**
    * What the last save on an advisory did, in the words the panel shows.
    *
-   * @type {Map<string, { ok: boolean, message: string }>}
+   * @type {Map<string, { ok: boolean, message: string, diagnostic?: import('../common/write.js').WriteDiagnostic }>}
    */
   const results = new Map();
 
@@ -1065,13 +1066,58 @@ if (typeof require === 'function') {
     // REQUIREMENTS.md section 3 has the panel reloading with the state that
     // fetch found, which no surface reading the cache would otherwise see.
     await hold(outcome);
-    results.set(key, { ok: outcome.ok, message: outcome.ok ? SAVED_MESSAGE : outcome.message });
+    results.set(key, {
+      ok: outcome.ok,
+      message: outcome.ok ? SAVED_MESSAGE : outcome.message,
+      ...(outcome.diagnostic === undefined ? {} : { diagnostic: outcome.diagnostic }),
+    });
     await repaint(context);
     return outcome;
   }
 
   /** How every surface builds an element. */
   const element = globalThis.bghsa.dom.element;
+
+  /**
+   * Builds a local, copyable explanation from the writer's structural facts.
+   * The visible text remains available for manual copying if clipboard access fails.
+   * @param {Document} doc
+   * @param {import('../common/write.js').WriteDiagnostic} diagnostic
+   * @returns {Element}
+   */
+  function diagnosticDetails(doc, diagnostic) {
+    const details = element(doc, 'details', 'mt-2 bghsa-diagnostic');
+    details.append(element(doc, 'summary', '', 'Diagnostic details'));
+    const version = globalThis.bghsa.storage.api()?.runtime?.getManifest?.().version ?? 'unknown';
+    const report = [
+      `Extension: ${version}`,
+      'Operation: edit tracking comment',
+      `Diagnostic: ${diagnostic.code}`,
+      `Missing: ${diagnostic.missingFields.join(', ')}`,
+      'Comment POST sent: no',
+    ].join('\n');
+    const text = element(doc, 'pre', 'mt-2', report);
+    text.setAttribute('style', 'white-space: pre-wrap; overflow-wrap: anywhere');
+    const copy = element(doc, 'button', 'btn btn-sm bghsa-copy-diagnostic', 'Copy diagnostic');
+    copy.setAttribute('type', 'button');
+    const status = element(doc, 'span', 'ml-2 bghsa-copy-status');
+    status.setAttribute('role', 'status');
+    copy.addEventListener('click', () => {
+      copy.setAttribute('disabled', '');
+      void (async () => {
+        try {
+          await globalThis.navigator.clipboard.writeText(report);
+          status.textContent = 'Copied.';
+        } catch {
+          status.textContent = 'Unable to copy. Select and copy the details above.';
+        } finally {
+          copy.removeAttribute('disabled');
+        }
+      })();
+    });
+    details.append(text, copy, status);
+    return details;
+  }
 
   /**
    * @param {Element} field
@@ -1736,6 +1782,10 @@ if (typeof require === 'function') {
           shown.message
         )
       );
+    }
+
+    if (shown?.diagnostic !== undefined) {
+      controls.append(diagnosticDetails(doc, shown.diagnostic));
     }
 
     box.append(disclosure);

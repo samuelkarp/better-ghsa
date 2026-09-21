@@ -540,6 +540,10 @@ test('an edit form carrying no concurrency token is not sent', async () => {
   const outcome = await write.editComment(editOptions({ doc: stripped, fetch: fake.send }));
   assert.strictEqual(outcome.ok, false);
   assert.strictEqual(outcome.reason, 'no-token');
+  assert.deepStrictEqual(outcome.diagnostic, {
+    code: 'edit-form-missing-fields',
+    missingFields: ['repository_advisory_comment[bodyVersion]'],
+  });
   assert.strictEqual(fake.calls.length, 0, 'a request went out');
   assert.strictEqual(outcome.message, 'Error: unexpected edit form fields');
   const whole = editPage(action, EDIT_TOKENS);

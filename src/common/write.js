@@ -23,6 +23,13 @@ if (typeof require === 'function') {
  */
 
 /**
+ * Structural facts only: never form values, page content, or identifiers.
+ * @typedef {object} WriteDiagnostic
+ * @property {'edit-form-missing-fields'} code
+ * @property {string[]} missingFields Names from REQUIRED_EDIT_FIELDS only.
+ */
+
+/**
  * @typedef {object} WriteResult
  * @property {boolean} ok
  * @property {string | null} reason One of `allowlist`, `fetch`,
@@ -30,6 +37,7 @@ if (typeof require === 'function') {
  *   `unreachable`, and null on success.
  * @property {number | null} status The response status, when there was one.
  * @property {string} message What happened, in the words the panel shows.
+ * @property {WriteDiagnostic} [diagnostic]
  */
 
 /**
@@ -773,7 +781,10 @@ if (typeof require === 'function') {
     const missing = REQUIRED_EDIT_FIELDS.filter((field) => !params.has(field));
     if (missing.length > 0) {
       log(`the edit form for comment ${commentId} carries no ${missing.join(' and no ')}`);
-      return result(false, 'no-token', null, EDIT_FIELDS_MESSAGE);
+      return {
+        ...result(false, 'no-token', null, EDIT_FIELDS_MESSAGE),
+        diagnostic: { code: 'edit-form-missing-fields', missingFields: missing },
+      };
     }
     params.set(EDIT_BODY_FIELD, body);
 
