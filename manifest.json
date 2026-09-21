@@ -57,6 +57,7 @@
         "src/done/csv.js",
         "src/done/view.js",
         "src/stats/statistics.js",
+        "src/common/pr-layout.js",
         "src/content.js"
       ],
       "run_at": "document_idle"

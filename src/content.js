@@ -6,6 +6,7 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
 if (typeof require === 'function') {
   require('./common/allowlist.js');
   require('./common/settings-control.js');
+  require('./common/pr-layout.js');
 }
 
 /**
@@ -191,6 +192,7 @@ if (typeof require === 'function') {
    * @returns {boolean} whether this call started or stopped the surfaces.
    */
   function reconsider(doc = globalThis.document, everywhere = false) {
+    globalThis.bghsa.prLayout.apply(doc, globalThis.location?.pathname ?? '');
     const control = globalThis.bghsa.settingsControl;
     if (locate(globalThis.location?.pathname ?? '') === null) {
       control?.hide(doc);

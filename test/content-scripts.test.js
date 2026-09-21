@@ -1192,3 +1192,36 @@ test('a page whose list has not arrived yet is left alone', async () => {
   assert.strictEqual(sandbox.counts.made, 0, 'an observer was made');
   assert.strictEqual(sandbox.counts.connected, 0, 'an observer was connected');
 });
+
+test('private-fork diff width follows navigation and the parent allowlist', async () => {
+  const fork = `${REPO}-ghsa-jmvx-2wfw-xfgj/pull/1`;
+  const sandbox = contentScriptScope({ pathname: `${fork}/changes`, allowlist: [] });
+  assert.deepStrictEqual(loadScripts(sandbox), []);
+  await settle();
+  const styleId = sandbox.bghsa.prLayout.STYLE_ID;
+  const hasStyle = () => sandbox.document.getElementById(styleId) !== null;
+  assert.strictEqual(hasStyle(), false);
+
+  setAllowlist(sandbox, [ALLOWED]);
+  await settle();
+  assert.strictEqual(hasStyle(), true, 'listing the parent did not widen the diff');
+  assert.deepStrictEqual(names(sandbox), [styleId]);
+  assert.strictEqual(sandbox.counts.writes, 0);
+  assert.strictEqual(sandbox.counts.made, 0);
+
+  navigate(sandbox, { pathname: fork });
+  await settle();
+  assert.strictEqual(hasStyle(), false, 'the override remained on the conversation');
+  navigate(sandbox, { pathname: `${fork}/files` });
+  await settle();
+  assert.strictEqual(hasStyle(), true);
+  navigate(sandbox, { pathname: `${REPO}/pull/1/changes` });
+  await settle();
+  assert.strictEqual(hasStyle(), false, 'an ordinary PR received the override');
+  navigate(sandbox, { pathname: `${fork}/changes` });
+  await settle();
+  assert.strictEqual(hasStyle(), true);
+  setAllowlist(sandbox, []);
+  await settle();
+  assert.strictEqual(hasStyle(), false, 'removing the parent left the override active');
+});

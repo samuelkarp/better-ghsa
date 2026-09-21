@@ -62,6 +62,14 @@ extension existed. A statistics view sits beside it with counts and response
 timings over the whole corpus and a CSV export. See
 [docs/completed.md](docs/completed.md).
 
+## Private-fork pull request diffs
+
+On a GHSA private fork's Files changed page, the extension removes the outer
+width limit and extra padding so the diff fills the page like a public PR.
+This applies when the parent repository is listed in settings. The parent is
+identified from the fork's `owner/repo-ghsa-xxxx-xxxx-xxxx` name. Removing the
+parent from settings restores GitHub's layout.
+
 ## Installing it
 
 ### From a store

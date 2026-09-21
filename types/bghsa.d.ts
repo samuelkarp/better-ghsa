@@ -39,6 +39,7 @@ interface BghsaNamespace {
   csv: typeof import('../src/done/csv.js');
   view: typeof import('../src/done/view.js');
   statistics: typeof import('../src/stats/statistics.js');
+  prLayout: typeof import('../src/common/pr-layout.js');
   content: typeof import('../src/content.js');
 }
 

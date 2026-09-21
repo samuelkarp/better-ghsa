@@ -524,6 +524,12 @@ not the repository is listed. On a repository that is not listed that control
 is the only thing the extension does: it reads no advisory, fetches nothing,
 and stores nothing.
 
+On a GHSA private fork's pull request diff page (`/pull/{number}/changes` or
+`/pull/{number}/files`), the extension removes the outer width limit and extra
+horizontal padding. The diff viewer retains its own padding. This layout change
+uses the parent repository's allowlist entry, inferred from the fork's
+`owner/repo-ghsa-xxxx-xxxx-xxxx` name, and follows navigation and allowlist edits.
+
 The extension has no background script. Every surface is a content script, and
 nothing runs outside a page.
 
