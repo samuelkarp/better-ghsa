@@ -370,6 +370,67 @@ test('a severity a maintainer confirmed reads confirmed on a cached row', async 
   );
 });
 
+test('a score whose vector moved since it was confirmed reads unconfirmed on a cached row', async () => {
+  const stored = /** @type {import('../src/common/parse-detail.js').ParsedDetail} */ (
+    TRIAGE_RECORD
+  );
+
+  /**
+   * What the cached row's severity chip reads and how it is painted, for the
+   * Member's confirmation taken against one vector. The chip is found by the
+   * mark the row puts on it and by nothing else.
+   *
+   * @param {string | null} vector What the confirmation was taken against.
+   * @returns {Promise<string>}
+   */
+  const severityChipFor = async (vector) => {
+    const record = withScoringConfirmed(TRIAGE_RECORD, '282847', {
+      by: 'samuelkarp',
+      at: '2026-08-25T18:04:11Z',
+      fp: await schema.scoringFingerprint(stored.severityField, vector),
+    });
+    const doc = listPage('list-page-triage.html');
+    await render(doc, { [keyFor('GHSA-jmvx-2wfw-xfgj')]: entryOf(record, 'triage') });
+    const row = /** @type {Element} */ (tableRows(doc)[0]);
+    const found = Array.from(
+      one(row, '.bghsa-list-chips').querySelectorAll(
+        `span.Label[${chips.SUBJECT_ATTRIBUTE}="${chips.SEVERITY_SUBJECT}"]`
+      )
+    ).map(
+      (label) => `${(label.textContent ?? '').replace(/\s+/g, ' ').trim()}[${chipColor(label)}]`
+    );
+    if (found.length !== 1) {
+      throw new Error(
+        `the row drew ${found.length} severity chips: ${found.join(' | ')}` +
+          ` (every chip on the row: ${chipLine(row)})`
+      );
+    }
+    return /** @type {string} */ (found[0]);
+  };
+
+  // The advisory the fixture holds scores its impact on confidentiality. Taken
+  // against that vector the confirmation binds to the score the stored read
+  // carries; taken against a vector that scores the impact on integrity it
+  // binds to one the stored read no longer carries. The severity selection is
+  // the same in both, so the vector is the whole of the difference.
+  const bound = await severityChipFor(stored.cvssV3);
+  const moved = await severityChipFor('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:N');
+
+  // A score that moved after it was confirmed leaves the severity chip where a
+  // score nobody has confirmed leaves it: the level named as unconfirmed, and
+  // dimmed. Naming who confirmed the earlier score is the detail panel's job.
+  //
+  // The chip the confirmation still binds to is read beside it, because the
+  // row draws the same unconfirmed chip for a confirmation that never reached
+  // it at all. Where the two agree, the moved vector is not what this is
+  // reading.
+  assert.ok(
+    moved === 'High, unconfirmed[Label--orange bghsa-dim]' && bound !== moved,
+    `the severity chip bound to the stored score: ${bound};` +
+      ` bound to a score that moved: ${moved}`
+  );
+});
+
 test('the cells beside a row are the owners, the state, and the observation', async () => {
   const doc = listPage('list-page-triage.html');
   await render(doc, { [keyFor('GHSA-jmvx-2wfw-xfgj')]: entryOf(TRIAGE_RECORD, 'triage') });
