@@ -10,10 +10,6 @@ const write = require('../src/common/write.js');
 
 const allowlist = require('../src/common/allowlist.js');
 
-// The list of repositories the extension acts on is stored rather than compiled
-// in, and is empty on a fresh install. The fixtures here are that repository's,
-// so the list is put in place and read before the first test, which is what the
-// extension itself does before it takes a page.
 test.before(async () => {
   allowlist.setStorage({
     get: async () => ({ [allowlist.STORAGE_KEY]: ['git-utensils/spoon-knife'] }),
@@ -39,10 +35,8 @@ function document(markup) {
   return /** @type {Document} */ (/** @type {unknown} */ (parseHTML(markup).document));
 }
 
-/** The advisory the fixtures come from, which is on the allowlist. */
 const REF = { owner: 'git-utensils', repo: 'Spoon-Knife', ghsaId: 'GHSA-jmvx-2wfw-xfgj' };
 
-/** The one parse of each large fixture in this file. */
 const triageDoc = fixture('triage-thread.html');
 const editDoc = fixture('edit-form.html');
 
@@ -66,9 +60,6 @@ function names(params) {
 }
 
 /**
- * A stand-in for `fetch` that answers with what the test hands it and records
- * the one call it was given.
- *
  * @param {number} status
  * @param {string} body
  * @returns {{ send: import('../src/common/write.js').WriteFetch, calls: Array<{ url: string, init: RequestInit }> }}
@@ -85,12 +76,10 @@ function fakeFetch(status, body) {
   };
 }
 
-/** A response document holding the comment that was written. */
 const WROTE = '<!doctype html><html><body><div class="comment-body">' +
   '<details><summary>Original report preserved by Better GHSA</summary>' +
   '<p>Path traversal in drawer handler</p></details></div></body></html>';
 
-/** A response document holding no such comment. */
 const WROTE_NOTHING = '<!doctype html><html><body><div>Something went wrong.</div></body></html>';
 
 /**
@@ -221,7 +210,7 @@ test('a form action names the advisory the reference names', () => {
     '/someone/else/security/advisories/GHSA-jmvx-2wfw-xfgj/comments',
     '/git-utensils/Spoon-Knife/security/advisories/GHSA-0000-0000-0000/comments',
     'https://example.invalid/git-utensils/Spoon-Knife/security/advisories/GHSA-jmvx-2wfw-xfgj/comments',
-    // Credentials in the action, which `origin` does not carry.
+    // URL.origin omits embedded credentials.
     'https://user:pass@github.com/git-utensils/Spoon-Knife/security/advisories/GHSA-jmvx-2wfw-xfgj/comments',
     'https://evil@github.com/git-utensils/Spoon-Knife/security/advisories/GHSA-jmvx-2wfw-xfgj/comments',
     'comments',
@@ -377,10 +366,8 @@ test('a write this extension could not confirm is not sent', async () => {
   assert.strictEqual(fake.calls.length, 0);
 });
 
-/** The id of the comment the captured edit form belongs to. */
 const EDIT_ID = '282847';
 
-/** The edit form as GitHub rendered it, by field name. */
 const EDIT_FIELDS = [
   '_method',
   'authenticity_token',
@@ -394,7 +381,6 @@ const EDIT_FIELDS = [
   'comment_id',
 ];
 
-/** A response document holding the edited comment. */
 const EDITED =
   '<!doctype html><html><body><div class="comment-body">' +
   '<details><summary>Better GHSA tracking state</summary>' +
@@ -428,7 +414,6 @@ function editPage(action, fields) {
   );
 }
 
-/** The fields an edit form has to carry, as markup. */
 const EDIT_TOKENS =
   '<input type="hidden" name="authenticity_token" value="t">' +
   '<input type="hidden" name="repository_advisory_comment[bodyVersion]" value="v">' +
@@ -601,9 +586,6 @@ test('a page the write could not read produces a failure and no page', async () 
 });
 
 /**
- * An advisory detail page carrying what a write reads from one: the reference,
- * the comment thread, and the form the request clones.
- *
  * @param {object} [options]
  * @param {string} [options.owner]
  * @param {string} [options.repo]
@@ -643,13 +625,12 @@ function advisoryHtml(options) {
 }
 
 /**
- * A stand-in for `fetch` answering the advisory page with `page` and the write
- * with a comment carrying `expected`.
+ * Return `page` for advisory reads and a comment containing `expected` for writes.
  *
  * @param {object} [options]
  * @param {string} [options.page]
  * @param {string} [options.expected]
- * @param {number} [options.status] The status the write is answered with.
+ * @param {number} [options.status] The write response status.
  * @returns {{ send: import('../src/common/write.js').WriteFetch, calls: Array<{ url: string, init: RequestInit }> }}
  */
 function exchange(options) {
@@ -720,18 +701,12 @@ test('a page that is another advisory stops the write before the body', async ()
 });
 
 test('the read time is taken before the page is asked for', async () => {
-  // REQUIREMENTS.md section 2: content read before a write must never be
-  // stored under a timestamp taken after it. The stamp is what the surfaces
-  // store the fetched page under, so a stamp taken after the request would
-  // date a page to a moment later than it was read, and a change GitHub took
-  // in between would read as already seen.
+  // Timestamp the advisory when the fetch starts (REQUIREMENTS.md section 2).
+  // A later timestamp could mark unseen changes as observed.
   const fake = exchange({ expected: 'the marker' });
   let clock = 1000;
   const { outcome, run } = await write.runWrite({
     ref: REF,
-    // Time passes while the page is on the wire, which is the whole of what
-    // this is about: the two moments are only ever equal on a clock that
-    // does not move.
     fetch: async (url, init) => {
       if ((init.method ?? 'GET') === 'GET') clock += 60_000;
       return fake.send(url, init);
@@ -843,11 +818,7 @@ test('a refusal from the body builder is the write result', async () => {
 });
 
 test('the hold is released on every path that sends nothing', async () => {
-  // A hold that outlives the write it was taken for makes that advisory
-  // unwritable for the life of the page, and the maintainer's only recovery is
-  // a reload they have no reason to try. The write settles in four ways
-  // without a request going out, and each of them has to hand the hold back
-  // saying nothing was sent.
+  // Every exit must release the write hold to allow another attempt.
   /**
    * @param {object} settings
    * @param {import('../src/common/write.js').WriteFetch} settings.fetch
@@ -911,8 +882,6 @@ test('the hold is released on every path that sends nothing', async () => {
   assert.deepStrictEqual(refused.events, [`take ${key}`, `release ${key} sent=false`]);
   assert.strictEqual(refused.outcome?.reason, 'stale');
 
-  // A body builder that throws is a defect in this extension, and it still
-  // leaves the advisory writable.
   const threw = await held({
     fetch: exchange().send,
     prepare: () => {

@@ -18,10 +18,8 @@ if (typeof require === 'function') {
  */
 
 /**
- * How far a press on one advisory has got. `pending` is set before anything is
- * awaited and holds the advisory for the flight; `sent` is a request that went
- * out without a confirmed answer; `written` is a comment this extension
- * confirmed.
+ * `pending` reserves an advisory before the first await. `sent` records a
+ * request with an unconfirmed outcome. `written` records confirmed preservation.
  *
  * @typedef {'pending' | 'sent' | 'written'} AttemptState
  */
@@ -29,16 +27,12 @@ if (typeof require === 'function') {
 /**
  * @typedef {object} Availability
  * @property {boolean} available Whether the button is offered.
- * @property {boolean} writable Whether pressing it would write.
- * @property {string | null} reason One of `preserved`, `attempted`,
- *   `in-flight`, `allowlist`, `provenance`, `unreadable`, and null when the
- *   write is open. `in-flight` is the reason the state write reports for the
- *   same event, so a press and a save landing on a write already going out read
- *   the same to anything that branches on it.
- * @property {string} message What the panel says about it.
- * @property {string | null} href Where the comment holding the original report
- *   is, as a fragment naming it on this page, and null where this document
- *   carries no such comment.
+ * @property {boolean} writable Whether preservation is permitted.
+ * @property {string | null} reason The refusal reason, or null when writable. Preservation
+ *   and state writes share the `in-flight` reason.
+ * @property {string} message The displayed status or refusal message.
+ * @property {string | null} href The preservation comment's fragment URL, or null if absent
+ *   from the document.
  */
 
 /**
@@ -49,40 +43,27 @@ if (typeof require === 'function') {
 
 (() => {
   /**
-   * The summary line of the preservation comment's `details` block. It is prose
-   * for the reader: nothing this extension does keys on it, so it can be
-   * rewritten without breaking recognition or write verification.
+   * Recognition and write verification use the marker, independently of this
+   * summary text.
    */
   const PRESERVE_SUMMARY = `Original report preserved by ${globalThis.bghsa.schema.PROJECT_LINK}`;
 
-  /** The label the advisory's title is written under. */
   const TITLE_LABEL = 'Title:';
 
-  /** The label the advisory's description is written under. */
   const DESCRIPTION_LABEL = 'Description:';
 
   /**
-   * What says a comment is a preservation comment. The body carries it once, in
-   * a code span under the summary: GitHub's sanitizer strips HTML comments but
-   * keeps `code`, so the token is in the rendered document both checks read, and
-   * it owes nothing to any sentence. The trailing `1` is the body format, so a
-   * later format can be told from this one.
-   *
-   * A reporter can copy this token into their own description, which hides the
-   * button on their own advisory. That denies the feature on that advisory and
-   * writes nothing, so recognition fails safe. Write verification does not rest
-   * on it; see `newMarker`.
+   * GitHub preserves code spans when sanitizing comments. The marker uses one
+   * to identify preservation comments in the rendered page. `1` is the format
+   * version. Verification also requires the random suffix from `newMarker`.
    */
   const MARKER_PREFIX = 'better-ghsa:preserved:1:';
 
-  /** How many random bytes a marker's per-write value carries. */
   const MARKER_BYTES = 8;
 
   /**
-   * The marker for one press: the fixed prefix and a value drawn immediately
-   * before the body is built. The response counts as the write only where it
-   * renders this value, which no description written earlier can hold, so text
-   * the reporter controls cannot confirm a write that did not happen.
+   * Generate a random marker per write. Verification requires this marker in
+   * the response to distinguish the new comment from existing page content.
    *
    * @returns {string}
    */
@@ -93,41 +74,26 @@ if (typeof require === 'function') {
     return `${MARKER_PREFIX}${value}`;
   }
 
-  /**
-   * What the panel says while a press is on its way to GitHub. The button that
-   * started it is disabled until it settles, so this is the state of a disabled
-   * control and not a refusal a press can reach.
-   */
   const PENDING_MESSAGE = globalThis.bghsa.write.SAVING_MESSAGE;
 
   /**
-   * What the panel says once a press has gone out unconfirmed. No second press
-   * goes out: a duplicate preservation comment is visible to the reporter, and
-   * only a fresh read of the page says whether the first one landed.
+   * An unconfirmed request may have created the comment. Require a page reload
+   * before another attempt to prevent duplicate preservation comments.
    */
   const ATTEMPTED_MESSAGE = 'Reload page';
 
-  /**
-   * What the panel's Original report row reads once the comment is on the
-   * advisory. It is a link where the page carries the comment's anchor and plain
-   * text where it does not, and it reads the same either way.
-   */
   const PRESERVED_MESSAGE = 'Preserved';
 
-
   /**
-   * How far a press has got on each advisory, by `owner/repo/GHSA-id`. GitHub
-   * does not put the new comment on the page, so the document alone does not say
-   * that a press already happened, and a panel rebuilt after GitHub replaced the
-   * region it sits in would offer the button a second time.
+   * Record attempts by `owner/repo/GHSA-id` across panel rebuilds. The live
+   * document may omit a comment created by this page's request.
    *
    * @type {Map<string, AttemptState>}
    */
   const attempts = new Map();
 
   /**
-   * The comment holding the original report. The marker is what says so; the
-   * body is not parsed and no sentence in it is read.
+   * Identify preservation comments by their marker.
    *
    * @param {readonly ParsedComment[]} comments
    * @returns {ParsedComment | null}
@@ -137,8 +103,6 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Whether the advisory already carries a preservation comment.
-   *
    * @param {readonly ParsedComment[]} comments
    * @returns {boolean}
    */
@@ -147,17 +111,9 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Reporter text with every `</details>` that closes nothing taken out. Such a
-   * tag would close the block this comment wraps the report in and spill the
-   * rest of the report into the thread. A `</details>` that closes a `<details>`
-   * the reporter opened stays, and the pair renders as a block nested inside the
-   * enclosing one.
-   *
-   * The tags are counted where they stand in the text, with no reading of how
-   * GitHub would render them. A `</details>` shown inside a code sample counts
-   * like any other: it can be dropped out of the sample, and it can take the
-   * count of an opener, leaving a tag that does close the wrapper in place. That
-   * is the accepted cost of not modelling GitHub's renderer.
+   * Remove unmatched closing details tags to protect the enclosing block.
+   * Nested pairs are preserved. This counts literal tags, including code samples;
+   * a tag in a sample can consume an opener and leave the wrapper unprotected.
    *
    * @param {string} text
    * @returns {string}
@@ -176,23 +132,13 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The comment the button writes: one collapsed block holding the marker and
-   * then the advisory's title and description under their labels.
-   *
-   * The marker comes first, immediately under the summary, so that no reporter
-   * text can render above it or swallow it.
-   *
-   * The block's own tags each stand on a line with a blank line between them and
-   * what they wrap, which is the shape the summary's link is known to render in.
-   *
-   * A description whose provenance did not read builds nothing. The comment no
-   * longer says which case it is, and the extension still declines to write
-   * where it cannot tell whether the description is the reporter's own text.
+   * Place the marker before reporter text to protect it from that text's markup.
+   * Preservation requires known description provenance.
    *
    * @param {ParsedDetail} advisory
-   * @param {string} marker The marker for this press.
-   * @returns {string | null} null when the title, the description, or the
-   *   description's provenance is not in hand.
+   * @param {string} marker The per-write marker.
+   * @returns {string | null} The comment body, or null if the title, description, or
+   *   provenance is unavailable.
    */
   function buildBody(advisory, marker) {
     const { title, description, descriptionOriginal } = advisory;
@@ -221,10 +167,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * What one document says about writing this comment, read from that document
-   * alone. A repository off the allowlist and a description whose provenance did
-   * not read leave the button pressable and refuse the press, so the reason
-   * reaches the maintainer who pressed it.
+   * Determine availability from the parsed document. Refusals leave the button
+   * enabled so a click can show the reason.
    *
    * @param {ParsedDetail} advisory
    * @returns {Availability}
@@ -232,8 +176,7 @@ if (typeof require === 'function') {
   function inspect(advisory) {
     const held = preservationComment(advisory.comments);
     if (held !== null) {
-      // The comment's own element carries the anchor GitHub links it by, so the
-      // panel can point at it and say nothing else.
+
       return availability(
         false,
         false,
@@ -265,11 +208,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * What the button offers on this advisory: what the page says, and what this
-   * page's own presses have already done.
-   *
-   * An advisory that already carries the comment offers no button, because the
-   * extension writes one comment per advisory.
+   * Combine page contents with local attempts to offer preservation at most once.
    *
    * @param {ParsedDetail} advisory
    * @returns {Availability}
@@ -288,10 +227,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Whether a press from this page put a comment on the advisory that this
-   * document does not show. A press that reached GitHub may have created the
-   * comment whatever came back, so it counts from the moment it went out until
-   * the page is read again.
+   * Check whether a sent request may have created a comment missing from this
+   * document. Both confirmed and unconfirmed requests count.
    *
    * @param {ParsedDetail} advisory
    * @returns {boolean}
@@ -323,18 +260,10 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Writes the preservation comment for this advisory.
+   * Preserve the title and description from a fresh advisory read. The same
+   * read supplies the form and the check for an existing preservation comment.
    *
-   * The whole write runs against a document fetched at press time: the comment
-   * this advisory may already carry, the form the request clones, and the title
-   * and description the comment holds all come from that document, so the
-   * comment holds the report as it stood when it was written.
-   *
-   * The advisory is held from the first press until that write settles, because
-   * a second one would put a second permanent comment on a real report.
-   *
-   * @param {ParsedDetail} advisory The advisory as the panel read it, which is
-   *   what says whether the button writes at all.
+   * @param {ParsedDetail} advisory
    * @param {PreserveOptions} [options]
    * @returns {Promise<WriteResult>}
    */
@@ -353,12 +282,10 @@ if (typeof require === 'function') {
       unreadable: { reason: 'unreadable', message: globalThis.bghsa.write.PARSE_MESSAGE },
       fetch: send,
       parseDocument: toDocument,
-      // A press that reached GitHub is never released: GitHub does not put the
-      // new comment on the page, so nothing here can say whether it landed, and
-      // a second press would put a second permanent comment on a real report.
+      // Retain the hold after sending, including unconfirmed outcomes, to prevent
+      // duplicate preservation comments.
       hold: {
-        // Held before anything is awaited: while a press is in flight the page
-        // still shows no comment, and a second press would write a second one.
+        // Acquire the hold before the first await to prevent concurrent requests.
         take: (key) => {
           attempts.set(key, 'pending');
         },
@@ -367,7 +294,7 @@ if (typeof require === 'function') {
         },
         release: (key, settled) => {
           if (settled.outcome?.ok === true) attempts.set(key, 'written');
-          // The advisory carries the comment already, written from elsewhere.
+
           else if (settled.outcome?.reason === 'preserved') attempts.set(key, 'written');
           else if (!settled.sent) attempts.delete(key);
         },

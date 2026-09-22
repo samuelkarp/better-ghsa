@@ -9,18 +9,12 @@ if (typeof require === 'function') {
 }
 
 /**
- * The part of `browser.storage.local` this file uses. `chrome.storage.local`
- * satisfies it too, and so does a stand-in a test hands to
- * {@link setStorage}.
- *
  * @typedef {object} BranchStorage
  * @property {(key: string) => Promise<Record<string, unknown>>} get
  * @property {(items: Record<string, unknown>) => Promise<void>} set
  */
 
 /**
- * The repository a branch set belongs to. `AdvisoryRef` satisfies it.
- *
  * @typedef {object} RepositoryRef
  * @property {string} owner
  * @property {string} repo
@@ -28,67 +22,51 @@ if (typeof require === 'function') {
 
 (() => {
   /**
-   * The `browser.storage.local` entry holding the release branches this
-   * extension has seen on each repository. It is its own entry and not part of
-   * the per-advisory cache: a repository's branches are the same for every
-   * advisory on that repository and outlive the advisory they were read on.
+   * Release branches are shared by a repository's advisories and persist
+   * independently of the advisory cache.
    */
   const BRANCHES_KEY = 'branches';
 
-  /** What the name of a release branch begins with. */
   const RELEASE_PREFIX = 'release/';
 
   /**
-   * What a branch name looks like once the version is all that is left of it:
-   * dot-separated runs of digits, behind an optional `v`.
+   * Version components are dot-separated digits with an optional leading `v`.
    */
   const VERSION_PATTERN = /^v?(\d+(?:\.\d+)*)$/;
 
   /**
-   * The release branches seen, keyed by the repository as `owner/repo`
-   * lowercased. GitHub treats a repository name case-insensitively and a branch
-   * name case-sensitively, so the key is folded and the names are held as they
-   * were read.
+   * Repository keys are case-insensitive. Branch names are case-sensitive.
    *
    * @type {Map<string, Set<string>>}
    */
   const seen = new Map();
 
-  /**
-   * The storage a caller put in place of the browser's, and null while the
-   * browser's own is what to use.
-   *
-   * @type {BranchStorage | null}
-   */
+  /** @type {BranchStorage | null} */
   let injected = null;
 
   /**
-   * @returns {BranchStorage | null} `storage.local` under whichever name this
-   *   browser gives the extension API, and null where there is none, which is
-   *   every environment outside a browser.
+   * @returns {BranchStorage | null} `storage.local`, or null if unavailable.
    */
   function browserStorage() {
     return /** @type {BranchStorage | null} */ (globalThis.bghsa.storage.local());
   }
 
   /**
-   * @param {BranchStorage | null} storage The storage to use, and null to go
-   *   back to the browser's own.
+   * @param {BranchStorage | null} storage The storage provider, or null for browser storage.
    * @returns {void}
    */
   function setStorage(storage) {
     injected = storage;
   }
 
-  /** @returns {BranchStorage | null} the storage this file reads and writes. */
+  /** @returns {BranchStorage | null} The active storage provider. */
   function storageOf() {
     return injected ?? browserStorage();
   }
 
   /**
    * @param {RepositoryRef | null | undefined} ref
-   * @returns {string | null} the key this repository's branches are held under,
-   *   and null where the page did not say which repository it is.
+   * @returns {string | null} The lowercase repository key, or null if incomplete.
    */
   function keyOf(ref) {
     if (ref === null || ref === undefined) return null;
@@ -111,9 +89,8 @@ if (typeof require === 'function') {
 
   /**
    * @param {string} branch
-   * @returns {number[] | null} the version the branch name carries, most
-   *   significant component first, and null where it carries none. `release/`
-   *   is not part of the version, and neither is a leading `v`.
+   * @returns {number[] | null} The numeric version components, or null if invalid.
+   *   Optional `release/` and `v` prefixes are removed.
    */
   function versionOf(branch) {
     const tail = branch.startsWith(RELEASE_PREFIX) ? branch.slice(RELEASE_PREFIX.length) : branch;
@@ -123,21 +100,13 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Orders two branch names as the candidate list offers them: by version
-   * descending, so `release/2.10` comes before `release/2.9`. String order puts
-   * those two the other way round, because it compares `1` against `9` and stops
-   * there.
-   *
-   * A component a version does not carry counts below every component another
-   * one does, so `release/2.10.1` comes before `release/2.10`.
-   *
-   * A name that carries no version has no place in that order. It sorts after
-   * every name that does, and names carrying no version sort among themselves by
-   * code point, so a maintainer reading the list twice reads it the same way.
+   * Sort versions in descending order. Missing components sort below present
+   * components: `release/2.10.1` precedes `release/2.10`. Non-version names
+   * follow version names and sort lexicographically.
    *
    * @param {string} left
    * @param {string} right
-   * @returns {number} negative where `left` is offered first.
+   * @returns {number} Negative when `left` sorts first.
    */
   function compare(left, right) {
     const first = versionOf(left);
@@ -157,7 +126,7 @@ if (typeof require === 'function') {
 
   /**
    * @param {readonly string[]} names
-   * @returns {string[]} those names in the order the candidate list offers them.
+   * @returns {string[]} The sorted branch names.
    */
   function order(names) {
     return [...names].sort(compare);
@@ -166,7 +135,7 @@ if (typeof require === 'function') {
   /**
    * @param {string} key
    * @param {readonly unknown[]} names
-   * @returns {boolean} whether the set grew.
+   * @returns {boolean} Whether any entries were added.
    */
   function take(key, names) {
     let grew = false;
@@ -187,17 +156,13 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Takes release branch names into the set this session holds. Nothing is
-   * awaited, so a caller rendering from a parsed record has this page's branches
-   * the moment it has read them.
-   *
-   * A name that is not a release branch is left out: the panel offers backport
-   * targets, and REQUIREMENTS.md section 6 has those be release branches.
+   * Record release branches synchronously for use during rendering. The panel
+   * offers only release branches as backport targets (REQUIREMENTS.md section 6).
    *
    * @param {RepositoryRef | null | undefined} ref The repository the names
    *   belong to.
    * @param {readonly unknown[]} names
-   * @returns {boolean} whether the set grew.
+   * @returns {boolean} Whether any entries were added.
    */
   function remember(ref, names) {
     const key = keyOf(ref);
@@ -206,8 +171,7 @@ if (typeof require === 'function') {
 
   /**
    * @param {RepositoryRef | null | undefined} ref
-   * @returns {string[]} the release branches seen on this repository, in the
-   *   order the candidate list offers them.
+   * @returns {string[]} The repository's observed release branches, sorted.
    */
   function known(ref) {
     const key = keyOf(ref);
@@ -215,16 +179,15 @@ if (typeof require === 'function') {
     return held === undefined ? [] : order([...held]);
   }
 
-  /** @returns {void} empties the set this session holds, leaving storage alone. */
+  /** @returns {void} Clears in-memory observations. */
   function clear() {
     seen.clear();
   }
 
   /**
-   * @param {unknown} value The entry as storage handed it back.
-   * @returns {Map<string, string[]>} the branches it holds, by repository, and
-   *   none where it holds something else. The entry is data an older version of
-   *   this extension wrote, so its shape is checked and never assumed.
+   * @param {unknown} value The stored entry.
+   * @returns {Map<string, string[]>} Stored branches by repository, excluding
+   *   malformed entries.
    */
   function repositoriesOf(value) {
     /** @type {Map<string, string[]>} */
@@ -241,8 +204,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * @returns {Record<string, string[]>} the set this session holds, in the shape
-   *   the entry takes.
+   * @returns {Record<string, string[]>} The observations serialized for storage.
    */
   function entry() {
     /** @type {Record<string, string[]>} */
@@ -253,8 +215,7 @@ if (typeof require === 'function') {
 
   /**
    * @param {Map<string, string[]>} stored
-   * @returns {boolean} whether this session holds a repository or a branch the
-   *   entry does not.
+   * @returns {boolean} Whether this session has observations missing from storage.
    */
   function ahead(stored) {
     for (const [key, names] of seen) {
@@ -267,17 +228,11 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Reads the stored branches into this session's set and writes the set back
-   * where it holds a branch the entry does not. The entry accumulates across
-   * advisories and across sessions, because a repository's release branches are
-   * the same on every advisory it has.
-   *
-   * Storage failing costs the panel nothing: the set still holds what this
-   * session has read, and this runs again on the next page.
+   * Merge stored branches with this session's observations and persist additions.
+   * Storage failures leave the session's observations available.
    *
    * @param {BranchStorage | null} [storage]
-   * @returns {Promise<boolean>} whether storage taught this session a branch it
-   *   did not have, which is when what was drawn from the set is out of date.
+   * @returns {Promise<boolean>} Whether storage added a branch to this session.
    */
   async function sync(storage = storageOf()) {
     if (storage === null) return false;

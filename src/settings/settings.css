@@ -1,9 +1,6 @@
-/*
- * The settings page is an extension page, not a GitHub page. The panel's
- * injected stylesheet in `src/detail/panel.js` is written for a GitHub page: it
- * carries only the few rules Primer does not, and its colors are Primer custom
- * properties. Neither Primer's classes nor its properties exist here, so this
- * page dresses itself, and its colors are its own.
+/**
+ * The extension settings page provides its own styles and colors because
+ * GitHub's Primer classes and custom properties are unavailable here.
  */
 
 :root {

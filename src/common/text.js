@@ -23,9 +23,8 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
 
   /**
    * @param {string | number | null | undefined} at
-   * @returns {number | null} the instant `at` names, and null for a value that
-   *   does not read as one. A number is already an instant and stands, because
-   *   the cache stamps what it holds in milliseconds.
+   * @returns {number | null} Epoch milliseconds, or null for an invalid value.
+   *   Numeric input is already in milliseconds.
    */
   function instantOf(at) {
     if (typeof at === 'number') return Number.isFinite(at) ? at : null;
@@ -36,9 +35,8 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
 
   /**
    * @param {string | number | null | undefined} at
-   * @returns {string | null} that instant to the minute in UTC. A string that
-   *   does not read as a time comes back as it stands, because a stored value is
-   *   whatever a maintainer's browser wrote.
+   * @returns {string | null} The time to the minute in UTC. Invalid strings
+   *   are returned unchanged.
    */
   function formatTime(at) {
     const parsed = instantOf(at);
@@ -48,8 +46,7 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
 
   /**
    * @param {string | number | null | undefined} at
-   * @returns {string | null} the day that instant falls on, in UTC, read the way
-   *   {@link formatTime} reads one.
+   * @returns {string | null} The UTC date. Invalid strings are returned unchanged.
    */
   function formatDate(at) {
     const parsed = instantOf(at);

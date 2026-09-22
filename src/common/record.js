@@ -9,21 +9,14 @@ if (typeof require === 'function') {
 }
 
 /**
- * Reads a cached advisory back into the shape the parser produces.
- *
- * A cache entry holds what some version of this extension wrote, so every field
- * is checked and none is assumed. What is derived from a field is derived
- * again here rather than read back: the trust rule and the schema rules that
- * apply are this version's, not the ones in force when the entry was written.
- *
- * Both surfaces that work from cached reads go through this file: the list
- * table's rows and the done view's corpus.
+ * Validate cached fields and recompute trust and schema reports with the
+ * current rules. The list table and completed view share this reader.
  */
 
 (() => {
   /**
    * @param {unknown} value
-   * @returns {string | null} the string it holds, and null for anything else.
+   * @returns {string | null} The nonempty string, or null for other values.
    */
   function text(value) {
     return typeof value === 'string' && value.trim() !== '' ? value : null;
@@ -31,7 +24,7 @@ if (typeof require === 'function') {
 
   /**
    * @param {unknown} value
-   * @returns {string[]} the strings with content the value holds.
+   * @returns {string[]} The nonempty strings in the array, or an empty array.
    */
   function strings(value) {
     if (!Array.isArray(value)) return [];
@@ -44,11 +37,6 @@ if (typeof require === 'function') {
   }
 
   /**
-   * One comment out of a cached record. The author's standing and the snapshot
-   * are recomputed here rather than read: the record is what an older version of
-   * this extension wrote, and the trust rule and the schema rules are this
-   * version's.
-   *
    * @param {unknown} value
    * @returns {import('./parse-detail.js').ParsedComment | null}
    */
@@ -72,10 +60,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The advisory a record names: which repository it is on and which advisory
-   * it is. A write from a cached read has no page to take that from, so what
-   * the entry holds is what says where the write goes, and a record naming no
-   * owner, no repository, or no identifier is one no write can be aimed at.
+   * Writes initiated from cached data require the owner, repository, and
+   * advisory ID to identify the destination.
    *
    * @param {unknown} value
    * @returns {import('./parse-detail.js').AdvisoryRef | null}
@@ -145,10 +131,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The advisory a cache entry holds. The entry is data an older version of this
-   * extension wrote, so every field is checked and none is assumed: a record
-   * carrying no comment list and no timeline is not one this reader can derive
-   * anything from, and it answers as absent.
+   * Require both comments and timeline arrays before deriving advisory state.
    *
    * @param {unknown} record
    * @returns {import('./parse-detail.js').ParsedDetail | null}

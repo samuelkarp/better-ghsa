@@ -13,11 +13,7 @@ if (typeof require === 'function') {
 }
 
 /**
- * The part of `browser.storage.local` this file uses. `chrome.storage.local`
- * satisfies it too, and so does a stand-in a test hands in.
- *
- * `get(null)` answers with every entry the extension holds, which is what the
- * clear reads to find the keys to take.
+ * `get(null)` returns all stored entries for selective removal.
  *
  * @typedef {object} ForgetStorage
  * @property {(keys: string | string[] | null) => Promise<Record<string, unknown>>} get
@@ -27,13 +23,10 @@ if (typeof require === 'function') {
 
 /**
  * @typedef {object} ForgetOptions
- * @property {ForgetStorage | null} [storage] The storage to read and write, and
- *   absent to use the one the cache names.
+ * @property {ForgetStorage | null} [storage] The storage provider. Defaults to the cache's provider.
  */
 
 /**
- * What one call took out of storage.
- *
  * @typedef {object} ForgetOutcome
  * @property {number} taken How many whole storage keys were removed.
  * @property {boolean} branches Whether the branches entry changed.
@@ -42,10 +35,7 @@ if (typeof require === 'function') {
 
 (() => {
   /**
-   * @returns {ForgetStorage | null} the storage to read and write. The cache
-   *   already answers for `browser.storage.local` under either of the names a
-   *   browser gives the extension API, and it is the store most of these keys
-   *   belong to, so this asks it rather than repeating the lookup.
+   * @returns {ForgetStorage | null} The cache's storage provider.
    */
   function storageOf() {
     return /** @type {ForgetStorage | null} */ (
@@ -54,13 +44,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Every repository this file reads is normalized the way the allowlist
-   * normalizes it, trimmed and lowercased, because that is how the allowlist
-   * stores it and how every storage key here spells it.
-   *
    * @param {unknown} value A repository as `owner/repo`.
-   * @returns {string} the owner half, lowercased, and empty where the value
-   *   names no repository. The members entry is keyed by this.
+   * @returns {string} The lowercase owner, or an empty string if invalid.
    */
   function ownerOf(value) {
     const entry = globalThis.bghsa.allowlist.normalize(value);
@@ -69,20 +54,12 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The storage keys holding what was read of one repository.
-   *
-   * The advisory keys are matched on `adv:{owner}/{repo}:`, the colon included,
-   * and the list and progress keys are compared whole. Neither an owner nor a
-   * repository name may carry a `/` or a `:`, so `owner/repo:` ends at exactly
-   * one repository: the trailing colon is what keeps `containerd/con` from
-   * matching `containerd/containerd`, whose keys read `adv:containerd/
-   * containerd:GHSA-...`. Matching `adv:{owner}/{repo}` without it would take
-   * every repository whose name begins with this one's.
+   * The trailing colon in `adv:{owner}/{repo}:` delimits the repository name
+   * and prevents matching another repository with the same prefix.
    *
    * @param {unknown} repository The repository, as `owner/repo`.
    * @param {readonly string[]} keys Every key storage holds.
-   * @returns {string[]} the ones belonging to that repository, and none where
-   *   the value names no repository.
+   * @returns {string[]} The repository's cache keys, or an empty list if invalid.
    */
   function keysFor(repository, keys) {
     const entry = globalThis.bghsa.allowlist.normalize(repository);
@@ -95,8 +72,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Reads every key storage holds. A storage that fails answers with none, and
-   * the caller then takes nothing, which is the cache staying where it stands.
+   * A failed storage read leaves existing entries untouched.
    *
    * @param {ForgetStorage} storage
    * @returns {Promise<Record<string, unknown>>}
@@ -110,13 +86,11 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Takes keys out of storage. Failing costs the caller nothing: the entries
-   * stay, and everything here is rederivable by reading the advisories again.
+   * Storage removal failures return zero.
    *
    * @param {ForgetStorage} storage
    * @param {readonly string[]} keys
-   * @returns {Promise<number>} how many were taken, and none where the removal
-   *   failed.
+   * @returns {Promise<number>} The number of removed keys, or zero on failure.
    */
   async function discard(storage, keys) {
     if (keys.length === 0) return 0;
@@ -129,13 +103,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Takes one repository or one organization out of an entry that holds a map
-   * of them, which is what the `members` and `branches` entries are. The entry
-   * is written back without it, and taken away once it holds nothing.
-   *
-   * The entry is data an older version of this extension wrote, so its shape is
-   * checked and never assumed: one holding something other than an object is
-   * left where it stands.
+   * Remove a repository or organization from a stored map. Remove the storage
+   * entry when the map becomes empty. Leave malformed entries untouched.
    *
    * @param {ForgetStorage} storage
    * @param {string} key The entry's key.
@@ -171,11 +140,9 @@ if (typeof require === 'function') {
 
   /**
    * @param {unknown} repository The repository being taken off the list.
-   * @param {readonly unknown[]} remaining The repositories still on it.
-   * @returns {boolean} whether any of them belongs to the same organization.
-   *   The members entry is keyed by organization, not by repository, so it is
-   *   this and not the repository that says whether the entry is still earning
-   *   its keep. REQUIREMENTS.md section 2.
+   * @param {readonly unknown[]} remaining The remaining allowed repositories.
+   * @returns {boolean} Whether the allowlist still needs this organization's
+   *   cached members (REQUIREMENTS.md section 2).
    */
   function organizationListed(repository, remaining) {
     const owner = ownerOf(repository);
@@ -184,14 +151,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Empties everything the extension read: the advisory reads, the list reads,
-   * the refresh progress, and the members and branches it observed. The
-   * repository list is left alone, because clearing it would turn the extension
-   * off. REQUIREMENTS.md section 2.
-   *
-   * Nothing here is authoritative. Every entry is rederivable by reading the
-   * advisories again, so this costs reads and nothing else, and no confirmation
-   * stands in front of it.
+   * Clear observed data while preserving the allowlist (REQUIREMENTS.md section 2).
    *
    * @param {ForgetOptions} [options]
    * @returns {Promise<ForgetOutcome>}
@@ -216,13 +176,9 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Empties what was read of one repository, which is what taking it off the
-   * list leaves behind: its advisory reads, its list reads, its refresh
-   * progress, and the release branches observed on it.
-   *
-   * The organization's members are keyed by organization and not by repository,
-   * so they go only where no repository from that organization is still listed.
-   * REQUIREMENTS.md section 2.
+   * Clear a repository's cache and observed release branches. Remove its
+   * organization's members only when the allowlist contains no other repository
+   * from that organization (REQUIREMENTS.md section 2).
    *
    * @param {unknown} entry The repository, as `owner/repo`.
    * @param {readonly unknown[]} [remaining] The repositories still on the list.

@@ -8,10 +8,7 @@ const allowlist = require('../src/common/allowlist.js');
 const { fakeStorage } = require('../test-support/storage.js');
 
 /**
- * A storage seeded under the one key this module owns.
- *
- * @param {unknown} [initial] What is stored under the allowlist's key, and
- *   absent for a fresh install, which has stored nothing.
+ * @param {unknown} [initial] The stored allowlist; omit for a fresh install.
  * @returns {import('../test-support/storage.js').FakeStorage}
  */
 const memory = (initial) =>
@@ -28,15 +25,11 @@ test('a fresh install carries no repositories', async () => {
   assert.strictEqual(allowlist.isAllowed('containerd/containerd'), false);
   assert.strictEqual(allowlist.isAllowed('git-utensils/Spoon-Knife'), false);
   assert.strictEqual(store.writes.length, 0, 'a read of an empty list wrote something');
-  // The zero above is a write that did not happen and not a count that cannot
-  // move: adding one repository takes the same count to one.
   assert.strictEqual((await allowlist.add('containerd/containerd')).ok, true);
   assert.strictEqual(store.writes.length, 1, 'a write went unrecorded');
 });
 
 test('an unread list allows nothing', () => {
-  // The gate is synchronous and storage is not, so between the extension
-  // loading and the read landing there is no answer. The answer taken is no.
   allowlist.setStorage(memory(['containerd/containerd']));
   assert.strictEqual(allowlist.loaded(), false);
   assert.strictEqual(allowlist.isAllowed('containerd/containerd'), false);
@@ -53,8 +46,6 @@ test('a listed repository is allowed once the list is read', async () => {
 test('the comparison is case-insensitive in both directions', async () => {
   allowlist.setStorage(memory(['Git-Utensils/Spoon-Knife']));
   await allowlist.load();
-  // The stored spelling is normalized on the way in, and the asked spelling on
-  // the way through, so neither side has to be the one the maintainer typed.
   assert.deepStrictEqual([...allowlist.current()], ['git-utensils/spoon-knife']);
   assert.strictEqual(allowlist.isAllowed('git-utensils/spoon-knife'), true);
   assert.strictEqual(allowlist.isAllowed('Git-Utensils/Spoon-Knife'), true);
@@ -141,8 +132,6 @@ test('adding refuses what is not a repository and stores nothing for it', async 
   assert.strictEqual(store.writes.length, 0, 'a refused entry was written');
   assert.deepStrictEqual([...allowlist.current()], []);
 
-  // The same call with a repository in it does write, so the zero above is the
-  // refusal and not a count that cannot move.
   assert.strictEqual((await allowlist.add('containerd/containerd')).ok, true);
   assert.strictEqual(store.writes.length, 1, 'an accepted entry went unrecorded');
 });
@@ -177,8 +166,6 @@ test('removing takes a repository out of storage and closes the gate on it', asy
 });
 
 test('a stored value that is not a list of repositories is read as no list', async () => {
-  // What storage holds was written by some version of this extension, and is
-  // never assumed to be what this one writes.
   for (const held of [null, 'containerd/containerd', 42, { 'containerd/containerd': true }]) {
     allowlist.setStorage(memory(held));
     assert.deepStrictEqual([...(await allowlist.load())], [], `read ${JSON.stringify(held)}`);
@@ -215,7 +202,6 @@ test('a change to the list reaches whoever subscribed', async () => {
   await allowlist.remove('containerd/containerd');
   assert.deepStrictEqual(heard, [[]]);
 
-  // A save that changes nothing is not a change anybody is told about.
   await allowlist.save([]);
   assert.deepStrictEqual(heard, [[]]);
 
@@ -243,16 +229,13 @@ test('the browser announcing a change takes the list without a read', async () =
     },
   };
   try {
-    // No storage is injected, so the browser's own is what is found, and the
-    // change events come from the same place.
+    // Passing null restores the browser's storage and change events.
     allowlist.setStorage(null);
     assert.strictEqual(allowlist.watch(), true);
     assert.strictEqual(allowlist.watch(), false, 'a second call subscribed again');
     await allowlist.load();
     assert.strictEqual(allowlist.isAllowed('containerd/containerd'), true);
 
-    // Nonzero, so the comparison below rests on a recording this test has seen
-    // work: the load above read storage once.
     const readsBefore = store.reads.length;
     assert.ok(readsBefore > 0, 'the read the load did went unrecorded');
     for (const listener of listeners) {
@@ -262,7 +245,6 @@ test('the browser announcing a change takes the list without a read', async () =
     assert.strictEqual(allowlist.isAllowed('containerd/nerdctl'), true);
     assert.strictEqual(store.reads.length, readsBefore, 'the change was answered with a read');
 
-    // A change in another area, and one naming another key, are not this list.
     for (const listener of listeners) {
       listener({ [allowlist.STORAGE_KEY]: { newValue: [] } }, 'sync');
       listener({ members: { newValue: [] } }, 'local');

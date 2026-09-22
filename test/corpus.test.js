@@ -11,20 +11,14 @@ const corpus = require('../src/done/corpus.js');
 
 const { fakeStorage } = require('../test-support/storage.js');
 
-// The queue and the crawl turn a fetched page into a document the way a content
-// script does. Nothing in this file reaches the network: every response is a
-// string a test wrote.
 globalThis.DOMParser = /** @type {typeof globalThis.DOMParser} */ (
   /** @type {unknown} */ (DOMParser)
 );
 
-/** The repository every corpus here is collected from. */
 const REF = { owner: 'containerd', repo: 'containerd' };
 
 /**
- * A clock a test moves by hand, and the wait the queue uses with it. Waiting
- * moves the clock and returns at once, so a corpus of a hundred advisories
- * costs no time and the intervals are still exact.
+ * Waiting advances the fake clock immediately.
  *
  * @param {number} [start]
  */
@@ -52,8 +46,6 @@ function ghsa(suffix) {
 }
 
 /**
- * One page of the advisory list, in the shape `parse-list` reads.
- *
  * @param {{ state: string, ids: readonly string[], counts?: Record<string, number>, next?: string | null }} page
  * @returns {string}
  */
@@ -100,14 +92,11 @@ function parse(html) {
   return list;
 }
 
-/** The first page of each done state. */
 const PUBLISHED_URL = `/${REF.owner}/${REF.repo}/security/advisories?state=published`;
 const CLOSED_URL = `/${REF.owner}/${REF.repo}/security/advisories?state=closed`;
 
 /**
- * One advisory detail page, in the shape `parse-detail` reads: the header meta
- * and the description Box header, which is where the report time and the
- * reporter come from.
+ * The description header supplies the report time and reporter.
  *
  * @param {{ ghsaId: string, state: string, severity?: string, reportedAt: string }} advisory
  * @returns {string}
@@ -127,9 +116,7 @@ function detailHtml(advisory) {
 }
 
 /**
- * A queue, a clock, and the pages GitHub answers with, wired the way a page
- * load wires them: one queue for the repository, carrying both the list pages
- * the walk asks for and the advisory reads that follow.
+ * List and advisory requests share one queue and clock.
  *
  * @param {Record<string, string>} pages By path.
  */
@@ -155,9 +142,7 @@ function harness(pages) {
   });
   /**
    * @param {Partial<import('../src/done/corpus.js').CorpusOptions>} [extra]
-   * @returns {ReturnType<typeof corpus.collect>} the corpus, collected on the
-   *   clock the queue runs on. A collection reading the wall clock would judge
-   *   every entry this queue wrote as long stale.
+   * @returns {ReturnType<typeof corpus.collect>} The corpus, using the queue clock.
    */
   const collect = (extra = {}) =>
     corpus.collect({ ref: REF, queue, storage, now: clock.now, ...extra });
@@ -243,9 +228,7 @@ test('the corpus spends one request a second across the walk and the reads', asy
   }
   const { clock, collect } = harness(pages);
   await collect();
-  // The walk and the reads share one queue and one persisted claim.
-  // Four requests, three intervals: the first owes nothing, and each of the
-  // rest waits out the whole second since the one before it.
+  // Four requests require three one-second intervals.
   assert.deepStrictEqual(clock.waits, [queues.RATE_MS, queues.RATE_MS, queues.RATE_MS]);
 });
 
@@ -254,8 +237,6 @@ test('an advisory the corpus holds no read of is a member and is named unread', 
   const pages = {
     [PUBLISHED_URL]: listHtml({ state: 'published', ids, counts: { published: 2 } }),
     [CLOSED_URL]: listHtml({ state: 'closed', ids: [], counts: { published: 2 } }),
-    // Only the first advisory answers. The second is in the corpus all the
-    // same: the list page named it.
     [detailUrl(ids[0] ?? '')]: detailHtml({
       ghsaId: ids[0] ?? '',
       state: 'Published',
@@ -320,7 +301,6 @@ test('the open advisories on the list are no part of the done corpus', async () 
     reportedAt: '2026-03-02T00:00:00Z',
   });
   const { storage, collect } = harness(pages);
-  // A triage walk ran first and left its rows in the same list record.
   await globalThis.bghsa.crawl.crawl({
     ref: REF,
     queue: {
@@ -361,7 +341,6 @@ test('a walk that did not reach its last page says the corpus is partial', async
     state: 'Published',
     reportedAt: '2026-03-02T00:00:00Z',
   });
-  // The second page never answers, so the walk holds it and does not complete.
   const { collect } = harness(pages);
   const collected = await collect();
   assert.strictEqual(collected.corpus.complete, false);
@@ -434,9 +413,7 @@ test('a page of the walk draws the corpus before any advisory is read', async ()
 });
 
 test('the corpus is ordered by identifier, whatever order the crawl found it in', async () => {
-  // The walk reads the published state first and takes each page's rows in the
-  // order GitHub laid them out, so this crawl meets the four advisories in the
-  // reverse of their identifier order.
+  // GitHub page order puts these advisory IDs in reverse order.
   const published = [ghsa('dddd'), ghsa('bbbb')];
   const closed = [ghsa('cccc'), ghsa('aaaa')];
   const found = [...published, ...closed];
@@ -472,9 +449,6 @@ test('the corpus is ordered by identifier, whatever order the crawl found it in'
     'the members are ordered by identifier'
   );
 
-  // The same rows in the order another walk of the same repository could hold
-  // them: the corpus a maintainer exports and the rows they read are in one
-  // order whichever collection built them.
   /** @type {import('../src/common/crawl.js').CrawledList} */
   const other = { walks: {}, rows: {} };
   for (const id of Object.keys(collected.crawled.list.rows).reverse()) {

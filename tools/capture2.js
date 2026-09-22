@@ -6,7 +6,7 @@
       a.push(n.tagName.toLowerCase() + (n.id ? '#' + n.id : '') + c); n = n.parentElement;
     } return a; };
 
-  // Structural skeleton: tags, classes, ids, hrefs, datetimes. Text is replaced by its length.
+  // Capture element structure and attributes. Replace text with its length.
   const skel = (el, depth, out, budget) => {
     if (depth > 9) return out;
     for (const node of el.childNodes) {
@@ -33,7 +33,7 @@
     path: location.pathname + location.search,
     me: document.querySelector('meta[name="user-login"]')?.content ?? null,
     customElements: [...new Set(all.map(e => e.tagName.toLowerCase()).filter(t => t.includes('-')))].sort(),
-    // Deferred-loading endpoints. This is where revision history lives.
+    // Revision history loads through these fragment endpoints.
     fragments: [...document.querySelectorAll('include-fragment,[data-url],[data-src],[data-fragment-url]')]
       .slice(0, 40).map(e => ({ tag: e.tagName.toLowerCase(),
         src: e.getAttribute('src') || e.getAttribute('data-url') || e.getAttribute('data-src') || e.getAttribute('data-fragment-url'),
@@ -41,7 +41,6 @@
   };
 
   if (/\/security\/advisories\/GHSA-/.test(location.pathname)) {
-    // ---- DETAIL PAGE: description revision history (§7) ----
     out.kind = 'detail';
     out.editedMarkers = all.filter(e => e.children.length === 0 && /^\(?edited\)?$/i.test((e.textContent || '').trim()))
       .slice(0, 6).map(e => ({ tag: e.tagName.toLowerCase(), chain: chain(e),
@@ -52,11 +51,9 @@
         href: e.getAttribute('href'), chain: chain(e) }));
     const descBox = document.querySelector('.js-repository-advisory-details .Box, .js-repository-advisory-details');
     out.descriptionRegion = sk(descBox?.querySelector('.Box-header, .timeline-comment-header') ?? descBox);
-    // Private fork / patch surface (§6 derived state)
     const fork = all.find(e => /private.?fork|delete_workspace|workspace/i.test(e.className || '') ) ?? null;
     out.forkRegion = fork ? { chain: chain(fork), html: sk(fork.parentElement ?? fork) } : null;
   } else {
-    // ---- LIST PAGE (§9) ----
     out.kind = 'list';
     const links = [...document.querySelectorAll('a[href*="/security/advisories/GHSA-"]')];
     out.advisoryLinkCount = links.length;

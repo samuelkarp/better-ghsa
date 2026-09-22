@@ -4,28 +4,20 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
 
 (() => {
   /**
-   * The names a browser gives the extension API. Chrome gives `chrome`,
-   * Firefox gives both and prefers `browser`, and a page outside an extension
-   * gives neither.
+   * Prefer Firefox's `browser` API when both names are available.
    */
   const NAMES = ['browser', 'chrome'];
 
   /**
-   * What a caller needs of `storage.local` before an API answers for it. Every
-   * caller reads and writes; the cache also evicts, and asks for `remove`.
+   * Callers require get and set. Cache eviction also requires remove.
    */
   const REQUIRED = ['get', 'set'];
 
   /**
-   * The extension API this browser offers, chosen by what its `storage.local`
-   * can do. A name whose `storage.local` is missing a method the caller needs
-   * is passed over rather than settled on, so a shim standing in for `browser`
-   * does not hide a working `chrome` behind it.
+   * Select the first API with all required storage methods.
    *
-   * @param {readonly string[]} [required] The methods `storage.local` has to
-   *   carry.
-   * @returns {Record<string, any> | undefined} the API, and undefined where no
-   *   name answers, which is every environment outside a browser.
+   * @param {readonly string[]} [required] Required storage methods.
+   * @returns {Record<string, any> | undefined} The API, or undefined if unavailable.
    */
   function api(required = REQUIRED) {
     const global = /** @type {Record<string, any>} */ (/** @type {unknown} */ (globalThis));
@@ -39,12 +31,10 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
   }
 
   /**
-   * `storage.local`, from the API {@link api} chooses. The caller casts it to
-   * the part of the WebExtension storage contract that file uses.
+   * Callers cast the store to the storage interface they use.
    *
-   * @param {readonly string[]} [required] The methods it has to carry.
-   * @returns {Record<string, any> | null} the store, and null where there is
-   *   none, which is every environment outside a browser.
+   * @param {readonly string[]} [required] Required storage methods.
+   * @returns {Record<string, any> | null} The store, or null if unavailable.
    */
   function local(required = REQUIRED) {
     return api(required)?.storage?.local ?? null;

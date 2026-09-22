@@ -1,7 +1,6 @@
 /**
- * The shared namespace every content script hangs its exports off. Content
- * scripts are classic scripts in one isolated world, so they reach each other
- * through this global.
+ * Content scripts share their exports through this global namespace.
+ * They run as classic scripts in the same isolated world.
  */
 interface BghsaNamespace {
   dom: typeof import('../src/common/dom.js');

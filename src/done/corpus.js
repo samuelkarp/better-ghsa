@@ -11,45 +11,33 @@ if (typeof require === 'function') {
 }
 
 /**
- * One advisory of the done corpus: what a list page showed of it, and what an
- * advisory read holds of it.
- *
- * A member with no read is still a member. The list page named it, so its
- * identifier, its state, its severity, and the time it was opened are known
- * without a request, and a statistic over the corpus says how many of these
- * there are.
+ * Include every advisory found on a list page, including those whose detail
+ * pages have not been fetched.
  *
  * @typedef {object} CorpusMember
  * @property {string} ghsaId
- * @property {string} state The `?state=` the crawl found it under.
+ * @property {string} state The query state used to discover the advisory.
  * @property {import('../common/parse-list.js').ListRow} row
- * @property {number} seenAt When the list page that named it was read.
+ * @property {number} seenAt The list observation time in epoch milliseconds.
  * @property {import('../common/parse-detail.js').ParsedDetail | null} advisory
- *   The advisory read, and null where none has landed.
- * @property {number | null} observedAt When that read was taken.
+ *   The fetched detail data, or null if unavailable.
+ * @property {number | null} observedAt The detail observation time in epoch milliseconds.
  */
 
 /**
- * The advisories of one repository in a set of states, and what is known about
- * how much of that set this is. The done view holds the published and closed
- * pair; the statistics hold that pair and the open one.
+ * A corpus contains advisories from selected repository states and records
+ * collection progress. The done view selects published and closed states;
+ * statistics also include open states.
  *
  * @typedef {object} Corpus
- * @property {CorpusMember[]} members Every advisory the crawl holds in those
- *   states, ordered by identifier so two collections of one corpus are ordered
- *   the same way.
- * @property {string[]} unread The members no advisory read backs.
- * @property {boolean} complete Whether every walk reached its last page. A
- *   corpus that is not complete holds part of the states, and how much is not
- *   known from the crawl alone.
- * @property {boolean} running Whether a collection is filling this corpus now.
- *   A corpus still being filled and one a pass gave up on are both short of the
- *   states, and only the second is a corpus that will stay that way. The
- *   `complete` flag alone does not tell them apart.
- * @property {Record<string, number | null>} expected What GitHub's own state
- *   tabs counted, by `?state=`, and null for a tab whose count went unread. It
- *   is the corpus size before any crawl, so it is what says whether the members
- *   here are all of them.
+ * @property {CorpusMember[]} members Collected advisories in the selected states, sorted by
+ *   identifier.
+ * @property {string[]} unread Identifiers without fetched detail data.
+ * @property {boolean} complete Whether every state crawl reached its last page.
+ * @property {boolean} running Whether collection is active. An incomplete corpus can be
+ *   running or stopped.
+ * @property {Record<string, number | null>} expected Counts from GitHub's state tabs, keyed
+ *   by query state. Null indicates an unread count.
  */
 
 /**
@@ -60,26 +48,22 @@ if (typeof require === 'function') {
  *   add: (ghsaIds: readonly string[]) => Promise<unknown>,
  *   run: () => Promise<import('../common/fetch.js').QueueSummary>,
  *   load: () => Promise<unknown>,
- * }} queue The one queue this repository's requests go through. The corpus
- *   crawl walks list pages and reads advisories through it, so its hundred-odd
- *   reads spend the same one request a second as everything else.
- * @property {import('../common/parse-list.js').ParsedList | null} [parsed] The
- *   list page being looked at.
+ * }} queue The shared repository queue for list and detail requests.
+ * @property {import('../common/parse-list.js').ParsedList | null} [parsed] The parsed
+ *   current list page.
  * @property {string} [href] The URL of that page.
  * @property {import('../common/cache.js').CacheStorage | null} [storage]
  * @property {() => number} [now]
  * @property {(html: string) => import('../common/parse-list.js').ParsedList | null} [parse]
- * @property {(corpus: Corpus) => void} [onPage] Called when a page of the walk
- *   lands, which is what draws the corpus before any advisory has been read.
+ * @property {(corpus: Corpus) => void} [onPage] Receives the updated corpus as each list
+ *   page arrives.
  * @property {(state: string, url: string, reason: unknown) => void} [onFailure]
  */
 
 (() => {
   /**
-   * The states the done corpus is the union of. REQUIREMENTS.md section 10: the
-   * done view lists published and closed advisories. The four state tabs are
-   * mutually exclusive, so both are walked whichever tab the page was opened
-   * on, exactly as the open pair is.
+   * GitHub state tabs are mutually exclusive. Collect both done states
+   * regardless of the currently displayed tab (REQUIREMENTS.md section 10).
    *
    * @type {readonly string[]}
    */
@@ -87,12 +71,9 @@ if (typeof require === 'function') {
 
   /**
    * @param {import('../common/parse-list.js').ParsedList | null | undefined} parsed
-   * @param {readonly string[]} [states] The states to count, and the done pair
-   *   where none is named.
-   * @returns {Record<string, number | null>} what the state tabs counted, by
-   *   `?state=`. A page nobody is looking at counts nothing, and a tab this
-   *   reader did not find counts null: neither is a zero, because a corpus of
-   *   no advisories and a corpus of unknown size are not the same thing.
+   * @param {readonly string[]} [states] Selected states; defaults to published and closed.
+   * @returns {Record<string, number | null>} State-tab counts keyed by query state. Null
+   *   indicates an unknown count.
    */
   function expectedOf(parsed, states = DONE_STATES) {
     /** @type {Record<string, number | null>} */
@@ -105,10 +86,10 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The corpus as the crawl and the cache hold it now. Nothing is fetched.
+   * Assemble the corpus from the crawl and cached detail pages.
    *
    * @param {{ owner: string, repo: string }} ref
-   * @param {import('../common/crawl.js').CrawledList} list What the crawl holds.
+   * @param {import('../common/crawl.js').CrawledList} list The collected list data.
    * @param {{
    *   storage?: import('../common/cache.js').CacheStorage | null,
    *   at?: number,
@@ -116,9 +97,8 @@ if (typeof require === 'function') {
    *   complete?: boolean,
    *   running?: boolean,
    *   states?: readonly string[],
-   * }} [options] `states` names the `?state=` values the corpus is over, and is
-   *   the done pair where it is absent. The statistics are over the whole
-   *   corpus, so they assemble the open pair through here as well.
+   * }} [options] Selected query states default to published and closed. Statistics also
+   *   select open states.
    * @returns {Promise<Corpus>}
    */
   async function membersOf(ref, list, options = {}) {
@@ -168,14 +148,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Walks `?state=published` and `?state=closed`, then reads the advisories
-   * they name.
-   *
-   * Both halves go through the queue the caller handed in: a list page and an
-   * advisory read each cost one request, and the rate limit counts requests.
-   * The corpus is a hundred-odd reads on a repository like
-   * `containerd/containerd`, which is a one-time cost because a closed entry
-   * lives thirty days and a published one ninety plus its draw.
+   * Collect published and closed advisories. List and detail requests share
+   * the caller's rate-limited queue.
    *
    * @param {CorpusOptions} options
    * @returns {Promise<{
@@ -192,8 +166,7 @@ if (typeof require === 'function') {
     /**
      * @param {import('../common/crawl.js').CrawledList} list
      * @param {boolean} complete
-     * @param {boolean} running Whether this collection is still going. Every
-     *   corpus drawn from inside the walk is, and the one it ends on is not.
+     * @param {boolean} running Whether collection is active.
      * @returns {Promise<Corpus>}
      */
     function assemble(list, complete, running) {
@@ -206,8 +179,7 @@ if (typeof require === 'function') {
       });
     }
 
-    // A pass an earlier page load left unfinished is taken back before anything
-    // is queued, so an advisory that pass had already read is not read again.
+    // Restore saved progress before adding work to avoid repeating completed reads.
     await options.queue.load();
 
     const crawled = await globalThis.bghsa.crawl.crawl({
@@ -222,8 +194,7 @@ if (typeof require === 'function') {
       onFailure: options.onFailure,
       onPage: (list) => {
         if (options.onPage === undefined) return;
-        // The page lands inside the walk, and what it adds to the corpus is
-        // drawn without waiting for the walk to finish.
+        // Display each list page as it arrives.
         void assemble(list, false, true).then(options.onPage, () => {});
       },
     });

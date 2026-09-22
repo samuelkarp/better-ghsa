@@ -3,26 +3,19 @@
 globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
 
 (() => {
-  /** The id of the control the extension owns, and the only mark it leaves. */
   const CONTROL_ID = 'bghsa-settings-control';
 
-  /** What the control reads. */
   const LABEL = 'Better GHSA settings';
 
   /**
-   * The settings page, by the path the manifest names it under. The manifest
-   * also lists this path in `web_accessible_resources`, because a navigation
-   * started from a github.com page to an extension page is blocked unless the
-   * page is listed there.
+   * Navigation from github.com requires the settings page to appear in the
+   * manifest's `web_accessible_resources`.
    */
   const SETTINGS_PAGE = 'src/settings/settings.html';
 
   /**
-   * @returns {Record<string, any> | undefined} the extension API under whichever
-   *   name this browser gives it, and undefined outside a browser. The test is
-   *   for the one member this file calls, so a stand-in carrying that member
-   *   answers and a global named `chrome` that is not the extension API does
-   *   not.
+   * @returns {Record<string, any> | undefined} The first extension API with
+   *   runtime.getURL, or undefined if unavailable.
    */
   function extensionApi() {
     const global = /** @type {Record<string, any>} */ (/** @type {unknown} */ (globalThis));
@@ -33,17 +26,11 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
   }
 
   /**
-   * The settings page's address in this browser.
+   * Hold the settings URL in the isolated world.
+   * Firefox URLs contain an installation UUID; exposing it in the DOM would
+   * allow page scripts to read it. Chrome URLs use the public extension ID.
    *
-   * It is asked for at the moment the control is built and kept in the isolated
-   * world, never in an attribute, so nothing on github.com reads it out of the
-   * page. On Firefox that is what keeps it out of reach: the address carries a
-   * UUID the browser generates once for the installation and then keeps, so a
-   * page that never sees it cannot build it. On Chrome the address is built from
-   * the extension's id, which is public, so there the manifest's listing of the
-   * page is a listing a github.com script can act on.
-   *
-   * @returns {string | null} the URL, and null outside a browser.
+   * @returns {string | null} The settings URL, or null if unavailable.
    */
   function settingsUrl() {
     const runtime = extensionApi()?.runtime;
@@ -57,12 +44,6 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
   }
 
   /**
-   * The extension's own block on this page: the table on the advisory list, the
-   * panel on an advisory, and null before either has drawn.
-   *
-   * Each surface is asked under the id it draws itself with, so a surface that
-   * is not loaded is one this does not look for.
-   *
    * @param {Document} doc
    * @returns {Element | null}
    */
@@ -77,10 +58,7 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
   }
 
   /**
-   * Where the surface for this page puts itself, asked of the surface so the
-   * two cannot drift apart, and null where the surface is not loaded or the
-   * page offers it nowhere. Which surface that is follows from the page: the
-   * list container is on the advisory list and on no advisory.
+   * Use the active surface's placement function.
    *
    * @param {Document} doc
    * @returns {{ parent: Element, before: Element } | null}
@@ -91,30 +69,19 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
     try {
       return surface?.anchor?.(doc) ?? null;
     } catch {
-      // A surface that cannot answer for the page is not a reason to leave the
-      // control off it.
+      // Try the fallback placement if the surface cannot supply one.
       return null;
     }
   }
 
   /**
-   * Where the control goes, which is directly above the extension's own block on
-   * every advisory page, listed repository or not.
-   *
-   * Above that block, so the control reads as the extension's and not as one
-   * more control of GitHub's page, and above rather than below because each
-   * surface reads the element after its own as the sign it is still in place: a
-   * control between the block and that element is a move the surface would draw
-   * itself again for.
-   *
-   * The block is not there to sit above before it has drawn, and on a
-   * repository the allowlist does not carry it never draws at all, so the
-   * second choice is the place the surface for this page takes. A block that
-   * arrives afterwards lands at that place and so lands under the control.
+   * Place the control above the extension's surface. Each surface checks its
+   * next sibling to detect displacement. The control must precede it.
+   * Before the surface renders, use its intended position.
    *
    * @param {Document} doc
-   * @returns {{ parent: Element, before: Element } | null} null when the page
-   *   offers nowhere to put it.
+   * @returns {{ parent: Element, before: Element } | null} Null if a suitable position
+   *   is unavailable.
    */
   function anchor(doc) {
     const own = ownBlock(doc);
@@ -123,15 +90,12 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
     if (place !== null) return place;
     const container = doc.querySelector('#advisories');
     if (container !== null) {
-      // The advisory list with no table surface loaded: above GitHub's filter,
-      // under its own heading, which is the place that surface takes.
+      // Use the table's position when its script is unavailable.
       const before = container.querySelector('repository-advisories-filter');
       if (before?.parentElement != null) return { parent: before.parentElement, before };
     }
-    // An advisory with no panel surface loaded, or one carrying no description
-    // for the panel to sit above: above the title. The header GitHub renders the
-    // title into sits inside a live region it replaces whole, so the control
-    // goes above the region and not inside it.
+    // GitHub replaces the title's live region as a whole. Place the control
+    // outside that region when the panel cannot supply a position.
     const header = doc.querySelector('div.gh-header.js-repository-advisory-details');
     const before = header?.closest('div.js-socket-channel') ?? header;
     if (before?.parentElement != null) return { parent: before.parentElement, before };
@@ -140,9 +104,8 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
 
   /**
    * @param {Document} doc
-   * @param {string} url The settings page, held in this closure alone.
-   * @returns {Element} the control, drawn in Primer's own classes so it reads as
-   *   part of the page it sits on.
+   * @param {string} url The settings URL, stored in the click handler's closure.
+   * @returns {Element} The control.
    */
   function build(doc, url) {
     const holder = doc.createElement('div');
@@ -153,8 +116,7 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
     button.className = 'btn btn-sm';
     button.textContent = LABEL;
     button.addEventListener('click', () => {
-      // A new tab, because the advisory the maintainer is reading is not
-      // something the extension navigates away from.
+      // Preserve the advisory page when opening settings.
       (doc.defaultView ?? globalThis).open(url, '_blank');
     });
     holder.append(button);
@@ -162,20 +124,12 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
   }
 
   /**
-   * Puts the control on an advisory page, which every advisory list and every
-   * advisory carries whether or not the allowlist carries the repository.
-   * REQUIREMENTS.md section 12. On a repository the allowlist does not carry it
-   * is the only thing the extension does there: it reads nothing off the
-   * advisory, sends nothing, and stores nothing.
-   *
-   * Placing is keyed on the control's own id, so a second call leaves one
-   * control, and the surface drawing itself again beside it leaves one too.
-   * GitHub replacing the content frame takes the control with it, and the next
-   * call after that navigation puts one back.
+   * Show the settings control even on repositories outside the allowlist
+   * (REQUIREMENTS.md section 12). Repeated calls reuse the existing control.
    *
    * @param {Document} [doc]
-   * @returns {Element | null} the control, and null where the page offers no
-   *   anchor or the browser offers no address for the settings page.
+   * @returns {Element | null} The control, or null if its position or settings
+   *   URL is unavailable.
    */
   function show(doc = globalThis.document) {
     const held = doc.getElementById(CONTROL_ID);
@@ -190,11 +144,8 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
   }
 
   /**
-   * Takes the control off a page that is no longer an advisory page at all,
-   * which is the one page an advisory control has no business on.
-   *
    * @param {Document} [doc]
-   * @returns {boolean} whether a control came off.
+   * @returns {boolean} Whether the control was removed.
    */
   function hide(doc = globalThis.document) {
     const held = doc.getElementById(CONTROL_ID);

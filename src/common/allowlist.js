@@ -6,12 +6,7 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
 if (typeof require === 'function') require('./storage.js');
 
 /**
- * The part of `browser.storage.local` this file uses. `chrome.storage.local`
- * satisfies it too, and so does a stand-in a test hands to {@link setStorage}.
- *
- * This is declared here rather than read from `src/common/cache.js`, which
- * declares the same shape, because the gate has to answer before the cache has
- * loaded.
+ * The allowlist loads before the cache and declares its storage interface here.
  *
  * @typedef {object} AllowlistStorage
  * @property {(keys: string | string[] | null) => Promise<Record<string, unknown>>} get
@@ -20,81 +15,63 @@ if (typeof require === 'function') require('./storage.js');
 
 (() => {
   /**
-   * The key the list is stored under in `browser.storage.local`.
-   *
-   * Nothing is stored under it on a fresh install, and an absent value is an
-   * empty list, so the extension runs nowhere until a maintainer names a
-   * repository in the settings page. REQUIREMENTS.md section 12.
+   * A fresh install has an empty allowlist. The extension runs only on listed
+   * repositories (REQUIREMENTS.md section 12).
    */
   const STORAGE_KEY = 'allowlist';
 
   /**
-   * What an entry looks like: `owner/repo`, as GitHub allows each half to be
-   * spelled. An owner is alphanumeric with interior hyphens; a repository name
-   * also takes dots and underscores.
+   * Entries use `owner/repo`. Owners allow alphanumerics and interior hyphens.
+   * Repository names also allow dots and underscores.
    */
   const OWNER = /^[a-z\d](?:[a-z\d]|-(?=[a-z\d]))*$/;
   const REPO = /^[a-z\d._-]+$/;
 
-  /** The longest owner and repository name GitHub accepts. */
   const MAX_OWNER = 39;
   const MAX_REPO = 100;
 
   /**
-   * The list, and null until storage has answered. Null is what makes an
-   * unloaded gate closed rather than open: {@link isAllowed} is synchronous and
-   * reads this, so before the read lands every repository is off the list.
+   * {@link isAllowed} returns false until storage supplies the allowlist.
    *
    * @type {readonly string[] | null}
    */
   let entries = null;
 
   /**
-   * The read in flight, so concurrent callers share one, and null when none has
-   * been started or the last one has landed.
+   * Concurrent callers share the pending storage read.
    *
    * @type {Promise<readonly string[]> | null}
    */
   let reading = null;
 
-  /**
-   * The storage a caller put in place of the browser's, and null while the
-   * browser's own is what to use.
-   *
-   * @type {AllowlistStorage | null}
-   */
+  /** @type {AllowlistStorage | null} */
   let injected = null;
 
   /**
-   * Whoever wants to hear that the list has changed. The gate in
-   * `src/content.js` is one: a repository taken off the list has to stop the
-   * extension on a page already showing it.
+   * Subscribers include `src/content.js`, which stops the extension when the
+   * current repository is removed from the allowlist.
    *
    * @type {Set<(entries: readonly string[]) => void>}
    */
   const listeners = new Set();
 
-  /** Whether {@link watch} has already subscribed to the browser's changes. */
   let watching = false;
 
   /**
-   * @returns {AllowlistStorage | null} `storage.local`, and null where there is
-   *   none, which is every environment outside a browser.
+   * @returns {AllowlistStorage | null} `storage.local`, or null if unavailable.
    */
   function browserStorage() {
     return /** @type {AllowlistStorage | null} */ (globalThis.bghsa.storage.local());
   }
 
-  /** @returns {AllowlistStorage | null} the storage this file reads and writes. */
+  /** @returns {AllowlistStorage | null} The active storage provider. */
   function storageOf() {
     return injected ?? browserStorage();
   }
 
   /**
-   * @param {AllowlistStorage | null} storage The storage to use, and null to go
-   *   back to the browser's own.
-   * @returns {void} puts the list back to unloaded, because the answer held in
-   *   memory came from the storage being replaced.
+   * @param {AllowlistStorage | null} storage The storage provider, or null for browser storage.
+   * @returns {void} Resets the cached allowlist.
    */
   function setStorage(storage) {
     injected = storage;
@@ -104,17 +81,14 @@ if (typeof require === 'function') require('./storage.js');
 
   /**
    * @param {unknown} value
-   * @returns {string} the entry as it is compared and stored: trimmed, and
-   *   lowercased because GitHub treats owner and repository names
-   *   case-insensitively and the comparison here does too.
+   * @returns {string} The trimmed, lowercase entry.
    */
   function normalize(value) {
     return typeof value === 'string' ? value.trim().toLowerCase() : '';
   }
 
   /**
-   * Whether a typed entry names a repository. It is a shape test, not an
-   * existence test: nothing here asks GitHub whether the repository is real.
+   * Validate the repository name syntax without checking whether it exists.
    *
    * @param {unknown} value
    * @returns {boolean}
@@ -132,10 +106,8 @@ if (typeof require === 'function') require('./storage.js');
   }
 
   /**
-   * @param {unknown} value What storage answered with, which is data an older
-   *   version of this extension wrote and is never assumed to be a list.
-   * @returns {readonly string[]} the entries in it, normalized, valid, and
-   *   deduplicated.
+   * @param {unknown} value The stored allowlist.
+   * @returns {readonly string[]} The normalized, valid, deduplicated entries.
    */
   function sanitize(value) {
     if (!Array.isArray(value)) return [];
@@ -149,21 +121,19 @@ if (typeof require === 'function') require('./storage.js');
     return kept;
   }
 
-  /** @returns {readonly string[]} the list, empty while it is unloaded. */
+  /** @returns {readonly string[]} The allowlist, or an empty list before loading. */
   function current() {
     return entries ?? [];
   }
 
-  /** @returns {boolean} whether storage has answered yet. */
+  /** @returns {boolean} Whether the allowlist has loaded. */
   function loaded() {
     return entries !== null;
   }
 
   /**
    * @param {readonly string[]} next
-   * @returns {void} holds the list and tells whoever asked to hear, where it
-   *   differs from the one held. A listener that throws does not keep the next
-   *   from hearing.
+   * @returns {void} Notifies listeners when the allowlist changes.
    */
   function adopt(next) {
     const before = entries;
@@ -175,19 +145,13 @@ if (typeof require === 'function') require('./storage.js');
       try {
         listener(next);
       } catch {
-        // A listener that cannot take the change is not a reason to keep the
-        // rest from hearing it.
+        // Notify the remaining listeners even if one throws.
       }
     }
   }
 
   /**
-   * Reads the list from storage, once. Concurrent callers share the read, and a
-   * caller after it has landed gets the answer without another read.
-   *
-   * A storage that is absent or that fails answers empty, which is the closed
-   * gate: the extension does nothing rather than acting on a repository it
-   * cannot confirm anybody listed.
+   * Load the allowlist once. A storage failure produces an empty allowlist.
    *
    * @returns {Promise<readonly string[]>}
    */
@@ -212,14 +176,9 @@ if (typeof require === 'function') require('./storage.js');
   }
 
   /**
-   * Whether the extension runs on a repository. The comparison is
-   * case-insensitive, matching GitHub's treatment of owner and repository
-   * names.
-   *
-   * This is synchronous, and storage is not. Until {@link load} has landed the
-   * list is unknown, and an unknown answer is no: the alternative injects a
-   * surface and fills the cache on a repository nobody listed. REQUIREMENTS.md
-   * section 12.
+   * Return whether the repository is allowed, using a case-insensitive match.
+   * The extension stays disabled until the allowlist loads (REQUIREMENTS.md
+   * section 12).
    *
    * @param {string} nameWithOwner `owner/repo`
    * @returns {boolean}
@@ -232,9 +191,8 @@ if (typeof require === 'function') require('./storage.js');
   }
 
   /**
-   * @param {readonly unknown[]} next The list to store. Entries are normalized,
-   *   invalid ones are dropped, and duplicates collapse.
-   * @returns {Promise<readonly string[]>} what was stored.
+   * @param {readonly unknown[]} next The entries to validate, normalize, and deduplicate.
+   * @returns {Promise<readonly string[]>} The stored entries.
    */
   async function save(next) {
     const kept = sanitize(next);
@@ -247,7 +205,7 @@ if (typeof require === 'function') require('./storage.js');
   /**
    * @param {unknown} value A repository as a maintainer typed it.
    * @returns {Promise<{ ok: boolean, entry: string, reason: string | null }>}
-   *   what was added, and why nothing was where it was not.
+   *   The entry and, on failure, the reason it was rejected.
    */
   async function add(value) {
     const entry = normalize(value);
@@ -271,7 +229,7 @@ if (typeof require === 'function') require('./storage.js');
 
   /**
    * @param {(entries: readonly string[]) => void} listener
-   * @returns {() => void} stops the listener hearing.
+   * @returns {() => void} Unsubscribes the listener.
    */
   function subscribe(listener) {
     listeners.add(listener);
@@ -281,19 +239,13 @@ if (typeof require === 'function') require('./storage.js');
   }
 
   /**
-   * Takes the list from the browser whenever another page of this extension
-   * writes it, so a settings page open beside an advisory changes what that
-   * advisory's page does without either being reloaded.
+   * Apply changes from other extension pages without reloading this page.
    *
-   * @returns {boolean} whether this call subscribed. False where the browser
-   *   offers no change events, which is every environment outside a browser,
-   *   and where a previous call already did.
+   * @returns {boolean} Whether this call subscribed.
    */
   function watch() {
     if (watching) return false;
-    // The API the change is watched on is the one the read came from, so a
-    // shim under one name does not have this listening to a store nothing here
-    // reads.
+    // Subscribe through the same API used for storage reads.
     const onChanged = globalThis.bghsa.storage.api()?.storage?.onChanged;
     if (typeof onChanged?.addListener !== 'function') return false;
     watching = true;

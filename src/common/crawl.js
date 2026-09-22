@@ -10,8 +10,6 @@ if (typeof require === 'function') {
 }
 
 /**
- * One advisory as a list page showed it, and where the crawl found it.
- *
  * @typedef {object} CrawledRow
  * @property {import('./parse-list.js').ListRow} row
  * @property {string} state The `?state=` this advisory was found under.
@@ -19,31 +17,24 @@ if (typeof require === 'function') {
  */
 
 /**
- * How far the walk of one state has got. It is held in the cache, so a walk a
- * navigation interrupted carries on from the page it had reached rather than
- * from the first one.
+ * Persist pagination progress to resume after navigation.
  *
  * @typedef {object} StateWalk
- * @property {string | null} next The page still to read, and null where there
- *   is none left.
+ * @property {string | null} next The next page URL, or null at the end.
  * @property {boolean} started
  * @property {boolean} complete Whether the walk reached the last page.
  * @property {number} startedAt When this walk began, epoch milliseconds.
- * @property {number} completedAt When it reached the last page, and 0 while it
- *   has not.
+ * @property {number} completedAt The completion time, or zero while incomplete.
  * @property {number} pages How many pages it has read.
  * @property {number} failures How many times in a row reading {@link next}
- *   failed. A page that lands puts it back to none.
- * @property {boolean} stalled Whether the walk gave up on the page it was
- *   holding. It did not reach the last page, so it is not complete, and it
- *   prunes nothing; the next walk of that state to fall due starts from the
- *   first page.
- * @property {number} abandonedAt When it gave up, and 0 while it has not.
+ *   failed. A successful read resets it to zero.
+ * @property {boolean} stalled Whether repeated failures abandoned this walk.
+ *   It remains incomplete and restarts from page one when due.
+ * @property {number} abandonedAt The abandonment time, or zero if active.
  */
 
 /**
- * Every open advisory this extension has seen on one repository, and how far the
- * walk of each state has got. It is the record the list cache entry holds.
+ * The list cache stores observed rows and pagination progress by state.
  *
  * @typedef {object} CrawledList
  * @property {Record<string, StateWalk>} walks By `?state=` value.
@@ -52,7 +43,7 @@ if (typeof require === 'function') {
 
 /**
  * @typedef {object} CrawlResult
- * @property {CrawledList} list What the crawl holds now.
+ * @property {CrawledList} list The updated crawl record.
  * @property {string[]} ids The advisories in the states this crawl covers.
  * @property {number} fetched Pages read over the network.
  * @property {number} failed Pages this pass could not read.
@@ -64,46 +55,30 @@ if (typeof require === 'function') {
  * @typedef {object} CrawlOptions
  * @property {{ owner: string, repo: string }} ref The repository being crawled.
  * @property {{ page: (url: string) => Promise<import('./fetch.js').PageRead> }} queue
- *   The one queue this repository's requests go through. A page of the list
- *   costs a request exactly as an advisory read does, so both spend its slot.
- * @property {import('./parse-list.js').ParsedList | null} [parsed] The list page
- *   the maintainer is looking at. Its rows cost no request, and where it is the
- *   first page of its state the walk of that state starts from it.
- * @property {string} [href] The URL of that page, which is what says whether it
- *   is the first page of its state.
+ *   Shares request scheduling with advisory detail reads.
+ * @property {import('./parse-list.js').ParsedList | null} [parsed] The visible
+ *   list page. Its rows are available without a request.
+ * @property {string} [href] The visible page's URL.
  * @property {import('./cache.js').CacheStorage | null} [storage]
  * @property {() => number} [now]
- * @property {readonly string[]} [states] The states to walk, and absent for the
- *   open pair.
+ * @property {readonly string[]} [states] The states to walk. Defaults to triage and draft.
  * @property {(html: string) => import('./parse-list.js').ParsedList | null} [parse]
- * @property {(list: CrawledList) => void} [onPage] Called when a page lands and
- *   when the live page's own rows are taken in, which is what repaints the
- *   table.
+ * @property {(list: CrawledList) => void} [onPage] Called after fetched or
+ *   visible rows are added.
  * @property {(state: string, url: string, reason: unknown) => void} [onFailure]
  */
 
 (() => {
   /**
-   * How many times in a row a walk may fail to read the page it is holding
-   * before it gives that page up.
-   *
-   * A page that fails once is a network on a bad day, and the walk keeps its
-   * place so the next page load asks for that page and no page before it. A
-   * page that fails every time is one GitHub will not serve at all, and a walk
-   * holding one never reaches its last page: it prunes nothing, so an advisory
-   * that left the state stays on the table, and it spends a dead request on
-   * every page load for as long as the record lasts.
-   *
-   * The walk that gives up has not finished and does not say it has. It drops
-   * the page it could not read, and the next walk of that state to fall due
-   * starts from the first page, following the links the pages themselves carry.
-   * That is what clears a stored page that has gone out of range.
+   * After repeated failures, abandon the stored page and restart from page one
+   * when the state is due for refresh. An abandoned walk stays incomplete and
+   * preserves existing rows.
    */
   const MAX_FAILURES = 3;
 
   /**
    * @param {unknown} value
-   * @returns {string | null} the string it holds, and null for anything else.
+   * @returns {string | null} The nonempty string, or null for other values.
    */
   function textOf(value) {
     return typeof value === 'string' && value.trim() !== '' ? value : null;
@@ -111,7 +86,7 @@ if (typeof require === 'function') {
 
   /**
    * @param {unknown} value
-   * @returns {number} the number it holds, and 0 for anything else.
+   * @returns {number} The finite number, or zero for other values.
    */
   function timeOf(value) {
     return typeof value === 'number' && Number.isFinite(value) ? value : 0;
@@ -119,8 +94,7 @@ if (typeof require === 'function') {
 
   /**
    * @param {unknown} value
-   * @returns {string | null} the `?state=` value this names, and null for a name
-   *   that is not one of GitHub's four.
+   * @returns {string | null} The normalized state, or null if unrecognized.
    */
   function stateKeyOf(value) {
     const wanted = String(value ?? '').trim().toLowerCase();
@@ -139,12 +113,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The page a `rel="next"` link names, as a path this crawl will ask GitHub
-   * for.
-   *
-   * A walk follows links out of a page GitHub rendered, so it checks where each
-   * one goes: the only thing it asks for is another page of this repository's
-   * own advisory list.
+   * Follow pagination only within this repository's advisory list.
    *
    * @param {unknown} href
    * @param {{ owner: string, repo: string }} ref
@@ -164,8 +133,8 @@ if (typeof require === 'function') {
 
   /**
    * @param {string | undefined} href The URL of the page being looked at.
-   * @returns {number | null} the page of the list it is, and null where the URL
-   *   does not say. A list URL carrying no `?page=` is the first page.
+   * @returns {number | null} The page number, or null for an absent URL or invalid
+   *   page parameter. An omitted page parameter means page one.
    */
   function pageOf(href) {
     if (href === undefined) return null;
@@ -181,9 +150,7 @@ if (typeof require === 'function') {
 
   /**
    * @param {unknown} value
-   * @returns {import('./parse-list.js').ListRow | null} the row it holds, and
-   *   null where it holds something else. The record is data an older version of
-   *   this extension wrote, so its shape is checked and never assumed.
+   * @returns {import('./parse-list.js').ListRow | null} The validated cached row.
    */
   function rowFrom(value) {
     if (!globalThis.bghsa.schema.isPlainObject(value)) return null;
@@ -224,9 +191,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * @param {unknown} value The list entry's record as the cache handed it back.
-   * @returns {CrawledList} what it holds, and an empty crawl where it holds
-   *   something else.
+   * @param {unknown} value The cached list record.
+   * @returns {CrawledList} The validated crawl record, or an empty crawl if invalid.
    */
   function listFrom(value) {
     /** @type {CrawledList} */
@@ -254,8 +220,7 @@ if (typeof require === 'function') {
   /**
    * @param {CrawledList} list
    * @param {string} state
-   * @returns {StateWalk} the walk held for that state, and one that has not
-   *   started where none is held.
+   * @returns {StateWalk} The stored walk, or a new unstarted walk if absent.
    */
   function walkOf(list, state) {
     return (
@@ -274,9 +239,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Takes one page's rows into the crawl. The state is the one the page was
-   * asked for under, which is what the row belongs to whatever its own chip
-   * reads.
+   * Associate rows with the requested state, independently of their chip text.
    *
    * @param {CrawledList} list
    * @param {readonly import('./parse-list.js').ListRow[]} rows
@@ -292,12 +255,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Drops the advisories that were in one state when it was last walked and are
-   * not in it now: an advisory a maintainer published, closed, or moved to the
-   * other open state.
-   *
-   * Only a walk that reached its last page prunes. A walk that stopped part way
-   * has seen part of the state, and the rest is not gone.
+   * After a complete walk, remove rows not seen since it began. Partial walks
+   * preserve previously observed rows.
    *
    * @param {CrawledList} list
    * @param {string} state
@@ -313,9 +272,7 @@ if (typeof require === 'function') {
   /**
    * @param {CrawledList} list
    * @param {readonly string[]} states
-   * @returns {import('./parse-list.js').ListRow[]} the advisories the crawl
-   *   holds in those states, which for the open pair is every advisory the list
-   *   table shows.
+   * @returns {import('./parse-list.js').ListRow[]} The cached rows in the requested states.
    */
   function rowsIn(list, states) {
     /** @type {import('./parse-list.js').ListRow[]} */
@@ -341,27 +298,17 @@ if (typeof require === 'function') {
   }
 
   /**
-   * A walk of one state waits out the threshold the entries in that state wait
-   * out. A state's list changes on the timescale its advisories do:
-   * `?state=published` gains a row when an advisory is published, and walking
-   * it every five minutes reads pages nothing has changed.
-   *
-   * A walk that starts over costs list pages and no advisory read: an advisory
-   * the walk names again is still within its own threshold.
+   * Use the state's cache refresh threshold for completed or abandoned walks.
    *
    * @param {CrawledList} list
    * @param {string} state
    * @param {number} at
-   * @returns {boolean} whether that state is worth walking now: it has never
-   *   been walked, a walk of it stopped part way, the last walk finished longer
-   *   ago than that state's threshold, or a walk gave up that long ago.
+   * @returns {boolean} Whether to start or resume the walk. Unstarted and
+   *   interrupted walks are immediately due.
    */
   function isDue(list, state, at) {
     const threshold = globalThis.bghsa.cache.staleAfter(state);
-    // A walk that gave up waits out the same threshold before it starts over,
-    // so a state whose pages GitHub refuses costs one attempt a threshold and
-    // not one a page load. It reached no last page, so the corpus it feeds
-    // reports itself partial until a walk does.
+    // Abandoned walks wait for the refresh threshold before restarting.
     const walk = walkOf(list, state);
     if (walk.stalled) return at - walk.abandonedAt >= threshold;
     if (!walk.started) return true;
@@ -370,13 +317,10 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Records that a walk could not read the page it is holding, and gives that
-   * page up once the attempts are spent.
-   *
    * @param {CrawledList} list
    * @param {string} state
    * @param {number} at
-   * @returns {boolean} whether the walk gave up.
+   * @returns {boolean} Whether the failure limit was reached.
    */
   function noteFailure(list, state, at) {
     const walk = walkOf(list, state);
@@ -395,9 +339,7 @@ if (typeof require === 'function') {
   /**
    * @param {CrawledList} list
    * @param {string} state
-   * @returns {boolean} whether a walk of that state is under way: it started, it
-   *   has not reached its last page, and it has not given up, so it is holding a
-   *   page still to read.
+   * @returns {boolean} Whether the walk has started and is neither complete nor stalled.
    */
   function inProgress(list, state) {
     const walk = walkOf(list, state);
@@ -405,16 +347,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Takes in the page the maintainer is looking at. Its rows are advisories seen
-   * now at no request cost, and where it is the first page of its state the walk
-   * of that state starts from it rather than asking GitHub for a page it already
-   * has.
-   *
-   * A walk already under way carries on from the page it had reached. Page one
-   * is the common way back to a list, and starting the walk over there would
-   * ask GitHub again for every page between one and the page the walk was
-   * holding. The rows on the page are still taken in, so coming back to page
-   * one costs nothing and gains what the page shows.
+   * Use the visible page's rows immediately. Start a due walk from a visible
+   * first page, but preserve the position of any walk already in progress.
    *
    * @param {CrawledList} list
    * @param {import('./parse-list.js').ParsedList} parsed
@@ -461,16 +395,9 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Walks every open state of one repository's advisory list, page by page.
-   *
-   * The four state tabs are mutually exclusive, so the open set is the union of
-   * `?state=triage` and `?state=draft`, and both are walked whichever tab the
-   * page was opened on.
-   *
-   * What is persisted after every page is the page each state's walk has still
-   * to read and every advisory seen so far. A reload therefore asks for the page
-   * the walk had reached and no earlier one, and the advisories already seen
-   * paint from the same record with nothing fetched.
+   * Walk the requested states, defaulting to triage and draft. Persist rows
+   * and pagination progress after each page for display and resumption after
+   * navigation.
    *
    * @param {CrawlOptions} options
    * @returns {Promise<CrawlResult>}
@@ -486,21 +413,19 @@ if (typeof require === 'function') {
         globalThis.bghsa.parseList.parseList(new DOMParser().parseFromString(html, 'text/html')));
 
     /**
-     * @returns {Promise<void>} holds the crawl where the next page load reads
-     *   it.
+     * @returns {Promise<void>} Persists the crawl for resumption after navigation.
      */
     async function persist() {
       await globalThis.bghsa.cache.putList(ref, list, { storage, at: clock() });
     }
 
-    /** @returns {void} tells the caller there is more of the list to draw. */
+    /** @returns {void} Notifies the caller of updated rows. */
     function report() {
       if (options.onPage === undefined) return;
       try {
         options.onPage(list);
       } catch {
-        // The listener that would hear about it is the one that threw. The
-        // crawl is what fills the table, and it carries on.
+        // Continue crawling after a listener failure.
       }
     }
 
@@ -515,7 +440,7 @@ if (typeof require === 'function') {
       try {
         options.onFailure(state, url, reason);
       } catch {
-        // As above.
+        // Continue crawling after a listener failure.
       }
     }
 
@@ -535,9 +460,6 @@ if (typeof require === 'function') {
 
     let fetched = 0;
     let failed = 0;
-    // Set when the queue reports the work stopped. The states left are not
-    // walked: the queue answers every further read the same way, and each walk
-    // stands where it stands until a page load takes the work back.
     let stopped = false;
 
     for (const state of states) {
@@ -559,11 +481,7 @@ if (typeof require === 'function') {
         await persist();
       }
 
-      // The pages this pass has asked for. REQUIREMENTS.md section 9 walks every
-      // page of a state, so nothing bounds how many are read; a `rel="next"`
-      // that names a page this pass already read is the one thing the walk will
-      // not follow, because following it is a request a second forever. The
-      // walk keeps its place, so it is not complete and it prunes nothing.
+      // Detect pagination cycles while allowing any number of distinct pages.
       /** @type {Set<string>} */
       const seen = new Set();
 
@@ -576,17 +494,13 @@ if (typeof require === 'function') {
 
         const answer = await options.queue.page(url);
         if (answer.stopped) {
-          // Nothing was asked of GitHub, so nothing is known about the page the
-          // walk is holding. The work was put down and will be taken back, and
-          // the walk keeps its place as it does across any other interruption:
-          // no attempt spent, and the next page load asks for this same page.
+          // A stopped queue made no request. Preserve the page without counting
+          // a failure.
           stopped = true;
           break;
         }
         if (answer.body === null) {
-          // The page the walk had reached stays in the record, so the next page
-          // load asks for that one and for no page before it. A page that has
-          // failed its attempts is given up on instead.
+          // Retry this page on the next load unless it reaches MAX_FAILURES.
           failed += 1;
           noteFailure(list, state, clock());
           await persist();
@@ -620,8 +534,6 @@ if (typeof require === 'function') {
           stalled: false,
           abandonedAt: 0,
         };
-        // Only the walk that reached the last page has seen the whole state, so
-        // what a walk that stopped short did not see this time is not gone.
         if (next === null) prune(list, state, walk.startedAt);
         await persist();
         report();

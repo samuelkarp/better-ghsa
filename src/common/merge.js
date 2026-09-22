@@ -6,9 +6,6 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
 if (typeof require === 'function') require('./schema.js');
 
 /**
- * A state comment as the merge reads it: the comment it sits in, whether its
- * author's snapshots count, and the snapshot itself.
- *
  * @typedef {object} SnapshotSource
  * @property {string} id The numeric comment id.
  * @property {string} elementId The `advisory-comment-{id}` element id.
@@ -27,8 +24,7 @@ if (typeof require === 'function') require('./schema.js');
  * @property {string} commentId
  * @property {string} elementId
  * @property {string | null} author
- * @property {string} message What the chip carries as a tooltip, and empty
- *   where the chip's own words are the whole of it.
+ * @property {string} message The chip tooltip, or an empty string.
  */
 
 /**
@@ -36,26 +32,20 @@ if (typeof require === 'function') require('./schema.js');
  * @property {Record<string, unknown> | null} state The payload of the snapshot
  *   that holds current state, unknown fields included.
  * @property {SnapshotSource | null} source The comment that payload came from.
- * @property {number | null} seq The ordering claim of that snapshot.
- * @property {number} observedSeq The highest ordering claim on the advisory,
- *   counting snapshots this merge excluded from state.
- * @property {number} nextSeq The ordering claim the next write carries, one
- *   above the highest observed. Every claim read is at most
- *   `schema.MAX_SEQ`, so this is exact and outranks every claim on the
- *   advisory.
+ * @property {number | null} seq The winning snapshot's sequence number.
+ * @property {number} observedSeq The highest valid sequence number, including
+ *   snapshots excluded from state.
+ * @property {number} nextSeq One above the highest observed sequence number.
  * @property {MergeWarning[]} warnings
- * @property {boolean} readOnly Whether a trusted snapshot names a schema major
- *   this reader does not interpret. Nothing else puts an advisory read-only.
- * @property {boolean} confirmationRequired Whether an excluded snapshot still
- *   carries an ordering claim, which makes the next write take one explicit
- *   confirmation.
+ * @property {boolean} readOnly Whether a trusted snapshot uses an unsupported
+ *   schema major.
+ * @property {boolean} confirmationRequired Whether an invalid trusted snapshot
+ *   with a valid sequence number requires confirmation before writing.
  */
 
 (() => {
   /**
-   * The login a tie is resolved on. Trust is decided on the comment's author, so
-   * that login ranks the snapshot, and the login the payload names stands in when
-   * the page did not give one.
+   * Use the comment author for tie-breaking, with the payload's login as fallback.
    *
    * @param {SnapshotSource} source
    * @returns {string}
@@ -65,11 +55,8 @@ if (typeof require === 'function') require('./schema.js');
   }
 
   /**
-   * Orders two logins by code point, negative when `left` sorts first. `<` and
-   * `>` on strings compare UTF-16 code units, which put every code point above
-   * the basic plane below `\uE000` through `\uFFFF`; section 7 puts the
-   * tie-break on code point order. GitHub logins are ASCII, where the two orders
-   * agree.
+   * Compare logins by Unicode code point. JavaScript string comparisons use
+   * UTF-16 code units, which differ for non-BMP characters.
    *
    * @param {string} left
    * @param {string} right
@@ -88,9 +75,8 @@ if (typeof require === 'function') require('./schema.js');
   }
 
   /**
-   * Whether `candidate` holds state over `holder`. The higher `seq` wins, and a
-   * tie goes to the greater login in code point order. The direction is
-   * arbitrary; what it buys is that every reader resolves a tie alike.
+   * The higher sequence number wins. Break ties by the greater login in
+   * Unicode code point order.
    *
    * @param {SnapshotSource} candidate
    * @param {SnapshotSource} holder
@@ -107,8 +93,7 @@ if (typeof require === 'function') require('./schema.js');
    * @param {MergeWarning[]} warnings
    * @param {WarningKind} kind
    * @param {SnapshotSource} source
-   * @param {string} message What the chip's tooltip reads, or empty for no
-   *   tooltip at all.
+   * @param {string} message The chip tooltip, or an empty string.
    * @returns {void}
    */
   function warn(warnings, kind, source, message) {
@@ -122,13 +107,9 @@ if (typeof require === 'function') require('./schema.js');
   }
 
   /**
-   * Resolves the state comments on one advisory into the state they agree on.
-   *
-   * A snapshot whose fence does not parse, or whose `seq` is absent or is not a
-   * number, carries no ordering claim: it is warned on and writing continues. A
-   * snapshot whose `seq` reads and whose payload fails validation is excluded
-   * from state, is warned on by name, and makes the next write take one explicit
-   * confirmation.
+   * Select the highest-ranked valid, trusted snapshot. A trusted snapshot with
+   * a valid sequence number and invalid fields requires confirmation before
+   * the next write. An unsupported trusted schema makes the advisory read-only.
    *
    * @param {SnapshotSource[]} sources
    * @returns {MergedState}
@@ -154,21 +135,14 @@ if (typeof require === 'function') require('./schema.js');
       observedSeq = Math.max(observedSeq, report.seq ?? 0);
 
       if (!source.trusted) {
-        // The chip is the whole of it: what it says the reader can act on, and
-        // nothing about the comment it sits on is a fact a tooltip would add.
         warn(warnings, 'untrusted', source, '');
         continue;
       }
 
-      // A payload naming a major this reader does not read is not one this
-      // reader's field rules can judge, so the version is settled first. The
-      // gate reads a major only where one parsed, so a payload that names no
-      // readable version falls through to validation, which is where a missing
-      // or malformed `betterGhsa` is reported.
+      // Handle unsupported major versions before field-validation errors.
+      // A missing or malformed betterGhsa value is a validation error.
       if (!report.schemaSupported) {
         readOnly = true;
-        // The chip beside this message already says the snapshot comes from a
-        // newer extension, so the version is the one fact left to carry.
         warn(
           warnings,
           'unsupported schema',
@@ -205,10 +179,7 @@ if (typeof require === 'function') require('./schema.js');
   }
 
   /**
-   * Writes `value` as an own field of `target` under `key`, whatever the key
-   * reads. Assignment to `__proto__` stores no field and sets the object's
-   * prototype from the value, so a snapshot carrying that key would lose it and
-   * the result would answer for fields it never held.
+   * Define an own property to preserve `__proto__` as data.
    *
    * @param {Record<string, unknown>} target
    * @param {string} key
@@ -225,12 +196,7 @@ if (typeof require === 'function') require('./schema.js');
   }
 
   /**
-   * A copy of `value` sharing no object with it. A written snapshot is built
-   * from the parsed report the merge holds and from the caller's changes; a
-   * copy is what keeps a later change to one of them out of the other.
-   *
-   * Plain objects and arrays are copied through. Every other value a JSON
-   * payload holds is a primitive and stands as it is.
+   * Deep-copy JSON values to isolate the result from later mutations.
    *
    * @param {unknown} value
    * @returns {unknown}
@@ -246,10 +212,8 @@ if (typeof require === 'function') require('./schema.js');
   }
 
   /**
-   * Copies `base` forward with `changes` applied. A field `changes` does not name
-   * survives untouched whether or not this reader knows it, an object is merged
-   * key by key so an unknown field inside it survives too, and null removes a
-   * field.
+   * Apply changes recursively while preserving unspecified fields. Null
+   * removes a field; undefined leaves it unchanged.
    *
    * @param {Record<string, unknown>} base
    * @param {Record<string, unknown>} changes
@@ -277,9 +241,8 @@ if (typeof require === 'function') require('./schema.js');
   }
 
   /**
-   * The payload of the next write: the merged state carried forward, the caller's
-   * changes applied, and the envelope stamped. It shares no object with `current`
-   * or with `changes`.
+   * Build the next snapshot from the current state, changes, and envelope.
+   * Nested objects are copied.
    *
    * @param {Record<string, unknown> | null} current
    * @param {Record<string, unknown>} changes

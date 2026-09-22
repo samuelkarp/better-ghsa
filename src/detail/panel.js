@@ -25,48 +25,39 @@ if (typeof require === 'function') {
 }
 
 (() => {
-  /** The id of the sentinel element the extension owns. */
+
   const PANEL_ID = 'bghsa-detail-panel';
 
-  /** The id of the extension's global stylesheet. */
   const STYLE_ID = 'bghsa-style';
 
-  /** Every rule the extension adds to the page. */
   const STYLE_TEXT = [
     '.bghsa-chips { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }',
     '.bghsa-label { flex: 0 0 9rem; }',
     '.bghsa-field-label { flex: 0 0 9rem; }',
-    // The summary is drawn as a Primer button. `display: inline-block` off
-    // `btn` already drops the triangle in engines that key the marker on
-    // `display: list-item`; these cover the ones that do not.
+    // Hide the disclosure marker in engines where the Primer button's display
+    // style alone does not remove it.
     '.bghsa-editor-summary { cursor: pointer; list-style: none; }',
     '.bghsa-editor-summary::-webkit-details-marker { display: none; }',
     '.bghsa-confirmed { display: flex; flex-direction: column; gap: 6px; }',
     '.bghsa-confirmation-name { flex: 0 0 9rem; }',
-    // `currentColor` is what a foreground falls back to: the page's own text
-    // color reads in either theme, where a fixed one would be wrong in one.
+    // Use the page text color as the fallback in both themes.
     '.bghsa-confirmation-note { color: var(--fgColor-muted, currentColor); }',
     '.bghsa-since { color: var(--fgColor-muted, currentColor); }',
     ...globalThis.bghsa.chips.TONE_RULES,
   ].join('\n');
 
-  /** What a row reads where the extension could not read the value behind it. */
   const UNKNOWN = 'Unknown';
 
-  /** The state GitHub gives an advisory nobody has published or closed yet. */
   const DRAFT_STATE = globalThis.bghsa.chips.DRAFT_STATE;
 
-  /** How every surface builds an element. */
   const element = globalThis.bghsa.dom.element;
 
-  /** How every surface cases a stored value. */
   const sentenceCase = globalThis.bghsa.chips.sentenceCase;
 
   /**
    * @param {Document} doc
    * @param {string} label
-   * @returns {{ row: Element, body: Element }} a Box row and the element its
-   *   value goes in.
+   * @returns {{ row: Element, body: Element }} The row and its value container.
    */
   function row(doc, label) {
     const container = element(doc, 'div', 'Box-row d-flex flex-items-baseline');
@@ -86,21 +77,9 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The chip row, which is visible whatever else the panel shows.
-   *
-   * The waiting chips and the patch state are what the list row leads with, and
-   * they are built here from the same code, so the reason an advisory sits
-   * where it does on the list is what its own page says first. The patch
-   * chip stands on a draft and on no other, which is the list's rule: an
-   * advisory in triage has not been accepted, so no patch is owed for it yet.
-   * An advisory that is published or closed has no list row and no waiting
-   * state to report.
-   *
-   * The advisory page carries the state, the severity, and the CVE above the
-   * panel, so the row does not repeat them. A state the extension could not read
-   * is the exception: it drives the patch chip, the confirmations, the
-   * never-reviewed reading and the place this advisory takes in the list, so a
-   * reader is owed the word that the panel is working without it.
+   * Use the list's waiting and patch chips on the detail page. Patch preparation
+   * applies to drafts. Published and closed advisories omit waiting chips.
+   * Report an unreadable state because it controls which chips appear.
    *
    * @param {Document} doc
    * @param {import('../common/parse-detail.js').ParsedDetail} advisory
@@ -132,10 +111,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * What the confirmation chip reads. A drifted track reverted to unconfirmed
-   * and reads as unconfirmed, and looks like every other unconfirmed track:
-   * one state, one appearance. Every confirmation chip is dimmed, as the chips
-   * GitHub's own sidebar carries are.
+   * Display drifted confirmations as unconfirmed.
    *
    * @param {import('./tracking.js').Confirmation} state
    * @returns {string}
@@ -147,10 +123,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Who acted and when. The chip beside this carries the verb, so the note
-   * carries the two facts it does not. A record naming no login reads as a
-   * maintainer, because the confirmation stands whether or not the login
-   * survived.
+   * Confirmation remains valid when its author is unknown.
    *
    * @param {import('./tracking.js').Confirmation} state
    * @returns {string}
@@ -163,10 +136,7 @@ if (typeof require === 'function') {
 
   /**
    * @param {import('./tracking.js').Confirmation} state
-   * @returns {string | null} what the panel says beside the chip. A drifted
-   *   track says nothing: it is unconfirmed, and who confirmed some earlier
-   *   value does not change that. Neither does a track whose value went
-   *   unread, where the chip already says the state is unknown.
+   * @returns {string | null} Attribution for a confirmed value, otherwise null.
    */
   function confirmationNote(state) {
     if (state.status === 'confirmed') return attribution(state);
@@ -174,25 +144,15 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The advisory states the confirmations and the original report row are not
-   * shown in.
+   * Published and closed advisories omit confirmations and report preservation.
    *
    * @type {readonly string[]}
    */
   const SETTLED_STATES = ['published', 'closed'];
 
   /**
-   * Whether this advisory is past the point the confirmations answer for, and
-   * past the point preserving the reporter's wording serves anything.
-   *
-   * A confirmation says whether the text was made publishable and the score
-   * approved, publication answers that by having happened, and a closed advisory
-   * will never be published. A state this reader could not read is not one of
-   * these, because an advisory on its way to publication is where the answer
-   * still matters.
-   *
-   * REQUIREMENTS.md section 8 puts the preserve button and its row under the
-   * same test: an advisory that is published or closed is dealt with.
+   * Confirmations and report preservation apply before publication or closure
+   * (REQUIREMENTS.md section 8). Unknown states still show these controls.
    *
    * @param {import('../common/parse-detail.js').ParsedDetail} advisory
    * @returns {boolean}
@@ -203,9 +163,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Whether the description standing on the page is still the reporter's own.
-   * Nothing on the page says, where no preserved comment stands to compare it
-   * against, which is the same answer an unread confirmation gives.
+   * Report whether the description matches the original report, or is unknown.
    *
    * @param {boolean | null} original
    * @returns {string}
@@ -216,12 +174,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The confirmations, which are what the panel is for: whether the advisory
-   * text was rewritten for publication and whether the score was approved.
-   *
-   * The description line carries one fact the other two do not, so the panel
-   * says what the description is in one place: whether a maintainer approved
-   * it, and whether it is still the text the reporter wrote.
+   * Show confirmation status and description provenance together.
    *
    * @param {Document} doc
    * @param {import('./tracking.js').TrackingView} tracking
@@ -231,16 +184,12 @@ if (typeof require === 'function') {
   function buildConfirmations(doc, tracking, advisory) {
     const container = element(doc, 'div', 'Box-row bghsa-confirmed');
     container.append(element(doc, 'div', 'text-bold bghsa-confirmed-heading', 'Confirmations'));
-    // The tracks in the order tracking names them, which is the order the
-    // panel shows them in.
+
     for (const track of globalThis.bghsa.tracking.CONFIRMATION_TRACKS) {
       const state = tracking[track.key];
       const line = element(doc, 'div', 'd-flex flex-items-baseline bghsa-confirmation');
       line.append(element(doc, 'span', 'bghsa-confirmation-name', track.name));
-      // A name and a body, the two elements `row` builds a panel row from, so
-      // a confirmation's chips start where every other row's content starts.
-      // The body is the flex container the chips lay out in, which keeps the
-      // gap between chips and off the space between the name and the first.
+      // Use a separate flex container for chip gaps to preserve panel row alignment.
       const body = element(doc, 'div', 'flex-auto bghsa-chips');
       line.append(body);
       body.append(globalThis.bghsa.chips.buildChip(doc, { text: confirmationText(state) }));
@@ -256,12 +205,10 @@ if (typeof require === 'function') {
   }
 
   /**
-   * What the embargo chip reads. The row is labelled `Embargo`, so the chip
-   * says where the embargo stands and does not name it again.
+   * The row label already names the embargo.
    *
    * @param {string | null} lift The stored lift date.
-   * @param {boolean} overdue Whether that date has gone by on an advisory that
-   *   is not published.
+   * @param {boolean} overdue Whether the lift date has passed on an unpublished advisory.
    * @returns {string}
    */
   function embargoText(lift, overdue) {
@@ -270,8 +217,6 @@ if (typeof require === 'function') {
   }
 
   /**
-   * A row carrying one chip per value.
-   *
    * @param {Document} doc
    * @param {string} label
    * @param {string[]} values
@@ -287,15 +232,13 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The stored tracks. A track appears only where the snapshot says something
-   * about it, so an advisory nobody has set a value on carries no rows here.
+   * Show stored tracks only when they have a value.
    *
    * @param {Document} doc
    * @param {import('./tracking.js').TrackingView} tracking
-   * @param {boolean} embargoOverdue Whether the embargo's lift date has gone by
-   *   on an advisory that is not published.
-   * @param {{ owner: string, repo: string } | null} ref The repository this
-   *   advisory belongs to, which is the one a duplicate names an advisory of.
+   * @param {boolean} embargoOverdue Whether the lift date has passed on an unpublished advisory.
+   * @param {{ owner: string, repo: string } | null} ref The repository used for duplicate
+   *   advisory links.
    * @returns {Element[]}
    */
   function buildTracks(doc, tracking, embargoOverdue, ref) {
@@ -305,9 +248,7 @@ if (typeof require === 'function') {
     if (tracking.triage !== null) {
       const built = row(doc, 'Triage');
       built.body.className = 'flex-auto bghsa-chips';
-      // The triage value is which side the advisory is waiting on, and the two
-      // sides are painted apart: what a maintainer owes takes the loud tone. A
-      // value this reader does not know is waiting on us.
+      // Unknown triage values count as waiting on maintainers.
       const blocked = globalThis.bghsa.order.classifyTriage(tracking.triage);
       built.body.append(
         globalThis.bghsa.chips.buildChip(doc, {
@@ -326,10 +267,8 @@ if (typeof require === 'function') {
     if (tracking.embargo) {
       const built = row(doc, 'Embargo');
       built.body.className = 'flex-auto bghsa-chips';
-      // An embargo in force and an embargo whose date has gone by are two
-      // states, and the words carry the difference: the red tone repeats what
-      // the chip says and never says it alone. The row is labeled `Embargo`, so
-      // the chip carries the date and nothing else.
+      // The text also identifies an overdue embargo for readers who cannot
+      // distinguish its color.
       built.body.append(
         globalThis.bghsa.chips.buildChip(doc, {
           text: embargoText(tracking.embargoLift, embargoOverdue),
@@ -359,9 +298,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The reasons a press left the advisory as it was, and so can be pressed again
-   * safely. Every other outcome may have created the comment, and pressing again
-   * would create a second one.
+   * These failures occur before a preservation request is sent and allow retries.
    *
    * @type {readonly string[]}
    */
@@ -376,10 +313,7 @@ if (typeof require === 'function') {
   ];
 
   /**
-   * Runs the write the button asks for and reports what happened. The button
-   * stays disabled once a press has reached GitHub, because a press whose result
-   * the extension could not confirm may still have created the comment. One
-   * press leaves one result: the previous one is taken away first.
+   * Disable retries after a request may have created a preservation comment.
    *
    * @param {Document} doc
    * @param {import('../common/parse-detail.js').ParsedDetail} advisory
@@ -402,16 +336,14 @@ if (typeof require === 'function') {
       if (note !== null) note.textContent = globalThis.bghsa.preserve.PRESERVED_MESSAGE;
       return outcome;
     }
-    // The comment is on the advisory, written from somewhere else. There is
-    // nothing left to press.
+
     if (outcome.reason === 'preserved') {
       button.remove();
       if (note !== null) note.textContent = outcome.message;
       return outcome;
     }
     if (note !== null) note.textContent = '';
-    // A press that could have created the comment leaves the button gone: the
-    // row says to reload, and what the reload shows is whether it landed.
+    // Allow retries only when the request could not have created a comment.
     const retryable = outcome.reason !== null && RETRYABLE.includes(outcome.reason);
     const banner = warning(doc, outcome.message);
     banner.classList.add('bghsa-preserve-result');
@@ -424,12 +356,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The row the preservation button lives in. An advisory that already carries
-   * the comment gets no button, because the extension writes one per advisory,
-   * and the row is a link to that comment.
-   *
-   * The caller decides whether the row belongs on this advisory at all: a
-   * settled one carries neither the row nor the availability read behind it.
+   * Show the preservation control or a link to the existing comment. The caller
+   * omits this row for published and closed advisories.
    *
    * @param {Document} doc
    * @param {import('../common/parse-detail.js').ParsedDetail} advisory
@@ -441,7 +369,7 @@ if (typeof require === 'function') {
     if (!state.available) {
       if (state.href === null) built.body.textContent = state.message;
       else {
-        // The comment is on this page, so the row points at it and says no more.
+
         const link = element(doc, 'a', 'bghsa-preserved', 'Preserved');
         link.setAttribute('href', state.href);
         built.body.append(link);
@@ -459,18 +387,13 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The panel, built from a parsed advisory, its derived state, and the tracking
-   * state the advisory's snapshots hold. It reads nothing from the document
-   * beyond the document itself, which creates the nodes.
+   * Build the panel from parsed and derived state.
    *
    * @param {Document} doc
    * @param {import('../common/parse-detail.js').ParsedDetail} advisory
    * @param {import('../common/derive.js').DerivedState} derived
    * @param {import('./tracking.js').TrackingView} tracking
-   * @param {import('./edit.js').EditorContext} [context] What the editing
-   *   controls read. A panel built without one displays the stored state and
-   *   does not edit it, because a write is refused against the ordering claim
-   *   the panel was read at and nothing else names it.
+   * @param {import('./edit.js').EditorContext} [context] Enables editing when supplied.
    * @returns {Element}
    */
   function buildPanel(doc, advisory, derived, tracking, context) {
@@ -483,30 +406,22 @@ if (typeof require === 'function') {
     );
     panel.append(buildChips(doc, advisory, derived, tracking));
 
-    // A value the extension could not read is answered in the row that stands
-    // for it, and a value with no row of its own goes unmentioned: the panel
-    // says what the advisory is, and there is nothing to act on in a list of
-    // what a parser missed.
     const dealtWith = settled(advisory);
     if (!dealtWith) panel.append(buildConfirmations(doc, tracking, advisory));
     for (const track of buildTracks(doc, tracking, embargoOverdue, advisory.ref)) {
       panel.append(track);
     }
-    // A dealt-with advisory gets no row and no availability read: what the
-    // button offers is only asked once there is a button to offer it.
+
     if (!dealtWith) panel.append(buildPreserve(doc, advisory));
 
-    // Last, under everything it edits, so the panel reads as state first and
-    // the one control that changes it sits where a reader has finished looking.
     if (context !== undefined) panel.append(globalThis.bghsa.edit.buildEditor(doc, context));
 
     return panel;
   }
 
   /**
-   * Where the panel goes: in the main column, above the description Box, and
-   * outside both live regions, because GitHub replaces each region's subtree on
-   * its own.
+   * Place the panel above the description and outside GitHub's independently
+   * replaced live regions.
    *
    * @param {Document} doc
    * @returns {{ parent: Element, before: Element } | null}
@@ -522,7 +437,7 @@ if (typeof require === 'function') {
 
   /**
    * @param {Document} doc
-   * @returns {void} adds the extension's stylesheet once.
+   * @returns {void}
    */
   function ensureStyle(doc) {
     if (doc.getElementById(STYLE_ID) !== null) return;
@@ -533,16 +448,15 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Places the panel. Placement is keyed on the sentinel element, so injecting
-   * twice leaves one panel and re-injecting after GitHub replaced the subtree
-   * puts one back.
+   * Replace an existing panel or insert one at the description anchor.
    *
    * @param {Document} doc
    * @param {import('../common/parse-detail.js').ParsedDetail} advisory
    * @param {import('../common/derive.js').DerivedState} derived
    * @param {import('./tracking.js').TrackingView} tracking
-   * @param {import('./edit.js').EditorContext} [context]
-   * @returns {Element | null} the panel, or null when the page offers no anchor.
+   * @param {import('./edit.js').EditorContext} [context] Enables editing when supplied.
+   * @returns {Element | null} The panel, or null if neither an anchor nor an existing panel
+   *   is available.
    */
   function injectPanel(doc, advisory, derived, tracking, context) {
     const panel = buildPanel(doc, advisory, derived, tracking, context);
@@ -561,9 +475,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Whether the document needs the panel placed: it carries no sentinel, or it
-   * carries one that no longer sits at the anchor because GitHub replaced the
-   * subtree under it.
+   * Check for a missing panel or one displaced by a GitHub subtree replacement.
    *
    * @param {Document} doc
    * @returns {boolean}
@@ -576,9 +488,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The render loop each document runs its passes through. One loop per document
-   * is what keeps a pass the observer asked for and a pass a save asked for from
-   * reading and writing the document together.
+   * Share one render loop per document to serialize observer and save requests.
    *
    * @type {WeakMap<Document, () => Promise<void>>}
    */
@@ -586,7 +496,7 @@ if (typeof require === 'function') {
 
   /**
    * @param {Document} doc
-   * @returns {() => Promise<void>} that document's loop, made on first use.
+   * @returns {() => Promise<void>} The document's render loop, created on first use.
    */
   function passFor(doc) {
     const held = loops.get(doc);
@@ -597,29 +507,14 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Holds what this page says about its advisory.
-   *
-   * REQUIREMENTS.md section 9: opening an advisory's detail page refreshes that
-   * advisory's cache entry. The document is already here, so the read costs no
-   * request, and the list table's next pass finds the entry inside the
-   * staleness threshold and spends its slot on an advisory nobody has opened.
-   *
-   * A write this page made went to GitHub and is in no open document, so
-   * between a write landing and the page being read again this document shows
-   * state the extension has already replaced. Storing that would put content
-   * read before the write under a timestamp taken after it, which
-   * REQUIREMENTS.md section 2 forbids: the entry would look fresh enough to
-   * skip a refresh while holding what the maintainer replaced. The pass stores
-   * nothing until the document catches up, and the entry the write left stands.
-   * The document is merged here rather than taken from the caller, so a pass
-   * reaches the cache through this and not around it.
+   * Refresh the cache from the open detail page (REQUIREMENTS.md section 9).
+   * Skip documents behind a local state or preservation write. Caching them
+   * would replace newer data with old content under a fresh timestamp.
    *
    * @param {import('../common/parse-detail.js').ParsedDetail} advisory
-   * @returns {Promise<import('../common/cache.js').CacheEntry | null>} the entry
-   *   as it was written, and null where nothing was written: a page that did not
-   *   say which advisory it is, a document behind a write from this page, and
-   *   storage that refused the write. The panel draws either way, because the
-   *   cache is never authoritative.
+   * @returns {Promise<import('../common/cache.js').CacheEntry | null>} The cached entry, or
+   *   null for an unidentified advisory, a document behind a local write, or a storage
+   *   failure.
    */
   function remember(advisory) {
     if (advisory.ref === null) return Promise.resolve(null);
@@ -631,11 +526,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Reads the document and places the panel. Returns null when the document is
-   * not an advisory detail page, or when it offers no anchor.
-   *
-   * Reading is asynchronous because a confirmation is judged against a
-   * fingerprint, and a digest is computed asynchronously.
+   * Read the document and place the panel. Fingerprinting confirmation values
+   * requires an asynchronous digest.
    *
    * @param {Document} doc
    * @returns {Promise<Element | null>}
@@ -643,27 +535,22 @@ if (typeof require === 'function') {
   async function render(doc) {
     const edit = globalThis.bghsa.edit;
     const advisory = globalThis.bghsa.parseDetail.parseDetail(doc);
-    // A pass over a document showing no advisory is how a departure from one
-    // reaches the extension when no click started it.
+    // Record departures caused by navigation without a click.
     if (advisory === null) {
       edit.panelShows(null);
       return null;
     }
     edit.panelShows(edit.keyOf(advisory));
-    // The panel does not wait on storage: what the page says is on the page.
+
     void remember(advisory);
-    // A comment this page wrote is on GitHub and not in this document, so the
-    // state a write left behind outranks what the document's comments merge to
-    // until the page is read again.
+    // Prefer locally saved state until the document includes that write.
     const context = await edit.contextFor(advisory, { rerender: () => passFor(doc)() });
     const placed = injectPanel(doc, advisory, context.derived, context.tracking, context);
-    // The chips carry the extension's tone classes, and a page offering the
-    // panel no anchor still gets them.
+    // Comment chips need styles even when the panel cannot be placed.
     ensureStyle(doc);
     globalThis.bghsa.comments.markComments(doc, context.merged);
-    // What storage holds reaches the panel through a pass of its own, because a
-    // member and a branch seen on another advisory are worth drawing again and
-    // are not worth holding this pass up for.
+    // Refresh member and branch suggestions after storage loads without delaying
+    // this render.
     void Promise.all([
       globalThis.bghsa.members.sync(),
       globalThis.bghsa.branches.sync(),
@@ -674,8 +561,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * @returns {string} what the nodes the extension owns match: the panel, the
-   *   stylesheet, and the chips it puts on comments.
+   * @returns {string} A selector for the panel, stylesheet, and comment chips.
    */
   function ownedSelector() {
     const attribute = globalThis.bghsa.parseDetail.EXTENSION_CHIP_ATTRIBUTE;
@@ -683,13 +569,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * A render loop for one document, running one pass at a time. A pass is
-   * asynchronous because a confirmation is judged against a digest, and two
-   * running together would each read the document and then write the panel, so
-   * the one that finished last would put back what it read first. A request
-   * arriving while a pass runs takes a pass of its own after it, because the
-   * document may have changed while that pass was reading, and further requests
-   * during the same pass fold into that one.
+   * Serialize asynchronous renders to prevent an older read from overwriting
+   * a newer panel. Coalesce requests during a pass into one subsequent pass.
    *
    * @param {Document} doc
    * @returns {() => Promise<void>}
@@ -702,10 +583,7 @@ if (typeof require === 'function') {
         again = true;
         return;
       }
-      // The gate the whole extension turns on, asked again on every pass.
-      // Starting is gated too, and a started document is not a page: GitHub
-      // turns one document into a page on another repository, and a pass driven
-      // by that swap arrives with no navigation event of its own.
+      // Recheck the allowlist after GitHub navigation within the same document.
       if (!globalThis.bghsa.content.enabled()) return;
       running = true;
       try {
@@ -720,39 +598,26 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Watches the document and runs a pass when what the panel describes changes,
-   * or when the panel is gone or has been left behind.
-   *
-   * The panel reads the live regions and describes what they hold, so a region
-   * whose contents are replaced leaves the panel describing a document that is
-   * no longer there: a comment chip is gone with its snapshot unmarked, and a
-   * title or a severity that moved leaves a confirmation claiming a value the
-   * page no longer carries.
+   * Refresh the panel and comment chips when GitHub changes live regions or
+   * removes or displaces the panel.
    *
    * @param {Document} doc
-   * @param {() => Promise<void>} [pass] The loop the observer runs its passes
-   *   through, which is what keeps them from overlapping a pass started
-   *   elsewhere.
-   * @returns {MutationObserver | null} null where the document offers nothing to
-   *   watch or no observer to watch it with.
+   * @param {() => Promise<void>} [pass] The shared render loop.
+   * @returns {MutationObserver | null} The observer, or null if observation is unavailable.
    */
   function observe(doc, pass = renderLoop(doc)) {
     return globalThis.bghsa.dom.watch(doc, { ownedSelector, outOfPlace, pass });
   }
 
   /**
-   * What each started document has running: the observer watching it and the
-   * call that takes the unsaved-changes warning back off. Held so that
-   * {@link stop} can let both go.
+   * Retain the observer and navigation cleanup callback for {@link stop}.
    *
    * @type {WeakMap<Document, { observer: MutationObserver | null, disarm: () => void }>}
    */
   const attached = new WeakMap();
 
   /**
-   * @returns {void} renders the panel into this page and keeps it there. The
-   *   first pass and every pass the observer asks for run through one loop, so
-   *   no two of them read and write the document together.
+   * @returns {void}
    */
   function start() {
     const doc = globalThis.document;
@@ -764,10 +629,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Takes the panel off a document, which is what a repository leaving the
-   * allowlist does to an advisory page already showing one. The observer is let
-   * go first, so removing the panel is not itself a reason to put it back, and
-   * the stylesheet goes with it because nothing else on the page uses it.
+   * Disconnect the observer before removing the panel to prevent reinsertion.
    *
    * @param {Document} [doc]
    * @returns {void}
@@ -779,9 +641,7 @@ if (typeof require === 'function') {
       held.disarm();
       attached.delete(doc);
     }
-    // Everything the surface wrote answers to the selector a pass already uses
-    // to tell its own writing from the page's: the panel, the stylesheet, and
-    // the chips this surface put on the comments in the thread.
+
     for (const node of doc.querySelectorAll(ownedSelector())) node.remove();
   }
 
@@ -805,10 +665,7 @@ if (typeof require === 'function') {
 
   globalThis.bghsa.panel = exported;
 
-  // Nothing starts here. The content script matches every github.com page, so a
-  // surface that started as it loaded would connect an observer on every one of
-  // them. `src/content.js` loads last and starts this surface on the pages it
-  // belongs to, and again when GitHub turns a page into one of those.
+  // src/content.js starts surfaces after checking the page and allowlist.
   if (typeof module !== 'undefined') {
     module.exports = exported;
   }

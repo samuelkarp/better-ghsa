@@ -8,9 +8,7 @@ if (typeof require === 'function') {
 }
 
 /**
- * A chip the list row, the completed row and the detail panel carry. A tone
- * names a Primer state token, and a chip with no tone is dimmed. Every surface
- * draws it as `Label`, `Label--secondary`, and `bghsa-tone-{tone}`.
+ * Chips share Primer state tones across the lists and detail panel.
  *
  * @typedef {object} Chip
  * @property {string} text
@@ -18,23 +16,16 @@ if (typeof require === 'function') {
  */
 
 /**
- * A chip as a surface draws it: what a producer here says, and what the surface
- * knows on top of it.
- *
  * @typedef {Chip & { severityClass?: string | null, dim?: boolean, fill?: boolean,
  *   subject?: string }} ChipSpec
- *   `severityClass` is the `Label--` modifiers GitHub painted the advisory's
- *   own severity chip with, which stands in for the neutral one, `dim` holds a
- *   chip back from its full color while keeping its hue, `fill` paints that
- *   color as the chip's own fill, and `subject` names what the chip is about.
+ *   `severityClass` supplies GitHub's severity label classes. `dim` reduces
+ *   opacity. `fill` uses the text color as the background. `subject` identifies
+ *   the chip.
  */
 
 (() => {
   /**
-   * A stored value as a chip reads it. GitHub sentence-cases its own chips, and
-   * a derived state is named in the lower case REQUIREMENTS.md sets. Only the
-   * first letter is touched, so a value this extension does not interpret still
-   * reaches the reader as it stands.
+   * Capitalize the first letter to match GitHub's chip labels.
    *
    * @param {string} value
    * @returns {string}
@@ -44,11 +35,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * How the derived waiting state is colored. Never reviewed and blocked on us
-   * are both work nobody has done and take danger. The other two take
-   * attention.
-   *
-   * @param {string} state What `order.waitingStateOf` derived.
+   * @param {string} state The derived waiting state.
    * @returns {Chip}
    */
   function derivedChip(state) {
@@ -58,23 +45,12 @@ if (typeof require === 'function') {
   }
 
   /**
-   * What the waiting chips read and how they are colored, which both surfaces
-   * take from here so a row and the panel behind it say the same thing.
-   *
-   * A stored triage value is the maintainer's own reading of where the advisory
-   * stands, and it parts `evaluating` from `awaiting maintainer input`, which
-   * the derived state holds together under blocked on us. So where one is
-   * stored it carries the chip, in the tone its own classification gives it:
-   * what a maintainer owes is loud, what the reporter owes is quieter.
-   *
-   * The derived chip stands beside it while the derivation still has something
-   * the value does not say, which is never reviewed and new activity. Blocked
-   * on us and blocked on the reporter are the classification of the value
-   * itself, so they drop where a value is stored and stand where none is: a
-   * row is owed a waiting chip either way.
+   * Stored triage distinguishes evaluating from awaiting maintainer input.
+   * Show it with the derived state only when that state adds review or activity
+   * information. Every advisory gets at least one waiting chip.
    *
    * @param {import('./order.js').WaitingEntry} entry
-   * @returns {Chip[]} the derived chip first, where it is drawn.
+   * @returns {Chip[]} The waiting chips, with the derived chip first if present.
    */
   function waitingChips(entry) {
     const order = globalThis.bghsa.order;
@@ -92,28 +68,21 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The state GitHub gives an advisory nobody has published or closed yet, as
-   * GitHub words it. The patch chip stands on a draft and on no other: an
-   * advisory in triage has not been accepted, so no patch is owed for it yet
-   * and its absence says nothing.
+   * Only draft advisories show a patch chip. Advisories in triage have not
+   * been accepted for patch preparation.
    */
   const DRAFT_STATE = 'Draft';
 
-  /** What the patch chip reads while the fork holds an open pull request. */
   const PATCH_IN_REVIEW = 'Patch in review';
 
-  /** What the patch chip reads while the fork holds no pull request. */
   const NO_PATCH = 'No patch yet';
 
-  /** What the patch chip reads where a pull request named a state nobody reads. */
   const PATCH_UNKNOWN = 'Unknown';
 
   /**
-   * What the advisory's private fork says about the patch. REQUIREMENTS.md
-   * section 6 has the fork's list show open pull requests only, so a fork
-   * listing none reads the same as no fork at all. A pull request whose state
-   * went unread reads `Unknown`, because a patch this reader could not judge is
-   * not a patch that is not there.
+   * The private fork lists only open pull requests (REQUIREMENTS.md section 6).
+   * An empty fork and an absent fork both mean no visible patch. An unreadable
+   * pull request state is unknown unless another pull request is open.
    *
    * @param {import('./derive.js').PatchState} patch
    * @returns {string}
@@ -126,11 +95,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * How the patch chip is colored. A draft owes a patch, so no patch takes
-   * danger and a patch under review takes attention. A state this reader could
-   * not judge claims neither and is dimmed.
-   *
-   * @param {string} state What {@link patchStateOf} read.
+   * @param {string} state The state returned by {@link patchStateOf}.
    * @returns {Chip}
    */
   function patchChip(state) {
@@ -142,14 +107,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * How a tone is painted, as the rules a surface's own stylesheet carries.
-   *
-   * The chips sit beside GitHub's own `Label--secondary`, a neutral outline over
-   * the page's background. `attention` and `danger` are muted fills, which carry
-   * default-strength text; `done` and `success` are emphasis fills, which carry
-   * `--fgColor-onEmphasis`. A muted fill falls back to a translucent color and
-   * an emphasis fill to the opaque one GitHub paints it, so each lands in either
-   * theme.
+   * Muted backgrounds use the default text color. Emphasis backgrounds use
+   * `--fgColor-onEmphasis`. Fallbacks preserve the translucent or opaque fill.
    *
    * @type {readonly string[]}
    */
@@ -169,35 +128,22 @@ if (typeof require === 'function') {
   ];
 
   /**
-   * The attribute naming what a chip is about, carried by a chip whose spec
-   * says. It is what points at one chip among the several a surface draws,
-   * where the words and the color are the reader's business and not a handle.
-   *
-   * `parseDetail.EXTENSION_CHIP_ATTRIBUTE` is a different mark for a different
-   * job: it tells a re-read of the advisory page that a chip beside a comment
-   * header is the extension's own and not a role badge.
+   * Identify chips independently of their labels and colors.
+   * `parseDetail.EXTENSION_CHIP_ATTRIBUTE` separately excludes extension chips
+   * from GitHub role badge parsing.
    */
   const SUBJECT_ATTRIBUTE = 'data-bghsa-chip';
 
-  /** What the advisory's severity chip names itself. */
   const SEVERITY_SUBJECT = 'severity';
 
-  /** What holds a chip back from its full color while keeping its hue. */
   const DIM_CLASS = 'bghsa-dim';
 
-  /** What paints a chip's own color as its fill. */
   const FILL_CLASS = 'bghsa-fill';
 
   /**
-   * How a filled chip is painted, as the rules a surface's own stylesheet
-   * carries.
-   *
-   * The fill is the color the chip's text carries, which on a severity chip is
-   * the one GitHub painted it, and the text over it is the page's own
-   * background. Primer holds a foreground and the background it is read over
-   * far enough apart to read either way round, so the pair carries its contrast
-   * inverted in both themes. The text takes an element of its own, because
-   * `currentColor` on the chip is the color the fill is taken from.
+   * Use the chip's foreground color as its fill and the page background color
+   * for its text. The text needs a separate element to preserve `currentColor`
+   * on the outer chip.
    *
    * @type {readonly string[]}
    */
@@ -207,15 +153,6 @@ if (typeof require === 'function') {
   ];
 
   /**
-   * One chip, as every surface draws it: `Label`, then GitHub's own color for
-   * the advisory's severity or the neutral modifier, then the tone, then the
-   * fill, then the dimming. A surface that builds one by hand is a surface that
-   * can disagree with the others about what a chip is.
-   *
-   * A spec naming a subject also carries {@link SUBJECT_ATTRIBUTE}. A chip
-   * naming none carries nothing extra, so what a chip reads and how it is
-   * painted are untouched either way.
-   *
    * @param {Document} doc
    * @param {ChipSpec} spec
    * @returns {Element}

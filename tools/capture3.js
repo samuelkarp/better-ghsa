@@ -6,9 +6,8 @@
       a.push(n.tagName.toLowerCase() + (n.id ? '#' + n.id : '') + c); n = n.parentElement;
     } return a; };
 
-  // Text survives verbatim only when it matches a shape this capture needs to
-  // read: a branch name, a state chip, a CVE or GHSA id, or a number. Every
-  // other string, of any length, is reduced to a character count.
+  // Preserve text matching these branch, state, identifier, and number patterns.
+  // Replace other text with its character count.
   const KEEP = [
     /^(main|master|release\/[\w.\-\/]+|v?\d+(\.\d+){1,3})$/,
     /^(Merged|Open|Closed|Draft|Triage|Published|Withdrawn|Approved|Reviewed|Changes requested|edited)$/i,
@@ -46,7 +45,7 @@
   const all = [...document.querySelectorAll('*')];
   const out = { path: location.pathname, me: document.querySelector('meta[name="user-login"]')?.content ?? null };
 
-  // 1. Private fork element. The clone URL names the fork repository.
+  // The clone URL identifies the private fork repository.
   const fork = document.querySelector('private-forks-git-clone-help');
   out.forkElementPresent = !!fork;
   out.forkSkeleton = sk(fork);
@@ -55,36 +54,32 @@
     chain: chain(i) })) : [];
   out.forkLinks = fork ? [...fork.querySelectorAll('a[href]')].map(a => ({ href: a.getAttribute('href'), t: text(a) })) : [];
 
-  // 2. Every pull request reference on the page, and whether it sits in prose.
   out.prLinks = [...document.querySelectorAll('a[href*="/pull/"]')].map(a => ({
     href: a.getAttribute('href'), t: text(a),
     inMarkdownBody: !!a.closest('div.markdown-body'),
     chain: chain(a) }));
 
-  // 3. Any region naming a branch, which is what backport progress turns on.
   out.branchish = all.filter(e => e.children.length === 0 &&
       /^(release\/|main$|master$|v?\d+\.\d+)/.test((e.textContent || '').trim()))
     .slice(0, 20).map(e => ({ t: red((e.textContent || '').trim()), chain: chain(e) }));
 
-  // 4. Merge and PR state chips.
   out.prStateChips = all.filter(e => e.children.length === 0 &&
       /^(Merged|Open|Closed|Draft|Approved|Changes requested)$/i.test((e.textContent || '').trim()))
     .slice(0, 20).map(e => ({ t: red(e.textContent.trim()), chain: chain(e) }));
 
-  // 5. Timeline items, which is where CVE notes and fork events would render.
+  // CVE notes and fork events appear in the timeline.
   const tl = [...document.querySelectorAll('div.TimelineItem, div.TimelineItem-body')];
   out.timelineCount = tl.length;
   out.timeline = tl.slice(0, 25).map(e => ({ t: text(e), chain: chain(e),
     when: e.querySelector('relative-time')?.getAttribute('datetime') ?? null,
     links: [...e.querySelectorAll('a[href]')].slice(0, 6).map(a => a.getAttribute('href')) }));
 
-  // 6. The whole advisory body below the header, structure only.
   const body = document.querySelector('div.js-socket-channel.js-updatable-content')
             || document.querySelector('#repo-content-turbo-frame');
   out.bodySkeleton = sk(body);
 
-  // 7. Description revision history. Open the description's "edited" dropdown
-  //    before running this: the include-fragment has no src until it opens.
+  // Open the description's "edited" dropdown before running this.
+  // Opening it sets the include-fragment's src for revision history.
   out.editHistory = [...document.querySelectorAll('span.js-comment-edit-history')].map(s => ({
     chain: chain(s),
     fragments: [...s.querySelectorAll('include-fragment')].map(f => ({
@@ -92,7 +87,6 @@
     open: !!s.querySelector('details[open]'),
     skeleton: sk(s) }));
 
-  // 8. CVE fields and any CVE note text.
   out.cveFields = [...document.querySelectorAll('[name^="repository_advisory["]')].map(e => ({
     name: e.getAttribute('name'), tag: e.tagName.toLowerCase(), type: e.getAttribute('type'),
     value: /\[(cve_id|cve_selection|severity|cvss_v3|state)\]$/.test(e.getAttribute('name') || '')

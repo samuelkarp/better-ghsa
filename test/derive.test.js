@@ -46,18 +46,15 @@ test('a reporter comment newer than every member action is new activity', () => 
 });
 
 test('a capture carrying no comment thread has no visible member', () => {
-  // The containerd capture holds no comment nodes, so there is no badge to
-  // read a member off. What that advisory's thread holds is not in it.
+  // Comments and member badges were removed from the containerd capture.
   const state = derive.derive(advisory('published-containerd.html'));
   assert.deepStrictEqual(state.members, []);
   assert.strictEqual(state.newActivity, false);
 });
 
 test('the advisory state alone says whether it has been reviewed', () => {
-  // The containerd capture carries no member comment, and its timeline is
-  // emptied here so no event carries a review either, which leaves the state as
-  // the only signal. Only the state varies: moving an advisory to draft or
-  // published leaves its thread where it is.
+  // The containerd capture omits comments. Clear the timeline to isolate
+  // the advisory state as evidence of review.
   const parsed = { ...advisory('published-containerd.html'), timeline: [] };
   assert.deepStrictEqual(derive.derive(parsed).members, []);
 
@@ -78,8 +75,6 @@ test('the advisory state alone says whether it has been reviewed', () => {
 });
 
 /**
- * The timeline region of an invented fixture, parsed on its own.
- *
  * @param {string} name
  * @returns {import('../src/common/parse-detail.js').TimelineEvent[]}
  */
@@ -90,8 +85,7 @@ function timeline(name) {
 }
 
 /**
- * An advisory in triage whose only commenter carries no badge, so nothing on
- * the page places a maintainer.
+ * Create a triage advisory with only untrusted comments.
  *
  * @param {import('../src/common/parse-detail.js').TimelineEvent[]} events
  * @returns {import('../src/common/parse-detail.js').ParsedDetail}
@@ -106,7 +100,6 @@ function unbadged(events) {
   };
 }
 
-/** A maintainer-only event whose actor appears nowhere else on the page. */
 const DELETED_FORK = {
   id: 'event-100000200',
   actor: 'thornapple',
@@ -115,9 +108,7 @@ const DELETED_FORK = {
 };
 
 test('an event only a maintainer can cause reviews the advisory', () => {
-  // The page places no maintainer: the one commenter carries no badge, and the
-  // actor on the deletion has never commented here. What reviews the advisory
-  // is the act, because a reporter cannot delete the private fork.
+  // Deleting the private fork requires a maintainer, even without a member badge.
   const parsed = unbadged([...timeline('invented-close-timeline.html'), DELETED_FORK]);
   const state = derive.derive(parsed);
   assert.deepStrictEqual(state.members, []);
@@ -126,11 +117,7 @@ test('an event only a maintainer can cause reviews the advisory', () => {
 });
 
 test('the acts a reporter can make leave the advisory never reviewed', () => {
-  // The same timeline without the deletion, and without the close, which is an
-  // act only a maintainer can make. Every event left is one the reporter or
-  // GitHub produces, and two of them hold the wording of a maintainer's act:
-  // `accepted credit` beside `accepted this report`, and `added themselves as
-  // a collaborator` beside a maintainer adding somebody else.
+  // Accepting credit and adding oneself as a collaborator are reporter actions.
   const parsed = unbadged(timeline('invented-close-timeline.html'));
   const kept = parsed.timeline.filter((event) => !/\bclosed this\b/.test(event.text));
   for (const phrase of ['accepted credit', 'added themselves as a collaborator']) {
@@ -149,10 +136,7 @@ test('the acts a reporter can make leave the advisory never reviewed', () => {
 });
 
 test('a title carrying a maintainer act is not read as one', () => {
-  // The reporter writes the title, and a `changed the title` event repeats it,
-  // so any wording at all can reach the timeline text. The phrase is read from
-  // the front of the event, where `changed the title` sits, so a title never
-  // reaches the place a phrase is matched.
+  // Title-change events include reporter-controlled text after the event phrase.
   const parsed = unbadged(timeline('invented-title-timeline.html'));
   assert.strictEqual(parsed.timeline.length, 8);
   assert.match(parsed.timeline[0]?.text ?? '', /accepted this report/);
@@ -164,9 +148,6 @@ test('a title carrying a maintainer act is not read as one', () => {
 });
 
 test('a title reading like a CVE request does not request a CVE', () => {
-  // The fixture carries `requested a CVE` as a title in both shapes a title
-  // change is rendered in. Neither is a CVE request, and no CVE is assigned, so
-  // the advisory has no CVE at all.
   const parsed = unbadged(timeline('invented-title-timeline.html'));
   const titles = parsed.timeline.filter((entry) => /requested a CVE/.test(entry.text));
   assert.strictEqual(titles.length, 2, 'two title changes carry the wording');
@@ -190,10 +171,7 @@ test('a CVE request a maintainer made is read as one', () => {
 });
 
 test('an event this reader does not know cannot carry a phrase into a match', () => {
-  // The reporter list is not the whole defense, because it names the events
-  // this reader knows about. An event neither list names, carrying the words
-  // of a maintainer's act somewhere after its own opening, is refused by the
-  // anchor alone.
+  // Anchoring the phrase also rejects matches inside unknown event types.
   const unknown = {
     id: null,
     actor: null,
@@ -233,14 +211,8 @@ test('each timeline phrase is placed on the side REQUIREMENTS.md puts it', () =>
 });
 
 test('a maintainer act named in the middle of an event is not read', () => {
-  // Nothing but the front of the phrase is matched, so wording that arrives
-  // anywhere else says nothing, whichever event carried it there.
-  //
-  // The last four are events this reader has never seen, which is the shape a
-  // page GitHub has changed takes. Their wording is not on either list, so the
-  // front anchor is the only thing standing between the text they carry and a
-  // maintainer's act. That text is the reporter's on any event that repeats
-  // what the reporter wrote.
+  // The final four cases represent unknown event types with embedded
+  // maintainer-action phrases.
   const texts = [
     'nettleweed changed the title x accepted this report Aug 24, 2026',
     'nettleweed changed the title x published this Aug 24, 2026',
@@ -325,7 +297,6 @@ test('an advisory with no private fork has no patch prepared', () => {
   assert.deepStrictEqual(state.patch.pullRequests, []);
 });
 
-/** The instant every embargo assertion below is judged against. */
 const NOW = Date.parse('2026-08-26T12:00:00Z');
 
 test('an embargo is overdue where its lift moment has passed and nothing published it', () => {

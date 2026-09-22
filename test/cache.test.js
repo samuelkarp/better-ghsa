@@ -5,16 +5,12 @@ const assert = require('node:assert');
 
 const cache = require('../src/common/cache.js');
 
-// A stand-in for `browser.storage.local`. Its `get(null)` answers with
-// everything, which is what the real one does and what the clear reads.
 const { fakeStorage } = require('../test-support/storage.js');
 
 /** @typedef {import('../test-support/storage.js').FakeStorage} Fake */
 
-/** The advisory every test here reads and writes. */
 const REF = { owner: 'containerd', repo: 'containerd', ghsaId: 'GHSA-1234-5678-9abc' };
 
-/** The key that advisory's entry is held under. */
 const KEY = 'adv:containerd/containerd:ghsa-1234-5678-9abc';
 
 const MINUTE = 60 * 1000;
@@ -23,7 +19,7 @@ const DAY = 24 * 60 * MINUTE;
 /**
  * @param {number} observedAt
  * @param {string | null} state
- * @param {number} [jitterMs] What the entry drew when it was written.
+ * @param {number} [jitterMs] The stored jitter in milliseconds.
  * @returns {import('../src/common/cache.js').CacheEntry}
  */
 function entry(observedAt, state, jitterMs = 0) {
@@ -82,13 +78,11 @@ test('a draw puts off the two long thresholds and no others', () => {
 test('a drawn entry comes due at its threshold and its own draw', () => {
   for (const state of ['published', 'withdrawn']) {
     const drawn = entry(0, state, 3 * DAY);
-    // The plain threshold on its own would have had this one due here.
     assert.ok(!cache.isStale(drawn, 30 * DAY), `${state} came due on the plain threshold`);
     assert.ok(!cache.isStale(drawn, 33 * DAY - 1), `${state} came due one millisecond early`);
     assert.ok(cache.isStale(drawn, 33 * DAY), `${state} was fresh at thirty-three days`);
   }
-  // The draw is on the two long thresholds and no others, so an entry in
-  // another state carrying one comes due where it always did.
+  // Jitter applies only to published and withdrawn advisories.
   assert.ok(cache.isStale(entry(0, 'closed', 3 * DAY), 7 * DAY), 'a closed entry took a draw');
 });
 
@@ -106,8 +100,6 @@ test('a done advisory refreshes on its own state, not on five minutes', () => {
     assert.strictEqual(cache.staleAfter(state), threshold, `the threshold for ${state}`);
     assert.ok(!cache.isStale(held, threshold - 1), `${state} went stale one millisecond early`);
     assert.ok(cache.isStale(held, threshold), `${state} was fresh at its own threshold`);
-    // What D2 costs: the done view is opened again an hour later, and a corpus
-    // of roughly 110 advisories is re-read at a request a second.
     assert.strictEqual(
       cache.isStale(held, 60 * MINUTE),
       state === 'triage' || state === 'draft',
@@ -142,16 +134,12 @@ test('an entry within its life is read back with what was written', async () => 
 test('an entry a year old is answered and left in storage', async () => {
   const storage = fakeStorage();
   await cache.putAdvisory(REF, { state: 'triage' }, { storage, at: 0 });
-  // A triage entry was the shortest-lived of all: seven days. A year on it is
-  // long past that and it is still what the table paints from.
   const held = await cache.getAdvisory(REF, { storage, at: 365 * DAY });
   assert.ok(held !== null, 'a year-old entry was not handed back');
   assert.ok(held.observedAt === 0, `the entry was observed at ${held?.observedAt}`);
   assert.ok(cache.isStale(held, 365 * DAY), 'a year-old triage entry was not stale');
   assert.ok(Object.hasOwn(storage.entries, KEY), 'the entry was taken out of storage');
   assert.deepStrictEqual(storage.removals, [], 'a removal went out for an entry within its life');
-  // The empty list above is a removal that did not go out and not a list that
-  // cannot grow: the clear takes the same entry out through `remove`.
   assert.ok((await cache.clear({ storage })) === 1, 'the clear took no entry');
   assert.ok(storage.removals.length === 1, 'the removal went unrecorded');
 });
@@ -169,8 +157,6 @@ test('many advisories are read in one call, however old they are', async () => {
   assert.ok(!found.has(ids[2] ?? ''), 'an advisory nothing wrote was handed back');
   assert.ok(storage.reads.length === 1, `storage saw ${storage.reads.length} reads`);
   assert.deepStrictEqual(storage.removals, [], 'a removal went out for an entry read in a pass');
-  // The empty list above is a removal that did not go out and not a list that
-  // cannot grow: the clear takes the two entries out through `remove`.
   assert.ok((await cache.clear({ storage })) === 2, 'the clear took neither entry');
   assert.ok(storage.removals.length === 1, 'the removal went unrecorded');
 });
@@ -231,9 +217,7 @@ test('an entry stamped with no real moment reads as absent', async () => {
     'an endless time read as a time'
   );
 
-  // Why the stamp is checked: every comparison against a stamp that is not a
-  // real moment answers false, so an entry carrying one would be fresh for
-  // ever and would never be refreshed.
+  // Invalid timestamps can prevent an entry from becoming due for refresh.
   const unreal = { record: {}, observedAt: Number.NaN, state: 'triage' };
   assert.ok(!cache.isStale(unreal, 40 * DAY), 'a NaN stamp read as stale');
 });
@@ -288,8 +272,7 @@ test('the jitter is drawn once, at write time, and held on the entry', async () 
     assert.ok(first !== null && first.jitterMs === 1.25 * DAY, `the first drew ${first?.jitterMs}`);
     assert.ok(second !== null && second.jitterMs === 3.75 * DAY, `the second drew ${second?.jitterMs}`);
 
-    // The draw is on the stored entry, so the moment it falls due is fixed
-    // when it is written and does not move when someone reads it.
+    // Stored jitter fixes the refresh deadline when the entry is written.
     const stored = storage.entries[KEY];
     const jitterMs = cache.entryFrom(stored)?.jitterMs;
     assert.ok(jitterMs === first.jitterMs, `storage held a draw of ${jitterMs}`);
@@ -314,8 +297,6 @@ test('a drawn entry read back from storage comes due at its own moment', async (
     const written = await cache.putAdvisory(REF, { state: 'published' }, { storage });
     const drew = written?.jitterMs;
     assert.ok(written !== null && drew === 2.5 * DAY, `the entry drew ${drew}`);
-    // The plain threshold on its own would have had this one due at thirty
-    // days, which is inside the window this walks.
     clock = 32.5 * DAY - 1;
     const before = await cache.getAdvisory(REF, { storage });
     assert.ok(before !== null && !cache.isStale(before, clock), 'came due one millisecond early');
@@ -338,8 +319,7 @@ test('an entry written before the draw comes due on the plain threshold', async 
   assert.ok(!cache.isStale(inside, 30 * DAY - 1), 'it came due one millisecond early');
   assert.ok(cache.isStale(inside, 30 * DAY), 'an entry carrying no draw was fresh at thirty days');
 
-  // A stored draw that is not a real duration is no draw. Every comparison
-  // against one answers false, so an entry carrying one would never come due.
+  // Invalid jitter values can prevent an entry from becoming due for refresh.
   const unreal = fakeStorage({ [KEY]: { ...held, jitterMs: Number.NaN } });
   const read = await cache.getEntry(KEY, { storage: unreal, at: 30 * DAY });
   assert.ok(read !== null, 'an entry carrying a NaN draw was not handed back');
@@ -352,23 +332,17 @@ test('counting a 404 against an advisory the cache does not hold does nothing', 
   assert.deepStrictEqual(counted, { misses: 0, evicted: false });
   assert.deepStrictEqual(storage.removals, [], 'a removal went out for an entry nothing holds');
 
-  // Three of them, which is what takes an entry that is held. There is nothing
-  // here to take and nothing for the count to go on.
   await cache.noteMissing(REF, { storage, at: 0 });
   const third = await cache.noteMissing(REF, { storage, at: 0 });
   assert.ok(!third.evicted, 'an advisory the cache does not hold was evicted');
 
-  // The empty list above is a removal that did not go out and not a count that
-  // cannot move: an entry the cache does hold is taken out through `remove`.
   await cache.putAdvisory(REF, { state: 'triage' }, { storage, at: 0 });
   assert.ok((await cache.clear({ storage })) === 1, 'the clear took no entry');
   assert.ok(storage.removals.length === 1, 'the removal went unrecorded');
 });
 
 test('three 404s in a row take the advisory out of the cache', async () => {
-  // The eviction is what stops a deleted or withdrawn advisory being asked for
-  // once a schedule forever. Asserted here as a unit, because the only other
-  // place it is exercised is a whole queue pass in test/fetch.test.js.
+  // Eviction ends retries for deleted or withdrawn advisories.
   const storage = fakeStorage();
   await cache.putAdvisory(REF, { state: 'triage' }, { storage, at: 0 });
 
@@ -397,8 +371,6 @@ test('three 404s in a row take the advisory out of the cache', async () => {
   );
   assert.deepStrictEqual(storage.removals, [[KEY]], 'the eviction named another key');
 
-  // A fourth has nothing left to count, and says so rather than reporting an
-  // eviction of an entry that is already gone.
   assert.deepStrictEqual(await cache.noteMissing(REF, { storage, at: 4 * MINUTE }), {
     misses: 0,
     evicted: false,
@@ -406,7 +378,6 @@ test('three 404s in a row take the advisory out of the cache', async () => {
 });
 
 test('a read between two 404s puts the count back to nothing', async () => {
-  // The rule is three in a row. A page that came back is the run broken.
   const storage = fakeStorage();
   await cache.putAdvisory(REF, { state: 'triage' }, { storage, at: 0 });
   await cache.noteMissing(REF, { storage, at: MINUTE });

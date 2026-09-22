@@ -27,10 +27,7 @@ function fixture(name) {
 
 /**
  * @param {string} name
- * @returns {import('../src/common/parse-detail.js').TimelineEvent[]} the
- *   timeline that fixture's region holds. A fixture is kept to the one region a
- *   test reads, and a timeline region carries no page header for `parseDetail`
- *   to recognize.
+ * @returns {import('../src/common/parse-detail.js').TimelineEvent[]} The timeline parsed from the fixture region.
  */
 function timelineFixture(name) {
   const html = fs.readFileSync(path.join(__dirname, '..', 'testdata', name), 'utf8');
@@ -39,9 +36,6 @@ function timelineFixture(name) {
 }
 
 /**
- * An advisory in the shape the parser produces, carrying only what a statistic
- * reads. Everything else is what an advisory with nothing on it holds.
- *
  * @param {Partial<import('../src/common/parse-detail.js').ParsedDetail>} fields
  * @returns {import('../src/common/parse-detail.js').ParsedDetail}
  */
@@ -75,8 +69,6 @@ function advisory(fields) {
 }
 
 /**
- * One comment in the shape the parser produces.
- *
  * @param {{
  *   author: string,
  *   role: string,
@@ -157,7 +149,6 @@ function corpusOf(members, over = {}) {
   };
 }
 
-/** One snapshot payload a member wrote, carrying a closure reason. */
 const CLOSED_AS = /** @param {string} reason */ (reason) => ({
   betterGhsa: '1.0',
   seq: 1,
@@ -167,8 +158,6 @@ const CLOSED_AS = /** @param {string} reason */ (reason) => ({
 });
 
 test("a member's state comment is not an answer to the reporter", () => {
-  // The draft fixture carries one comment: a state comment from a member. The
-  // advisory contributes no first response, and not a response of zero.
   const draft = fixture('draft.html');
   assert.strictEqual(draft.comments.length, 1);
   assert.strictEqual(draft.comments[0]?.role, 'Member');
@@ -178,9 +167,7 @@ test("a member's state comment is not an answer to the reporter", () => {
 });
 
 test('a preserved original report is not an answer to the reporter', () => {
-  // The preservation comment carries the reporter's own text back onto the
-  // thread under a member's login. Counting it would move the first response
-  // from the answer at 23:00 to the copy at 22:05.
+  // Preservation comments copy the reporter's text. They do not count as member responses.
   const preserved = comment({
     author: 'samuelkarp',
     role: 'Member',
@@ -264,9 +251,6 @@ test('an advisory closed twice is measured to the close that first resolved it',
 });
 
 test('the last close and the last publication are read beside the first', () => {
-  // Two readers over one timeline: the timings measure to the ending an
-  // advisory first reached, and the completed list shows the one it is sitting
-  // in.
   const closed = advisory({
     reportedAt: '2026-08-24T16:19:16Z',
     timeline: [
@@ -291,11 +275,7 @@ test('the last close and the last publication are read beside the first', () => 
 });
 
 test('a title carrying a maintainer act sets no timing', () => {
-  // The reporter writes the advisory's title, and a `changed the title` event
-  // repeats it into the timeline, so every one of these phrases is text the
-  // reporter chose. Read against the whole event text they set all three
-  // instants, and the report-to-accept, report-to-close and report-to-publish
-  // durations with them.
+  // Title-change events contain reporter-controlled text, including event phrases.
   const timeline = timelineFixture('invented-title-timeline.html');
   const forged = timeline.filter((entry) => /changed the title/.test(entry.text));
   assert.strictEqual(forged.length, 7, 'the fixture holds seven title changes');
@@ -316,9 +296,7 @@ test('a title carrying a maintainer act sets no timing', () => {
 });
 
 test('an event this reader does not know sets no timing', () => {
-  // The reporter list names the events this reader knows about. An event it
-  // does not know, carrying the words of an act somewhere after its own
-  // opening, is refused by the anchor alone.
+  // Anchoring the phrase rejects matches inside unknown event types.
   const held = advisory({
     reportedAt: '2026-08-24T16:00:00Z',
     timeline: [
@@ -333,8 +311,6 @@ test('an event this reader does not know sets no timing', () => {
 });
 
 test('GitHub releasing an advisory is not a maintainer publishing it', () => {
-  // The same timeline carries a release the day after the publication. A rule
-  // taking any event that ends in "this" would read the release as one.
   const published = fixture('published-containerd.html');
   const released = published.timeline.find((entry) => /released this/.test(entry.text));
   assert.ok(released !== undefined, 'the fixture carries a release');
@@ -374,14 +350,9 @@ test('each timing measures from the report time to the event that ends it', () =
 
   /** @type {[string, Advisory, (held: Advisory) => number | null, string, number][]} */
   const cases = [
-    // 22:15:18 to 22:16:30 is a minute and twelve seconds.
     ['first response', triage, stats.firstResponseAt, '2026-08-25T22:16:30Z', 72 * 1000],
-    // 18:05:12 to 19:02:26 is fifty-seven minutes and fourteen seconds.
     ['accept', published, stats.draftAt, '2026-04-07T19:02:26Z', 3434 * 1000],
-    // 16:19:16 to 19:21:00 is three hours, one minute, and forty-four seconds.
     ['close', closed, stats.closeAt, '2026-08-24T19:21:00Z', 10904 * 1000],
-    // 18:05:12 on April 7 to 22:11:52 on August 3 is a hundred and eighteen
-    // days, four hours, six minutes and forty seconds.
     ['publish', published, stats.publishAt, '2026-08-03T22:11:52Z', 10210000 * 1000],
   ];
   for (const [name, held, at, eventAt, duration] of cases) {
@@ -403,17 +374,9 @@ test('the four timings are named for what each measures', () => {
 });
 
 /**
- * A capture of a real closed advisory, read from the path in
- * `BGHSA_CLOSED_ADVISORY_CAPTURE`. A closed advisory is not published: its
- * title, its participants, and its timeline are all private, so no such capture
- * is committed here and the variable points at a file outside the repository.
- * With the variable unset the check skips, which is what a clone of this
- * repository sees. With it set, a path that does not exist or does not read as
- * an advisory fails the check, so a mistyped path cannot pass for a check that
- * ran. The assertions are instants only, so nothing the capture holds is
- * written down here or printed by a failure.
- *
- * `docs/testing.md` describes the variable.
+ * Closed advisory captures contain private data and stay outside the repository.
+ * BGHSA_CLOSED_ADVISORY_CAPTURE selects the local capture; see docs/testing.md.
+ * The test skips when the variable is unset and fails for an invalid path or page.
  */
 const CAPTURE_VAR = 'BGHSA_CLOSED_ADVISORY_CAPTURE';
 const CAPTURE_SET = Object.prototype.hasOwnProperty.call(process.env, CAPTURE_VAR);
@@ -613,8 +576,6 @@ test('the corpus is counted by closure reason, state, severity, and month', () =
 
   assert.deepStrictEqual({ ...summary.counts.month?.counts }, { '2026-03': 2, '2026-04': 2 });
 
-  // Every advisory here has ended, two by being closed for a reason and two by
-  // being published, so the endings account for the whole of it.
   assert.deepStrictEqual(
     { ...summary.counts.reason?.counts },
     { 'not a vulnerability': 2, published: 2 }
@@ -631,18 +592,11 @@ test('the corpus is counted by closure reason, state, severity, and month', () =
 });
 
 test('the endings are counted over the advisories that ended', () => {
-  // A published advisory ended by being published and a closed one ended for
-  // the reason it was closed for. A closed advisory nobody has given a reason
-  // ended without one, and is the count a backfill works from. An advisory in
-  // triage or in draft has not ended, and is in none of it: counting one under
-  // no reason would say a report still being worked was closed without one.
   const summary = stats.summarize(
     corpusOf([
       member({ ghsaId: 'GHSA-aaaa-aaaa-aaaa', state: 'triage' }),
       member({ ghsaId: 'GHSA-bbbb-bbbb-bbbb', state: 'draft' }),
       member({ ghsaId: 'GHSA-cccc-cccc-cccc', state: 'published' }),
-      // Closed and never read. Nothing has been read to say what reason it
-      // carries.
       member({ ghsaId: 'GHSA-ffff-ffff-ffff', state: 'closed' }),
       member({
         ghsaId: 'GHSA-dddd-dddd-dddd',
@@ -680,9 +634,8 @@ test('the endings are counted over the advisories that ended', () => {
     3,
     'the two still being worked, or the one nobody read, were counted as endings'
   );
-  // REQUIREMENTS.md section 10: a metric is omitted where the event it needs is
-  // not observable. A close nobody has read is such a member, and reading it as
-  // a close with no reason set would inflate the share a backfill works from.
+  // An unread closed advisory has an unknown closure reason.
+  // Omit it from the metric (REQUIREMENTS.md section 10).
   assert.strictEqual(summary.counts.reason?.unread, 1);
 });
 
@@ -766,23 +719,18 @@ test('a corpus of one real advisory measures what its page carries', () => {
   assert.deepStrictEqual(summary.timings.publish?.values, [10210000 * 1000]);
   assert.strictEqual(summary.timings.close?.counted, 0, 'a published advisory is not a closed one');
   assert.strictEqual(summary.timings.close?.omitted, 1);
-  // Redaction dropped every comment node from this capture before it was saved,
-  // so the file holds none. An advisory with no comment on it answers nobody,
-  // and the summary counts it among the omitted rather than at zero.
+  // Comments were removed from the capture. Its first-response duration is unavailable.
   assert.deepStrictEqual(published.comments, []);
   assert.deepStrictEqual(summary.timings.firstResponse?.values, []);
   assert.strictEqual(summary.timings.firstResponse?.omitted, 1);
   assert.strictEqual(summary.timings.firstResponse?.mean, null);
 });
 
-/** The units the durations below are written in. */
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
 
 test('the median of a timing is the middle of what it measured', () => {
-  // One advisory answered in an hour, one in a day, one in twelve. The long one
-  // carries the mean past every value but itself, so the two answers stand
-  // apart and a mean standing in for the median would read as one.
+  // The long response time makes the mean differ from the median.
   const odd = stats.timing([DAY, 12 * DAY, HOUR], { corpus: 3, unread: 0 });
   assert.strictEqual(odd.median, DAY, 'the middle of an odd count');
   assert.strictEqual(odd.mean, (HOUR + DAY + 12 * DAY) / 3);
@@ -795,10 +743,7 @@ test('the median of a timing is the middle of what it measured', () => {
 });
 
 test('a timing orders its values by magnitude', () => {
-  // Two hours, a day and three days are 7200000, 86400000 and 259200000
-  // milliseconds, which read in a different order as text: "259200000" comes
-  // first there and "86400000" last. A corpus holds durations of every size, so
-  // an order taken from the text would report the wrong min, median and max.
+  // These durations sort differently as numbers and strings.
   const values = [3 * DAY, 2 * HOUR, DAY];
   assert.notDeepStrictEqual(
     [...values].sort(),

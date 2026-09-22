@@ -24,10 +24,6 @@ const allowlist = require('../src/common/allowlist.js');
 
 const { fakeStorage } = require('../test-support/storage.js');
 
-// The list of repositories the extension acts on is stored rather than compiled
-// in, and is empty on a fresh install. The fixtures here are that repository's,
-// so the list is put in place and read before the first test, which is what the
-// extension itself does before it takes a page.
 test.before(async () => {
   allowlist.setStorage({
     get: async () => ({ [allowlist.STORAGE_KEY]: ['git-utensils/spoon-knife'] }),
@@ -36,10 +32,8 @@ test.before(async () => {
   await allowlist.load();
 });
 
-/** The write time every save below stamps, so the snapshot it writes is exact. */
 const AT = '2026-08-26T11:00:00Z';
 
-/** What the fetch stand-in answers the page request with. */
 const PAGE_HTML = '<<the advisory page>>';
 
 /**
@@ -68,8 +62,7 @@ function escapeHtml(text) {
 }
 
 /**
- * The comment GitHub renders from a state comment body: the marker in a code
- * span, and the fence as a highlighted `pre`.
+ * Render the snapshot marker as a code span and the JSON as a highlighted pre.
  *
  * @param {string} markdown
  * @returns {string}
@@ -95,13 +88,9 @@ function postedBody(params) {
   return params.get('body') ?? params.get(write.EDIT_BODY_FIELD) ?? '';
 }
 
-/** The comment the signed-in maintainer holds their state in on the fixture. */
 const OWN_COMMENT = 'advisory-comment-282847';
 
 /**
- * Puts what a write landed into the page the next fetch answers with, which is
- * what GitHub does with an edited comment.
- *
  * @param {Document} page
  * @param {URLSearchParams} params
  * @returns {void}
@@ -114,13 +103,10 @@ function land(page, params) {
 }
 
 /**
- * A stand-in for `fetch` that answers the page request with one document and
- * the comment request with the comment that request wrote. A write that lands
- * goes into that document, so a second save reads the advisory as it now
- * stands.
+ * Successful writes update the document returned by subsequent reads.
  *
  * @param {Document} page
- * @param {number} [status] The status the comment request is answered with.
+ * @param {number} [status] The comment response status.
  * @returns {{
  *   fetch: import('../src/common/write.js').WriteFetch,
  *   parseDocument: (html: string) => Document,
@@ -147,13 +133,11 @@ function session(page, status = 200) {
 }
 
 /**
- * One advisory as two documents: the page this browsing context is looking at,
- * and the page a write's own fetch reads. A write lands on the second, because
- * a comment written from here is on GitHub and not in the document the panel
- * sits in.
+ * Use separate documents for the open page and the server response.
+ * A save updates the server response while the open page remains unchanged.
  *
  * @param {string} name
- * @param {number} [status] The status the comment request is answered with.
+ * @param {number} [status] The comment response status.
  * @returns {{ page: Document, talk: ReturnType<typeof session> }}
  */
 function pair(name, status) {
@@ -190,9 +174,7 @@ function lastSnapshot(calls) {
 }
 
 /**
- * @returns {void} takes every advisory's changes, held state, results,
- *   half-typed text, and flight marks back out, so one test says nothing to
- *   the next.
+ * @returns {void} Clears staged changes, results, input text, and pending saves.
  */
 function forget() {
   edit.edits.clear();
@@ -252,7 +234,7 @@ function text(node) {
 
 /**
  * @param {Element} node
- * @returns {void} tells the control's handler that its value moved.
+ * @returns {void} Dispatches a change event.
  */
 function changed(node) {
   const view = node.ownerDocument?.defaultView;
@@ -261,9 +243,7 @@ function changed(node) {
 }
 
 /**
- * Picks an option the way a maintainer does. The selection is the `selected`
- * attribute here, which is what this document model reads a select's value
- * from.
+ * linkedom reads a select's value from the selected attribute.
  *
  * @param {Element} select
  * @param {string} value
@@ -288,8 +268,7 @@ function tick(box, value) {
 }
 
 /**
- * Types into a control without leaving it. `change` fires on blur, and half a
- * date is what the field holds until then.
+ * Dispatch input while the control is still focused.
  *
  * @param {Element} field
  * @param {string} value
@@ -315,7 +294,7 @@ function type(field, value) {
 
 /**
  * @param {Element} root
- * @returns {string} what the panel says about unsaved work.
+ * @returns {string} The unsaved-changes message.
  */
 function note(root) {
   return text(control(root, '.bghsa-save-note'));
@@ -363,8 +342,6 @@ test('a save writes one comment carrying the change', async () => {
   assert.strictEqual(snapshot['by'], 'samuelkarp');
   assert.strictEqual(snapshot['seq'], 8);
   assert.strictEqual(snapshot['triageSince'], AT);
-  // A track no control changed is carried forward, and so is a field this
-  // reader does not know.
   assert.deepStrictEqual(snapshot['owners'], ['samuelkarp']);
   assert.deepStrictEqual(snapshot['cutleryPolicy'], { sharpened: true });
   assert.strictEqual(edit.edits.has(edit.keyOf(context.advisory)), false);
@@ -387,9 +364,8 @@ test('a save that landed leaves the panel holding what it wrote', async () => {
 });
 
 /**
- * Another maintainer's state comment, at the ordering claim `seq` and from a
- * login that takes the tie. The reporter's comment on the fixture stands in
- * for it: it becomes a member's, and it carries their snapshot.
+ * Replace the reporter's comment with a member snapshot at `seq`.
+ * The member login wins a sequence tie with the signed-in maintainer.
  *
  * @param {Document} page
  * @param {number} seq
@@ -437,8 +413,7 @@ test('a rival snapshot at the sequence a save reached refuses the next save', as
   assert.ok(landed.ok === true, `the first save failed: ${landed.message}`);
   assert.strictEqual(sentSnapshot(talk.calls)['seq'], 8);
 
-  // Another maintainer claimed sequence 8 at the same moment, and the tie on
-  // GitHub goes to the greater login.
+  // At sequence 8, the greater login wins the tie.
   rivalSnapshot(remote, 8, 'awaiting maintainer input');
 
   const second = await editorFor(page, {
@@ -462,7 +437,6 @@ test('a rival snapshot at the sequence a save reached refuses the next save', as
     'the refused change was taken out of the panel'
   );
 
-  // The panel reloads from what the advisory says now.
   const third = await editorFor(page, {
     fetch: talk.fetch,
     parseDocument: talk.parseDocument,
@@ -506,7 +480,6 @@ test('a panel at a sequence the advisory has moved past refuses and reloads', as
   assert.strictEqual(talk.posts().length, 0, 'a refused write reached the comment');
   assert.strictEqual(edit.editsFor(edit.keyOf(context.advisory)).triage, 'evaluating');
 
-  // The panel reloaded with what the fetch read, so pressing Save again writes.
   const reloaded = await contextFor(page, { fetch: talk.fetch, parseDocument: talk.parseDocument });
   assert.strictEqual(reloaded.merged.observedSeq, 7);
   const outcome = await edit.save({ ...reloaded, at: AT });
@@ -543,8 +516,7 @@ test('a save that stops before a request reports it and asks for a pass', async 
 
   assert.strictEqual(outcome.reason, 'unchanged');
   assert.strictEqual(talk.calls.length, 0, 'a save with no change reached GitHub');
-  // The press disabled the controls and wrote "Writing to GitHub" on the
-  // panel, so a save that stops has to put something else there.
+  // A failed save must restore the controls and replace the progress message.
   assert.strictEqual(passes, 1, 'the panel was left as the press put it');
   assert.strictEqual(edit.results.get(edit.keyOf(context.advisory))?.message, '');
 });
@@ -581,8 +553,6 @@ test('discarding takes the changes back out', async () => {
   /** @type {HTMLElement} */ (/** @type {unknown} */ (control(editor, 'button.bghsa-discard')))
     .click();
 
-  // The panel the next pass builds is what the maintainer is left looking at,
-  // and it offers the stored state with nothing staged over it.
   const after = edit.buildEditor(page, context);
   assert.strictEqual(note(after), '');
   assert.strictEqual(control(after, 'button.bghsa-save').hasAttribute('disabled'), true);
@@ -601,7 +571,6 @@ test('a value confirmed now reads as confirmed', async () => {
   });
   assert.strictEqual(context.tracking.description.status, 'unconfirmed');
   tick(control(editor, 'input.bghsa-confirm-description'), true);
-  // A staged confirmation is named by the label its own row carries.
   assert.strictEqual(note(editor), 'Unsaved changes: Description.');
   const outcome = await edit.save(context);
 
@@ -610,8 +579,7 @@ test('a value confirmed now reads as confirmed', async () => {
   assert.strictEqual(view.description.status, 'confirmed');
   assert.strictEqual(view.description.by, 'samuelkarp');
   assert.strictEqual(view.description.at, AT);
-  // The record another maintainer wrote is carried forward untouched, drift
-  // and all.
+  // Preserve the other maintainer's confirmation, including its outdated hash.
   assert.strictEqual(view.title.status, 'drifted');
   assert.strictEqual(view.title.by, 'samuelkarp');
 });
@@ -624,8 +592,7 @@ test('clearing a confirmation takes the record away', async () => {
   tick(control(confirming.editor, 'input.bghsa-confirm-description'), true);
   await edit.save(confirming.context);
 
-  // The comment is on GitHub and not in this document, so the panel reads the
-  // state its own write left behind.
+  // The open document lacks the saved comment. Read the state retained after saving.
   const clearing = await editorFor(page, wiring);
   assert.strictEqual(clearing.context.tracking.description.status, 'confirmed');
   assert.strictEqual(
@@ -667,13 +634,11 @@ test('a confirmation the page cannot back is cleared and taken away', async () =
     fetch: talk.fetch,
     parseDocument: talk.parseDocument,
   });
-  // Ticked while the title was on the page.
   tick(control(first.editor, 'input.bghsa-confirm-title'), true);
   const key = edit.keyOf(first.context.advisory);
   assert.strictEqual(edit.editsFor(key).confirm?.title, true);
 
-  // The page stops carrying the title, so nothing says what the record would
-  // bind to.
+  // Removing the title makes its confirmation unavailable.
   const field = page.querySelector('[name="repository_advisory[title]"]');
   if (field === null) throw new Error('the fixture carries no title field');
   field.remove();
@@ -724,8 +689,6 @@ test('an excluded snapshot takes one confirmation, and the panel asks for it', a
     text(control(again.editor, 'input.bghsa-supersede').parentElement ?? again.editor),
     'Supersede unparsed state'
   );
-  // The row label, which is not the word the confirmation rows are under: this
-  // one is a maintainer overriding a snapshot, not approving a value.
   const row = control(again.editor, 'input.bghsa-supersede').closest('.bghsa-field');
   assert.strictEqual(text(row?.querySelector('.bghsa-field-label') ?? again.editor), 'Override');
   tick(control(again.editor, 'input.bghsa-supersede'), true);
@@ -805,8 +768,7 @@ test('a member of one organization is not offered on another organization', asyn
     "a member of another organization is offered as this one's owner"
   );
 
-  // With no containerd member seen, that advisory falls back to the
-  // collaborators, and a git-utensils member has no place among them either.
+  // Without observed containerd members, suggestions use containerd collaborators.
   forget();
   members.remember({ owner: 'git-utensils' }, ['samuelkarp']);
   const { editor: cd } = await editorFor(fixture('published-containerd.html'));
@@ -847,8 +809,6 @@ test('a typed login matching no candidate is taken as it is', async () => {
     owners.map((owner) => text(control(owner, '.Label'))),
     ['samuelkarp', 'yaroslavk']
   );
-  // No chip marks an owner the extension does not recognize: it blocked
-  // nothing, and such an owner could always be saved.
   assert.strictEqual(editor.querySelector('.bghsa-owner-unknown'), null);
   assert.strictEqual(note(editor), 'Unsaved changes: Owners.');
 
@@ -909,7 +869,6 @@ test('an owner retyped in a different case holds no change', async () => {
   assert.strictEqual(control(editor, 'button.bghsa-save').hasAttribute('disabled'), true);
 });
 
-/** The repository every fixture below carries an advisory of. */
 const REPO = { owner: 'git-utensils', repo: 'Spoon-Knife' };
 
 /**
@@ -931,8 +890,6 @@ function press(editor, selector) {
 
 test('the backport candidates are offered by version, newest first', async () => {
   forget();
-  // release/0.9 sorts below the release/1.0 this advisory already carries, so
-  // the two sources are ordered together and not one after the other.
   branches.remember(REPO, ['release/2.9', 'release/2.10', 'release/0.9', 'main']);
   const { editor } = await editorFor(fixture('triage-thread.html'));
 
@@ -1098,7 +1055,6 @@ test('text is held as it is typed, before the field is left', async () => {
 
   assert.strictEqual(edit.editsFor(key).embargoLift, '2026-12-01');
   assert.strictEqual(edit.editsFor(key).closureDuplicateOf, 'GHSA-1111-2222-3333');
-  // The list names each track by the label the panel's own row carries.
   assert.strictEqual(note(editor), 'Unsaved changes: Embargo, Closed as.');
   forget();
 });
@@ -1110,7 +1066,6 @@ test('half-typed text survives a render pass', async () => {
   assert.ok(first !== null, 'the fixture offered no anchor');
   const before = /** @type {Element} */ (first);
   typing(control(before, 'input.bghsa-embargo-lift'), '2026-12-01');
-  // A login is a change once it is added, and text in the control until then.
   typing(control(before, 'input.bghsa-owner-input'), 'kolysh');
 
   const second = await panel.render(page);
@@ -1131,8 +1086,7 @@ test('half-typed text survives a render pass', async () => {
 });
 
 /**
- * Puts a field inside the stored embargo that this reader does not know, as a
- * newer version of the extension writing the same advisory would.
+ * Add an unknown embargo field to simulate a snapshot from a newer extension.
  *
  * @param {Document} page
  * @returns {void}
@@ -1269,7 +1223,6 @@ test('a pass drops an id the advisory moved off duplicate under', async () => {
   typing(control(first.editor, 'input.bghsa-closure-duplicate'), 'GHSA-1111-2222-3333');
   assert.strictEqual(edit.editsFor(key).closureDuplicateOf, 'GHSA-1111-2222-3333');
 
-  // Another maintainer closes it as fixed, and the page carries that now.
   const moved = JSON.parse(String(fence.textContent ?? ''));
   moved.seq += 1;
   moved.closure = { reason: 'fixed' };
@@ -1341,8 +1294,7 @@ test('a checkbox ticked and unticked leaves nothing staged', async () => {
   );
   assert.strictEqual(edit.anyPending(), false, 'a checkbox put back where it started warns');
 
-  // The title confirmation on this fixture has drifted, so the box stands
-  // unticked and ticking it is a record the advisory does not carry.
+  // The fixture's title hash is outdated. Checking the box stages a new confirmation.
   assert.strictEqual(context.tracking.title.status, 'drifted');
   const title = control(editor, 'input.bghsa-confirm-title');
   tick(title, true);
@@ -1382,8 +1334,8 @@ test('clearing a record holding an unknown field is refused', async () => {
 
 test('a clear is judged against the state the write reads', async () => {
   forget();
-  // The field landed on the advisory after the panel loaded, by a hand edit at
-  // the sequence the panel is holding. The panel's own page does not carry it.
+  // The remote snapshot contains an unknown field at the same sequence number.
+  // The open page lacks that field.
   const page = fixture('triage-thread.html');
   const remote = fixture('triage-thread.html');
   embargoWithUnknownField(remote);
@@ -1402,8 +1354,6 @@ test('a clear is judged against the state the write reads', async () => {
 
 test('a clear the write reads no unknown field against still goes', async () => {
   forget();
-  // The mirror: the panel loaded with the field and the advisory no longer
-  // carries it, so nothing stands in the way of the clear.
   const page = fixture('triage-thread.html');
   embargoWithUnknownField(page);
   const talk = session(fixture('triage-thread.html'));
@@ -1466,9 +1416,8 @@ test('the closure controls write the duplicate only for a duplicate', async () =
   });
   choose(control(other.editor, 'select.bghsa-closure'), 'out of scope');
   await edit.save(other.context);
-  // A closure that is not a duplicate names none, and a field the snapshot
-  // never carried is left out rather than written as null, which the validator
-  // refuses.
+  // Non-duplicate closures omit an absent duplicate field.
+  // The validator rejects null for this field.
   const written = sentSnapshot(second.calls);
   assert.deepStrictEqual(written['closure'], { reason: 'out of scope' });
   assert.strictEqual(
@@ -1502,7 +1451,7 @@ test('an embargo turned on with no date writes a snapshot that validates', async
 
 /**
  * @param {() => boolean} done
- * @returns {Promise<void>} resolves once `done` holds, or throws.
+ * @returns {Promise<void>} Resolves when done returns true; throws on timeout.
  */
 async function until(done) {
   for (let tries = 0; tries < 200; tries += 1) {
@@ -1529,8 +1478,6 @@ test('pressing Save writes once and asks for a render pass', async () => {
 
   assert.strictEqual(note(editor), edit.WRITING_MESSAGE);
   assert.strictEqual(note(editor), 'Saving...');
-  // The controls are held still while the request is out: a value staged
-  // against it is a value that write does not carry.
   const held = Array.from(editor.querySelectorAll('.bghsa-controls input, .bghsa-controls select'));
   assert.ok(held.length > 0, 'the editor offers no controls');
   assert.strictEqual(
@@ -1564,8 +1511,6 @@ test('a pass during a save leaves the maintainer nothing to stage', async () => 
   /** @type {HTMLElement} */ (/** @type {unknown} */ (control(editor, 'button.bghsa-save')))
     .click();
 
-  // GitHub replaces what surrounds the panel while the request is out, and the
-  // pass that follows builds the controls again.
   const midflight = edit.buildEditor(page, context);
   const open = Array.from(
     midflight.querySelectorAll('.bghsa-controls input, .bghsa-controls select')
@@ -1610,13 +1555,10 @@ test('a second save while one is on its way keeps the flight mark', async () => 
     assert.ok(second.ok === false, 'a second save while one was out was not refused');
     assert.ok(second.reason === 'in-flight', `the second save was refused as ${second.reason}`);
     assert.ok(edit.saving.has(key), 'the second save took the mark the first one is flying under');
-    // What a pass during the flight builds, which is what the maintainer reads.
     const during = edit.buildEditor(page, context);
     assert.strictEqual(note(during), edit.WRITING_MESSAGE);
     assert.strictEqual(control(during, 'button.bghsa-save').hasAttribute('disabled'), true);
   } finally {
-    // Let go of the flight whatever happened above, so a write left hanging
-    // says nothing to the next test.
     go();
     landed = await flight;
   }
@@ -1645,7 +1587,6 @@ test('a value staged while a write is out is kept and reported', async () => {
   const editor = edit.buildEditor(page, context);
   choose(control(editor, 'select.bghsa-triage'), 'evaluating');
   const sent = edit.save(context);
-  // A control the maintainer reached before the pass held it still.
   edit.stage(key, context.tracking, { closureReason: 'not a vulnerability' });
   land();
   const outcome = await sent;
@@ -1697,8 +1638,7 @@ test('a save drops a confirmation the page stopped backing', async () => {
 });
 
 /**
- * Puts the writer out of action the way an environment failure does, and puts
- * it back whatever the caller did.
+ * Make writeState throw during the callback and restore it afterward.
  *
  * @param {() => Promise<void>} body
  * @returns {Promise<void>}
@@ -1979,9 +1919,6 @@ test('a link opened somewhere else leaves the panel where it is', async () => {
 });
 
 /**
- * A click carrying what the pointer held: a button other than the primary one,
- * or a modifier key.
- *
  * @param {Document} doc
  * @param {Record<string, unknown>} held
  * @returns {Event}
@@ -2014,8 +1951,7 @@ test('a click the browser answers elsewhere leaves the panel where it is', async
   });
   try {
     choose(control(editor, 'select.bghsa-triage'), 'evaluating');
-    // Each of these opens the link somewhere else, so the panel and the change
-    // in it are still in front of the maintainer.
+    // These clicks open another tab or window and leave the unsaved form open.
     const elsewhere = {
       'the middle button': { button: 1 },
       'command held': { metaKey: true },
@@ -2027,11 +1963,9 @@ test('a click the browser answers elsewhere leaves the panel where it is', async
       link.dispatchEvent(pointer(page, held));
       assert.strictEqual(asked, 0, `${what} asked about leaving`);
     }
-    // A download takes the file and leaves the page showing.
     file.dispatchEvent(cancelable(page, 'click'));
     assert.strictEqual(asked, 0, 'a download asked about leaving');
 
-    // The same link pressed with nothing held is the departure this warns on.
     link.dispatchEvent(cancelable(page, 'click'));
     assert.strictEqual(asked, 1, 'a plain press did not ask about leaving');
   } finally {
@@ -2043,9 +1977,6 @@ test('a click the browser answers elsewhere leaves the panel where it is', async
 });
 
 /**
- * The panel on an advisory page holding a change in a control that was never
- * saved, which is what a maintainer leaves behind by walking away from it.
- *
  * @param {string} name
  * @returns {Promise<{ page: Document, key: string }>}
  */
@@ -2061,17 +1992,13 @@ async function unsavedPanel(name) {
   return { page, key };
 }
 
-/** One row of the advisory list, as GitHub puts it in the content frame. */
 const LIST_MARKUP =
   '<div id="advisories"><div class="Box-row Box-row--drag-hide">' +
   '<a class="Link--primary" href="/git-utensils/Spoon-Knife/security/advisories/' +
   'GHSA-2222-2222-2222">Another advisory</a></div></div>';
 
 /**
- * GitHub replacing the content frame, which is how the advisory list arrives
- * with no document load and no press on a link: the advisory leaves the frame,
- * the panel goes with it, and the render loop takes the pass that finds a page
- * showing no advisory.
+ * Replace the advisory with a list through soft navigation.
  *
  * @param {Document} page
  * @returns {Promise<Element>} the advisory the list offers to open next.
@@ -2107,8 +2034,6 @@ test('the page holding unsaved changes is the page that asks about them', async 
     );
     assert.strictEqual(edit.anyPending(), true, 'changes the maintainer kept were dropped');
 
-    // The advisory list is not the page the changes were left on, and opening
-    // another advisory from it is not the navigation that left them.
     next.dispatchEvent(cancelable(page, 'click'));
     assert.deepStrictEqual(
       asked,
@@ -2116,9 +2041,6 @@ test('the page holding unsaved changes is the page that asks about them', async 
       'the next navigation asked again'
     );
 
-    // The same press on the same link asks while the advisory holding the
-    // changes is the one showing, so it is the departure that quieted it and
-    // not a guard that stopped listening.
     edit.panelShows(key);
     next.dispatchEvent(cancelable(page, 'click'));
     assert.strictEqual(asked.length, 2, 'the guard heard nothing on the page it is armed for');
@@ -2157,7 +2079,6 @@ test('a confirmation to supersede is not work to warn about', async () => {
   forget();
 });
 
-/** The list row the table builds this advisory's row on top of. */
 const LIST_ROW = {
   ghsaId: 'GHSA-jmvx-2wfw-xfgj',
   owner: 'git-utensils',
@@ -2193,8 +2114,6 @@ test('a refused save leaves the cache holding the page the write read', async ()
     assert.strictEqual(refusal.reason, 'stale');
     assert.strictEqual(talk.posts().length, 0, 'a refused write reached the comment');
 
-    // The request was spent on reading the advisory, so what it read is held:
-    // the panel reloads from it, and so does every other surface.
     const entry = await cache.getAdvisory(ref);
     assert.ok(entry !== null, 'a refused write left the page it read nowhere');
     assert.strictEqual(entry.observedAt, readAt, 'the entry carries another moment');
@@ -2209,12 +2128,8 @@ test('a refused save leaves the cache holding the page the write read', async ()
 });
 
 test('a superseded refusal leaves the cache holding the page the write read', async () => {
-  // The stale case above is a refusal at a sequence number the advisory has
-  // moved past, so the document is plainly behind. A superseded refusal is the
-  // other shape: the rival claimed the same sequence number this panel loaded
-  // with, so the document and what the refusal read agree on the number and
-  // disagree on whose snapshot it is. The next pass over the document must not
-  // put the document over what the refusal read.
+  // The remote snapshot wins a login tie at the same sequence number.
+  // A render pass over the open document must preserve the fetched state.
   forget();
   const readAt = Date.parse('2026-08-26T11:00:00Z');
   cache.setStorage(fakeStorage());
@@ -2231,8 +2146,6 @@ test('a superseded refusal leaves the cache holding the page the write read', as
     const key = edit.keyOf(context.advisory);
     assert.strictEqual(context.merged.observedSeq, 7);
 
-    // Another maintainer claimed the sequence this panel loaded with, and the
-    // tie on GitHub goes to the greater login.
     rivalSnapshot(remote, 7, 'awaiting maintainer input');
     choose(control(editor, 'select.bghsa-triage'), 'evaluating');
     const refusal = await edit.save(context);
@@ -2254,8 +2167,6 @@ test('a superseded refusal leaves the cache holding the page the write read', as
       'the refusal stored something other than the rival state its fetch read'
     );
 
-    // The pass the reload runs, over the document the refusal did not change.
-    // It carries this maintainer's own snapshot at the same sequence number.
     assert.ok(
       (await panel.remember(context.advisory)) === null,
       'the pass stored the document over the state the refusal read'
@@ -2293,8 +2204,6 @@ test('a save that landed leaves the list building the row from what it wrote', a
   try {
     const { page, talk } = pair('triage-thread.html');
     const wiring = { fetch: talk.fetch, parseDocument: talk.parseDocument };
-    // The pass that placed the panel, which holds the advisory as this page
-    // shows it. The fixture's embargo lifts on the thirtieth of September.
     await panel.render(page);
     const { editor, context } = await editorFor(page, {
       ...wiring,
@@ -2310,9 +2219,8 @@ test('a save that landed leaves the list building the row from what it wrote', a
     const ref = /** @type {import('../src/common/parse-detail.js').AdvisoryRef} */ (
       context.advisory.ref
     );
-    // A later pass over the same document, which still does not carry the
-    // comment the save wrote. What it parses to is not an observation of this
-    // advisory, and the entry the write left stands at the moment it was read.
+    // The unchanged document lacks the saved comment. Rendering it again
+    // must preserve the cache entry and its observation time.
     const wroteAt = clockAt;
     clockAt += 4 * 60 * 1000;
     await panel.render(page);

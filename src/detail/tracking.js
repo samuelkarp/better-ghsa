@@ -14,13 +14,9 @@ if (typeof require === 'function') {
  */
 
 /**
- * Where one confirmation track stands against the value the page carries now.
- *
- * `drifted` is a confirmation whose fingerprint no longer matches that value.
- * REQUIREMENTS.md section 6 reverts the track to unconfirmed there and keeps
- * who confirmed a different value and when, which is what the record still
- * holds. `unreadable` is a source value the parser did not find, where there is
- * nothing to compare the fingerprint against.
+ * A drifted confirmation has a different fingerprint from the current value.
+ * Its author and timestamp remain available for display (REQUIREMENTS.md
+ * section 6). An unreadable value could not be parsed for comparison.
  *
  * @typedef {'confirmed' | 'unconfirmed' | 'drifted' | 'unreadable'} ConfirmationStatus
  */
@@ -32,19 +28,14 @@ if (typeof require === 'function') {
 /**
  * @typedef {object} Confirmation
  * @property {ConfirmationStatus} status
- * @property {string | null} by The login the record names.
- * @property {string | null} at The time the record names.
+ * @property {string | null} by The confirming login.
+ * @property {string | null} at The confirmation timestamp.
  */
 
 /**
- * The fingerprints of the values the confirmations bind to, computed from the
- * metadata form source values. A value the parser did not read is null, and
- * its track cannot be judged.
- *
- * The scoring halves are labeled inside the fingerprinted source, so an unset
- * severity and an unset vector are a scoring state like any other. A form
- * field the parser did not find is not a scoring state: nothing on the page
- * says what the score is, so the scoring fingerprint is null there.
+ * Confirmations use fingerprints of metadata form source values. A missing
+ * field produces a null fingerprint. Empty severity and vector fields are
+ * valid scoring inputs; their labels distinguish them in the fingerprint.
  *
  * @typedef {object} Fingerprints
  * @property {string | null} title
@@ -53,9 +44,7 @@ if (typeof require === 'function') {
  */
 
 /**
- * The stored tracks of REQUIREMENTS.md section 6, read out of one snapshot.
- * Every value is displayed as it stands, so a value this reader does not
- * interpret reaches the panel raw.
+ * Unknown tracking values remain available for display as stored.
  *
  * @typedef {object} TrackingView
  * @property {string | null} triage
@@ -73,9 +62,7 @@ if (typeof require === 'function') {
 
 (() => {
   /**
-   * The confirmation tracks, in the order the panel shows them. `name` is what
-   * the panel calls the track beside its chip, and what the editor's list of
-   * unsaved changes calls it.
+   * The panel and the unsaved-change list share these track names and order.
    *
    * @type {readonly { key: ConfirmationTrack, name: string }[]}
    */
@@ -88,8 +75,7 @@ if (typeof require === 'function') {
   /**
    * @param {Record<string, unknown> | null} record
    * @param {string} key
-   * @returns {string | null} the field's value, or null where it is not a string
-   *   with content.
+   * @returns {string | null} The string value, or null for missing, non-string, or blank values.
    */
   function stringField(record, key) {
     const value = record === null ? undefined : record[key];
@@ -99,7 +85,7 @@ if (typeof require === 'function') {
   /**
    * @param {Record<string, unknown> | null} record
    * @param {string} key
-   * @returns {string[]} the strings with content the field holds.
+   * @returns {string[]} Nonblank strings from the array field.
    */
   function stringArrayField(record, key) {
     const value = record === null ? undefined : record[key];
@@ -118,8 +104,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Where one confirmation stands. A record carrying no fingerprint confirms
-   * nothing, because nothing says what it confirmed.
+   * A confirmation requires a fingerprint of the approved value.
    *
    * @param {Record<string, unknown> | null} state
    * @param {string} track
@@ -137,8 +122,6 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The tracks one snapshot holds, judged against the values on the page.
-   *
    * @param {Record<string, unknown> | null} state The merged snapshot.
    * @param {Fingerprints} fingerprints
    * @returns {TrackingView}
@@ -162,15 +145,15 @@ if (typeof require === 'function') {
   }
 
   /**
-   * @returns {TrackingView} the view of an advisory no snapshot holds state for.
+   * @returns {TrackingView} Tracking defaults for an advisory without stored state.
    */
   function untracked() {
     return read(null, { title: null, description: null, scoring: null });
   }
 
   /**
-   * The fingerprints of the values a confirmation binds to. The inputs are the
-   * metadata form source values, which is the raw markdown, not rendered text.
+   * Fingerprint the metadata form source values, including raw description
+   * markdown.
    *
    * @param {ParsedDetail} advisory
    * @returns {Promise<Fingerprints>}
@@ -188,8 +171,6 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The tracking state one advisory page carries.
-   *
    * @param {ParsedDetail} advisory
    * @param {MergedState} merged
    * @returns {Promise<TrackingView>}

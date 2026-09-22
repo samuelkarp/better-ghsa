@@ -27,28 +27,19 @@ if (typeof require === 'function') {
  * @typedef {object} StateWriteResult
  * @property {import('../common/write.js').WriteDiagnostic} [diagnostic]
  * @property {boolean} ok
- * @property {string | null} reason One of `allowlist`, `in-flight`, `fetch`,
- *   `mismatch`, `unreadable`, `stale`, `superseded`, `read-only`,
- *   `confirmation`, `ambiguous`, `invalid`, the reason a caller's `guard`
- *   named, the reasons a write of the comment itself carries, and null on
- *   success.
+ * @property {string | null} reason The failure reason from validation, the caller's guard,
+ *   or the comment request. Null on success.
  * @property {number | null} status
- * @property {string} message What happened, in the words the panel shows.
- * @property {Record<string, unknown> | null} snapshot The snapshot this write
- *   put on the advisory, and null where nothing was written.
- * @property {MergedState | null} merged The state the fetched page carried,
- *   and null where the write never read one. A refused write hands this back
- *   so the panel reloads from what the advisory says now.
- * @property {ParsedDetail | null} advisory The advisory as this write read it.
- *   A write that landed carries the page with the comment it wrote on it; a
- *   write refused by what the page said carries the page as it stands, because
- *   the fetch was spent on reading it and nothing was written to it. Null where
- *   the write never got a page, and null once a request has gone out and not
- *   come back as a landed write.
- * @property {number | null} readAt When that page was read, epoch
- *   milliseconds. Everything in the advisory but a landed write's own comment
- *   was observed then, so it is the observation time a cache entry holding it
- *   carries.
+ * @property {string} message The displayed result message.
+ * @property {Record<string, unknown> | null} snapshot The written snapshot, or null on
+ *   failure.
+ * @property {MergedState | null} merged State from the fetched page, or null before a
+ *   successful read. Refusals return it for the panel to refresh.
+ * @property {ParsedDetail | null} advisory The fetched page, updated with a confirmed
+ *   write. Refusals before sending return the unchanged page. Null before a successful read
+ *   or after an unconfirmed request.
+ * @property {number | null} readAt The fetch time in epoch milliseconds. All returned data
+ *   except the written comment was observed then.
  */
 
 /**
@@ -56,10 +47,8 @@ if (typeof require === 'function') {
  */
 
 /**
- * Which snapshot holds current state, as far as anything outside the merge can
- * tell: the comment it sits in, and the account it belongs to. A state the
- * panel remembers from a write of its own names no comment in this document,
- * and the login it was written under stands for it.
+ * A snapshot is identified by its comment and author. A newly written comment
+ * has an unknown ID until the next page read; its author identifies it meanwhile.
  *
  * @typedef {object} SnapshotHolder
  * @property {string | null} commentId
@@ -68,49 +57,33 @@ if (typeof require === 'function') {
 
 /**
  * @typedef {object} StateWriteOptions
- * @property {AdvisoryRef} ref The advisory to write on, read from the page.
- * @property {number} loadedSeq The highest ordering claim the panel loaded
- *   with. A page that has moved past it refuses the write.
- * @property {SnapshotHolder} [loadedHolder] Which snapshot held state when the
- *   panel loaded. A sequence number is not on its own an identity: two
- *   maintainers writing at once claim the same one, and the tie sends state to
- *   one of them. A holder that is not the one the panel loaded with refuses
- *   the write, whatever the sequence says.
- * @property {Record<string, unknown> | ChangesBuilder} changes The panel's
- *   changes, as snapshot fields. A field named null is removed, and a field
- *   not named is carried forward whether or not this reader knows it. A
- *   builder is handed the login and the time this write stamps, which is what
- *   a record naming who did something binds to.
- * @property {boolean} [confirmed] Whether the maintainer has confirmed a write
- *   that supersedes a snapshot this reader could not interpret.
+ * @property {AdvisoryRef} ref The advisory identified by the page.
+ * @property {number} loadedSeq The sequence number loaded by the panel. A different fetched
+ *   sequence prevents the write.
+ * @property {SnapshotHolder} [loadedHolder] The loaded snapshot identity. A different
+ *   holder prevents writes even when the sequence numbers match.
+ * @property {Record<string, unknown> | ChangesBuilder} changes Snapshot field changes. Null
+ *   removes a field; omitted fields are preserved, including unknown fields. A builder
+ *   receives the write login and timestamp.
+ * @property {boolean} [confirmed] Approval to supersede an unreadable snapshot.
  * @property {(state: Record<string, unknown> | null, changes: Record<string,
- *   unknown>) => { reason: string, message: string } | null} [guard] A last
- *   look at the changes against the state this write builds on, which is the
- *   state its own fetch read and not the one the panel was loaded with. An
- *   objection refuses the write, and is what the panel says.
- * @property {string} [at] The write time. The clock is read when this is
- *   absent.
+ *   unknown>) => { reason: string, message: string } | null} [guard] Checks changes
+ *   against freshly fetched state. A returned objection prevents the write
+ *   and supplies the displayed reason.
+ * @property {string} [at] The explicit write time; defaults to the current time.
  * @property {WriteFetch} [fetch]
  * @property {(html: string) => Document} [parseDocument]
- * @property {() => void} [beforeSend] Called once the comment request is built
- *   and before it goes out.
+ * @property {() => void} [beforeSend] Called after building the comment request and before
+ *   sending it.
  */
 
 (() => {
-  /**
-   * What the panel says while a write on this advisory is already going out.
-   * The controls that started it are held still until it settles, so this is
-   * the state of a disabled control and not a refusal a press can reach.
-   *
-   * The preservation press says the same and reports the same `in-flight`
-   * reason, so one event reads the same however it was started.
-   */
+
   const IN_FLIGHT_MESSAGE = globalThis.bghsa.write.SAVING_MESSAGE;
 
   /**
-   * The advisories a write is going out for. A second write while one is in
-   * flight would compute its sequence number from a page the first one has not
-   * landed on yet, and both would claim the same one.
+   * Serialize writes per advisory to prevent concurrent saves from choosing the
+   * same sequence number.
    *
    * @type {Set<string>}
    */
@@ -119,8 +92,7 @@ if (typeof require === 'function') {
   /**
    * @param {string | null | undefined} left
    * @param {string | null | undefined} right
-   * @returns {boolean} whether both name one GitHub account. Logins differ in
-   *   case between places GitHub renders them and name one account.
+   * @returns {boolean} Whether the logins match case-insensitively.
    */
   function sameLogin(left, right) {
     if (typeof left !== 'string' || typeof right !== 'string') return false;
@@ -129,12 +101,11 @@ if (typeof require === 'function') {
 
   /**
    * @param {MergedState} merged
-   * @returns {SnapshotHolder} which snapshot this state came from.
+   * @returns {SnapshotHolder} The source snapshot's identity.
    */
   function holderOf(merged) {
     const by = merged.state === null ? undefined : merged.state['by'];
-    // A snapshot the extension wrote onto a comment it has not read back names
-    // no identifier, and an empty one is that and not a comment of its own.
+    // Newly created comments have an unknown ID until the next page read.
     const commentId = merged.source?.id ?? '';
     return {
       commentId: commentId === '' ? null : commentId,
@@ -143,10 +114,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Whether two readings name one snapshot. The comment id settles it where both
-   * readings have one; a state remembered from a write of this panel's own names
-   * no comment, and there the login it went out under is what there is to
-   * compare.
+   * Compare comment IDs when both are known. Otherwise compare authors to
+   * identify a locally saved snapshot before its comment ID is available.
    *
    * @param {SnapshotHolder} left
    * @param {SnapshotHolder} right
@@ -161,8 +130,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The JSON a state comment carries. Two spaces of indent put every line under
-   * a key, so no line of it can read as the end of the fence that holds it.
+   * Indent JSON to prevent its contents from closing the Markdown fence.
    *
    * @param {Record<string, unknown>} snapshot
    * @returns {string}
@@ -172,15 +140,9 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The body of a state comment: the collapsed block REQUIREMENTS.md section 3
-   * describes, holding the marker and the snapshot.
-   *
-   * The marker is a code span outside the fence, which is what says the comment
-   * is a state comment whatever the fence holds. Everything the snapshot says is
-   * inside the fence, so no value in it renders as markup.
-   *
-   * The block's own tags each stand on a line with a blank line between them and
-   * what they wrap, which is the shape the summary's link is known to render in.
+   * Build the collapsed state block described in REQUIREMENTS.md section 3.
+   * The marker outside the JSON fence identifies the comment even if its payload
+   * is invalid. The fence prevents snapshot values from rendering as markup.
    *
    * @param {Record<string, unknown>} snapshot
    * @returns {string}
@@ -195,8 +157,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The state comments one maintainer wrote on this advisory. The write model
-   * puts at most one there, and no maintainer writes to anyone else's.
+   * Each maintainer may write only their own state comment.
    *
    * @param {readonly ParsedComment[]} comments
    * @param {string} login
@@ -209,22 +170,17 @@ if (typeof require === 'function') {
   }
 
   /**
-   * @returns {string} the write time, to the second. `at` is informational
-   *   because maintainer clocks differ, so nothing reads it finer than that.
+   * @returns {string} The write time, to the second.
    */
   function nowStamp() {
     return new Date().toISOString().replace(/\.\d+Z$/, 'Z');
   }
 
   /**
-   * How long an advisory has been waiting is measured from `triageSince`, and
-   * the triage value an advisory carries for the first time is where that
-   * measurement starts. It starts at the most recent member action the page
-   * carries, and at the report time where no member has acted, so an advisory a
-   * maintainer has been working on does not read as having arrived at the moment
-   * its triage value was set.
+   * The first triage value measures waiting time from the latest member activity,
+   * falling back to the report time.
    *
-   * @param {ParsedDetail} advisory The advisory as the write's own fetch read it.
+   * @param {ParsedDetail} advisory The freshly fetched advisory.
    * @returns {string | null}
    */
   function seedTriageSince(advisory) {
@@ -232,27 +188,15 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Stamps `triageSince` with the write time when this write changes the triage
-   * value, and leaves it as the merged state carried it when it does not. A
-   * write that names `triageSince` itself is left alone.
-   *
-   * A write that gives an advisory a triage value where the state it builds on
-   * carries none stamps `seed`, whatever else has been written to that advisory.
-   * REQUIREMENTS.md section 6 measures a first triage value from the most recent
-   * maintainer action, and a maintainer who replied three weeks ago and saved an
-   * owner yesterday has been waiting three weeks. The write time stands in where
-   * the page offered nothing to seed from.
-   *
-   * A write that takes the triage value away takes the time with it. What
-   * `triageSince` measures is how long the advisory has stood in its triage
-   * value, and a snapshot with no triage value stands in none.
+   * Record when the triage value changes. Its first value uses `seed`, falling
+   * back to the write time. Removing triage also removes `triageSince`.
+   * An explicit `triageSince` change overrides this calculation.
    *
    * @param {Record<string, unknown>} snapshot
    * @param {Record<string, unknown> | null} current
    * @param {Record<string, unknown>} changes
    * @param {string} at
-   * @param {string | null} seed Where a first triage value measures from, and
-   *   null where the page offered nothing to seed from.
+   * @param {string | null} seed The initial triage time, or null if unavailable.
    * @returns {void}
    */
   function stampTriageSince(snapshot, current, changes, at, seed) {
@@ -269,7 +213,7 @@ if (typeof require === 'function') {
   /**
    * @param {string} reason
    * @param {string} message
-   * @returns {WriteResult} what stops a write before a request is built.
+   * @returns {WriteResult} The refusal result.
    */
   function stopped(reason, message) {
     return { ok: false, reason, status: null, message };
@@ -280,9 +224,8 @@ if (typeof require === 'function') {
    * @param {number | null} status
    * @param {string} message
    * @param {MergedState | null} merged
-   * @param {{ advisory: ParsedDetail, readAt: number } | null} read What this
-   *   write's fetch read, and when, where the refusal was decided on it and no
-   *   request went out. Null where there is no page to hand back.
+   * @param {{ advisory: ParsedDetail, readAt: number } | null} read The fetched page and
+   *   timestamp for a refusal before sending, or null if unavailable.
    * @returns {StateWriteResult}
    */
   function refused(reason, status, message, merged, read) {
@@ -299,14 +242,11 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The badge GitHub renders beside this account on this advisory, which is
-   * what says whether its snapshots count toward state. A comment it already
-   * holds carries the badge; where it holds none, a member badge this account
-   * carried on another advisory in the same organization stands for it, and
-   * that is the whole of what the extension has seen.
+   * Use this account's role badges on the advisory to determine snapshot trust.
+   * If none are present, use membership observed in the same organization.
    *
-   * @param {ParsedDetail} fresh The advisory as this write read it.
-   * @param {string} viewer The account this write went out under.
+   * @param {ParsedDetail} fresh The freshly fetched advisory.
+   * @param {string} viewer The account used for this write.
    * @returns {string | null}
    */
   function roleOf(fresh, viewer) {
@@ -323,28 +263,19 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The comment this write left on the advisory, in the shape a reader of the
-   * page parses one into.
+   * Represent a successful write as a parsed comment. A new comment's GitHub ID
+   * is unknown until the next page read; {@link holderOf} uses its author meanwhile.
    *
-   * A created comment names no identifier: GitHub minted one and the page this
-   * write read does not carry it. The account it went out under is what stands
-   * for it until the advisory is read again, which is what {@link holderOf}
-   * falls back on.
-   *
-   * @param {ParsedDetail} fresh The advisory as this write read it.
-   * @param {string} viewer The account this write went out under.
-   * @param {ParsedComment | undefined} mine The comment this write edited, and
-   *   undefined where it created one.
-   * @param {import('../common/schema.js').SnapshotReport} report The snapshot
-   *   this write put in that comment, as this extension reads it back.
+   * @param {ParsedDetail} fresh The freshly fetched advisory.
+   * @param {string} viewer The account used for this write.
+   * @param {ParsedComment | undefined} mine The edited comment, or undefined for creation.
+   * @param {import('../common/schema.js').SnapshotReport} report The validated snapshot.
    * @param {string} at The write time.
    * @returns {ParsedComment}
    */
   function writtenComment(fresh, viewer, mine, report, at) {
     const schema = globalThis.bghsa.schema;
-    // What the collapsed block renders to: the summary, the marker in its code
-    // span, and the fence. It is the text a reader of the page would collapse
-    // out of the comment body.
+    // Match the whitespace-normalized text the parser reads from the rendered body.
     const text = globalThis.bghsa.write.collapse(
       [schema.STATE_COMMENT_SUMMARY, schema.STATE_COMMENT_MARKER, report.raw].join(' ')
     );
@@ -364,14 +295,12 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The advisory as it stands once this write landed. REQUIREMENTS.md section
-   * 2: a write this extension makes updates the cache entry to carry what was
-   * written, and the page this write read is everything else that entry holds.
+   * Update the fetched advisory with the written comment for caching
+   * (REQUIREMENTS.md section 2).
    *
    * @param {ParsedDetail} fresh
-   * @param {ParsedComment} written The comment this write left.
-   * @param {ParsedComment | undefined} mine The comment it replaced, and
-   *   undefined where it created one.
+   * @param {ParsedComment} written The written comment.
+   * @param {ParsedComment | undefined} mine The replaced comment, or undefined for creation.
    * @returns {ParsedDetail}
    */
   function withWrite(fresh, written, mine) {
@@ -386,8 +315,8 @@ if (typeof require === 'function') {
    * @param {WriteResult} outcome
    * @param {Record<string, unknown>} snapshot
    * @param {MergedState} merged
-   * @param {{ advisory: ParsedDetail, readAt: number }} read What this write's
-   *   own fetch read, and when.
+   * @param {{ advisory: ParsedDetail, readAt: number }} read The fetched advisory and
+   *   observation time.
    * @returns {StateWriteResult}
    */
   function settled(outcome, snapshot, merged, read) {
@@ -404,22 +333,10 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Writes this maintainer's state comment on one advisory.
-   *
-   * The snapshots it merges, the comment it edits, and the state it stamps all
-   * come from the one document the write reads. A page that has moved past the
-   * sequence number the panel loaded with refuses the write, and so does a page
-   * where that sequence belongs to another snapshot than the one the panel
-   * loaded, so a change is never applied to state the maintainer did not see.
-   *
-   * The comment this maintainer already wrote is edited, and one is created
-   * where they have written none. Another maintainer's comment is never the
-   * target: the edit form for it is in the page, and posting it would overwrite
-   * what they wrote in front of the reporter.
-   *
-   * The advisory is held while the write is out and released once it settles,
-   * whatever it settled as: a save GitHub did not confirm is one the maintainer
-   * can make again.
+   * Write this maintainer's state comment using a fresh advisory read.
+   * Reject changes if the sequence number or snapshot holder differs from what
+   * the panel loaded. GitHub exposes other authors' edit forms, but this writer
+   * selects only the current maintainer's comment.
    *
    * @param {StateWriteOptions} options
    * @returns {Promise<StateWriteResult>}
@@ -429,7 +346,7 @@ if (typeof require === 'function') {
     const { ref, loadedSeq } = options;
 
     /**
-     * What the prepare step read, which the result carries back out of it.
+     * The prepare step records the state returned to the caller.
      *
      * @type {{ merged: MergedState | null, snapshot: Record<string, unknown> | null,
      *   landed: (() => ParsedDetail) | null,
@@ -439,8 +356,8 @@ if (typeof require === 'function') {
 
     const { outcome, run } = await write.runWrite({
       ref,
-      // Released whatever happened: an unconfirmed save is one the maintainer
-      // can make again, and the advisory says what it says.
+      // Release the hold after every attempt, including an unconfirmed save,
+      // to allow retries.
       hold: {
         held: (key) =>
           inFlight.has(key)
@@ -459,14 +376,10 @@ if (typeof require === 'function') {
       ...(options.beforeSend === undefined ? {} : { beforeSend: options.beforeSend }),
       prepare: (context) => {
         const fresh = context.advisory;
-        // The page this fetch spent its request on. Every refusal below is
-        // decided on it and sends nothing, so it is the advisory as it stands
-        // and the result hands it back. It is dropped again once the write is
-        // prepared, because a request that goes out can land and leave the page
-        // this read behind.
+        // Return the fetched page on refusals before sending. Clear it when the write
+        // is prepared because a sent request may change the advisory.
         read.fresh = { advisory: fresh, readAt: context.readAt };
-        // This write's comment is keyed to the maintainer it goes out under, so
-        // an account this extension could not read is one it will not write as.
+        // The logged-in account determines which state comment this write may edit.
         const viewer = fresh.viewer;
         if (viewer === null) {
           return {
@@ -482,11 +395,8 @@ if (typeof require === 'function') {
         if (merged.observedSeq !== loadedSeq) {
           return stopped('stale', globalThis.bghsa.write.STALE_MESSAGE);
         }
-        // Before the holder gate, because a maintainer holding two state
-        // comments is told to delete one and can act on that. Reading the
-        // advisory again would find the same two, and the write model in
-        // REQUIREMENTS.md section 3 puts one comment per maintainer on an
-        // advisory.
+        // Report duplicate comments before checking the holder. The maintainer must
+        // delete a duplicate; reloading alone cannot resolve this error.
         const own = ownStateComments(fresh.comments, viewer);
         if (own.length > 1) {
           return stopped('ambiguous', `Error: multiple tracking comments from ${viewer}`);
@@ -504,8 +414,7 @@ if (typeof require === 'function') {
         }
 
         const at = options.at ?? nowStamp();
-        // The changes are asked for once the login and the time are settled, so
-        // a record inside them names the account this write goes out under.
+        // Confirmation records use the login and timestamp of this write.
         const changes =
           typeof options.changes === 'function'
             ? options.changes({ by: viewer, at })
@@ -521,11 +430,7 @@ if (typeof require === 'function') {
         stampTriageSince(built, merged.state, changes, at, seedTriageSince(fresh));
         read.snapshot = built;
 
-        // The snapshot goes through this extension's own reader before it goes
-        // out. A payload the reader would exclude is one no reader takes as
-        // state, and an advisory carrying a snapshot the extension that wrote it
-        // refuses to read is one nobody can write from until it is superseded by
-        // hand.
+        // Validate the snapshot before sending to ensure the extension can read it.
         const json = snapshotJson(built);
         const reading = globalThis.bghsa.schema.readSnapshot(json);
         if (!reading.valid) {
@@ -536,10 +441,6 @@ if (typeof require === 'function') {
           return stopped('invalid', globalThis.bghsa.write.INVALID_STATE_MESSAGE);
         }
 
-        // The comment this maintainer already wrote is the one this replaces.
-        // Another maintainer's comment is never the target: the edit form for it
-        // is in the page, and posting it would overwrite what they wrote in
-        // front of the reporter.
         const mine = own[0];
         read.landed = () => withWrite(fresh, writtenComment(fresh, viewer, mine, reading, at), mine);
         read.fresh = null;

@@ -67,12 +67,8 @@ test('the merged state is the trusted snapshot with the highest seq', () => {
 });
 
 test('the highest seq holds state over the greater login', () => {
-  // REQUIREMENTS.md section 3 puts the sequence number first and the login
-  // second. The two are set against each other here: the current snapshot is
-  // the one whose author sorts first, so a merge that read state off the
-  // login alone would answer with the stale one. Without that opposition a
-  // fixture can agree with both rules at once, and the seq comparison can go
-  // missing unnoticed.
+  // Sequence number precedes login in the snapshot order (REQUIREMENTS.md section 3).
+  // These values make the two criteria produce opposite orders.
   const stale = source('11', 'zeta', true, snapshotJson(1, 'zeta', 'awaiting reporter'));
   const current = source('12', 'alpha', true, snapshotJson(9, 'alpha', 'evaluating'));
 
@@ -83,8 +79,6 @@ test('the highest seq holds state over the greater login', () => {
     assert.strictEqual(merged.state?.['triage'], 'evaluating');
   }
 
-  // One maintainer's save does not stop being current because another
-  // maintainer's login sorts above theirs.
   assert.ok(merge.compareLogins('zeta', 'alpha') > 0, 'the logins do not oppose the seq');
 });
 
@@ -141,8 +135,6 @@ test('a fence that carries no ordering claim is warned on and writing continues'
   assert.strictEqual(merged.warnings.length, 1);
   assert.strictEqual(merged.warnings[0]?.kind, 'not a snapshot');
   assert.strictEqual(merged.warnings[0]?.commentId, '11');
-  // The tooltip is the problem list alone: the comment it hangs on is the one
-  // the reader is already looking at.
   assert.strictEqual(merged.warnings[0]?.message, 'the fenced block does not parse as JSON');
   assert.strictEqual(merged.confirmationRequired, false);
   assert.strictEqual(merged.source?.id, '12');
@@ -164,8 +156,6 @@ test('a readable seq with an invalid payload is excluded and takes a confirmatio
   assert.strictEqual(merged.observedSeq, 9);
   assert.strictEqual(merged.nextSeq, 10, 'the next write does not outrank the excluded snapshot');
 
-  // Two of them, and the reader is owed a warning on each comment rather than
-  // on the first one it met. They come back in the order the comments stand in.
   const both = merge.mergeSnapshots([
     source('11', 'samuelkarp', true, '{"betterGhsa":"1.0","seq":9,"by":"samuelkarp","owners":"x"}'),
     source('12', 'dmcgowan', true, '{"betterGhsa":"1.0","seq":4,"by":"dmcgowan","backports":3}'),
@@ -193,9 +183,8 @@ test('a schema major this reader does not know puts the advisory read-only', () 
 });
 
 test('one snapshot in a newer schema puts the whole advisory read-only', () => {
-  // The reader cannot say what the newer snapshot claims, and it may be the
-  // current one. Everything this reader can read is still shown, and nothing is
-  // written over a claim it cannot see.
+  // An unsupported snapshot may be current. Preserve readable state
+  // and block writes until the unsupported version can be read.
   const merged = merge.mergeSnapshots([
     source('11', 'samuelkarp', true, snapshotJson(4, 'samuelkarp', 'evaluating')),
     source('12', 'dmcgowan', true, '{"betterGhsa":"2.0","seq":5,"by":"dmcgowan"}'),
@@ -247,7 +236,6 @@ test('an untrusted snapshot is ignored, warned on, and still orders writes', () 
   assert.strictEqual(merged.warnings.length, 1);
   assert.strictEqual(merged.warnings[0]?.kind, 'untrusted');
   assert.strictEqual(merged.warnings[0]?.author, 'prakleumas');
-  // The chip says the whole of it, so there is no tooltip.
   assert.strictEqual(merged.warnings[0]?.message, '');
   assert.strictEqual(merged.nextSeq, 8);
 });

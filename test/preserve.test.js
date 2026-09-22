@@ -13,10 +13,6 @@ const stateWrite = require('../src/detail/state.js');
 
 const allowlist = require('../src/common/allowlist.js');
 
-// The list of repositories the extension acts on is stored rather than compiled
-// in, and is empty on a fresh install. The fixtures here are that repository's,
-// so the list is put in place and read before the first test, which is what the
-// extension itself does before it takes a page.
 test.before(async () => {
   allowlist.setStorage({
     get: async () => ({ [allowlist.STORAGE_KEY]: ['git-utensils/spoon-knife'] }),
@@ -53,27 +49,21 @@ function detail(doc, name) {
   return parsed;
 }
 
-/** The one parse of each large fixture in this file. */
 const draft = detail(fixture('draft.html'), 'draft.html');
 
-/** The advisory the fixtures come from, which is on the allowlist. */
 const REF = { owner: 'git-utensils', repo: 'Spoon-Knife', ghsaId: 'GHSA-jmvx-2wfw-xfgj' };
 
-/** The path of that advisory's detail page. */
 const DETAIL = '/git-utensils/Spoon-Knife/security/advisories/GHSA-jmvx-2wfw-xfgj';
 
-/** The title the built page carries. */
 const TITLE = 'Path traversal in the drawer handler';
 
-/** The description the built page carries. */
 const DESCRIPTION = '### Summary\n\nThe handler joins a path without normalizing it.';
 
-/** A marker standing in for one a press draws. */
 const MARKER = `${preserve.MARKER_PREFIX}0123456789abcdef`;
 
 /**
  * @param {string} value
- * @returns {string} `value` with the characters markup reads escaped.
+ * @returns {string} The HTML-escaped value.
  */
 function escape(value) {
   return value
@@ -94,10 +84,6 @@ function escape(value) {
  */
 
 /**
- * An advisory detail page holding what this extension reads from one: the
- * reference, the title and description, the description's revision control,
- * the comment thread, and the form a write clones.
- *
  * @param {PageOptions} [options]
  * @returns {string}
  */
@@ -163,16 +149,13 @@ function pageRecord(options) {
   return parsed;
 }
 
-/** The advisory the panel loaded with in most of these tests. */
 const advisory = pageRecord();
 
 /**
- * A response holding the comment a write claims to have made, as GitHub
- * renders it: the code span survives the sanitizer, so the marker is in the
- * document the write is read back out of.
+ * GitHub preserves the marker's code span when rendering the comment.
  *
- * @param {string} marker The marker the press wrote.
- * @param {string} [title] The title the comment carries.
+ * @param {string} marker The submitted marker.
+ * @param {string} [title] The comment title.
  * @returns {string}
  */
 function wroteHtml(marker, title) {
@@ -205,16 +188,14 @@ function markerOf(init) {
  */
 
 /**
- * A stand-in for `fetch` answering the detail page with `page` and the write
- * with `answer`.
+ * Return `page` for advisory reads and `answer` for writes.
  *
  * @param {object} [options]
  * @param {string} [options.page] The detail page markup.
  * @param {number} [options.pageStatus]
- * @param {string} [options.answer] The markup the write is answered with. By
- *   default the comment the press wrote, as GitHub renders it.
- * @param {string} [options.answerTitle] The title that comment carries.
- * @param {number} [options.status] The status the write is answered with.
+ * @param {string} [options.answer] The write response markup; defaults to the rendered submitted comment.
+ * @param {string} [options.answerTitle] The response comment title.
+ * @param {number} [options.status] The write response status.
  * @param {Promise<void>} [options.holdPage] Awaited before the page answers.
  * @param {Promise<void>} [options.holdWrite] Awaited before the write answers.
  * @returns {Exchange}
@@ -249,16 +230,14 @@ function run(fake) {
 }
 
 /**
- * @returns {Promise<void>} resolves once every pending microtask has run.
+ * @returns {Promise<void>} Resolves on the next timer callback.
  */
 function tick() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-/** The link the summary carries, as the body writes it. */
 const LINK = '<a href="https://github.com/samuelkarp/better-ghsa">Better GHSA</a>';
 
-/** The comment an advisory gets. */
 const BODY = [
   '<details>',
   '',
@@ -405,10 +384,6 @@ test('a title or description that did not read refuses the write', () => {
 });
 
 test('what refuses the press is what the body cannot be built from', () => {
-  // The comment holds the title and the description, and is written only where
-  // the description is the reporter's own text. A press is refused on exactly
-  // the readings that build no body, so the refusal a maintainer sees always
-  // names which of the three did not read.
   for (const title of [advisory.title, null]) {
     for (const description of [advisory.description, null]) {
       for (const original of [advisory.descriptionOriginal, null]) {
@@ -663,7 +638,6 @@ test('a press and a save landing on a write already out report one reason', asyn
   await tick();
   const pressed = await preserve.preserve(advisory, run(fake));
 
-  // The same event on the state write, which the panel's Save button reaches.
   const key = write.holdKey(REF);
   stateWrite.inFlight.add(key);
   /** @type {import('../src/detail/state.js').StateWriteResult} */

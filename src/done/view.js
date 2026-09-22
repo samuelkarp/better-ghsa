@@ -24,51 +24,37 @@ if (typeof require === 'function') {
 }
 
 /**
- * One published or closed advisory, as the view draws it.
- *
  * @typedef {object} DoneRow
  * @property {string} ghsaId
  * @property {string | null} href
  * @property {string | null} title
- * @property {string | null} state As GitHub names it.
+ * @property {string | null} state The GitHub state label.
  * @property {string | null} severityLabel
- * @property {string | null} severityClass The color GitHub painted this
- *   advisory's own severity chip with, read off whichever page supplied the
- *   level.
+ * @property {string | null} severityClass GitHub's class from the same page as the severity
+ *   label.
  * @property {string | null} openedAt
  * @property {string | null} reporter
- * @property {string | null} ending How the advisory ended, as the line under
- *   the title names it, and null wherever {@link endedAt} is.
- * @property {number | null} endedAt When the advisory ended: a closed
- *   advisory's last close and a published one's last publication. Null where no
- *   advisory read backs the row, where the timeline records no such event, and
- *   where the state is neither ending.
- * @property {string | null} closureReason The stored reason, and null where the
- *   advisory carries none or nothing has read it.
- * @property {string | null} closureDuplicateOf What the advisory duplicates, as
- *   the maintainer who set the reason wrote it.
- * @property {boolean} read Whether an advisory read backs this row.
- * @property {number | null} observedAt When that read was taken.
- * @property {boolean} writable Whether a reason can be set from here, which
- *   needs a read that says which advisory this is.
+ * @property {string | null} ending The ending label, or null when endedAt is unknown.
+ * @property {number | null} endedAt The last close or publication matching the current
+ *   state. Null if the detail read or corresponding event is unavailable.
+ * @property {string | null} closureReason The stored reason, or null if absent or unread.
+ * @property {string | null} closureDuplicateOf The stored duplicate identifier.
+ * @property {boolean} read Whether detail data is available.
+ * @property {number | null} observedAt The detail observation time in epoch milliseconds.
+ * @property {boolean} writable Whether detail data identifies the advisory for saving a
+ *   reason.
  */
 
 /**
- * What the view holds for one document.
- *
  * @typedef {object} Held
- * @property {import('./corpus.js').Corpus | null} corpus What the crawl and the
- *   reads hold, and null before the first page lands.
- * @property {boolean} reading Whether a collection is running.
+ * @property {import('./corpus.js').Corpus | null} corpus The collected corpus, or null
+ *   before the first page arrives.
+ * @property {boolean} reading Whether collection is active.
  * @property {{ owner: string, repo: string } | null} ref
- * @property {string[]} failures What the last collection could not read, in the
- *   order it found out, each named once.
+ * @property {string[]} failures Distinct collection failures in detection order.
  */
 
 /**
- * What a write from this view goes out with. The page's own fetch is what a
- * maintainer's press uses; a caller hands its own in.
- *
  * @typedef {object} WriteOptions
  * @property {import('../common/write.js').WriteFetch} [fetch]
  * @property {(html: string) => Document} [parseDocument]
@@ -85,75 +71,47 @@ if (typeof require === 'function') {
  */
 
 (() => {
-  /** The id of the element the done view owns. */
+
   const ROOT_ID = 'bghsa-done';
 
-  /** The id of the done view's stylesheet. */
   const STYLE_ID = 'bghsa-done-style';
 
-  /** The view this surface is, as the list page holds the choice. */
   const MODE = 'done';
 
-  /** What the toggle reads while another view is showing. */
   const SHOW_DONE = 'Show completed';
 
-  /** What it reads while this one is. The statistics use it for the way back. */
   const SHOW_OPEN = 'Show open';
 
-  /** What the Box this view draws is headed. */
   const HEADING_TEXT = 'Completed';
 
-  /** What the control that writes one closure reason reads. */
   const SAVE_LABEL = 'Save';
 
-  /** What the closure control and the filter over it are labeled. */
   const REASON_LABEL = 'Closure reason';
 
-  /** What the filter over the two endings reads, as the open list names it. */
   const STATE_LABEL = 'State';
 
-  /** What the filter over the level reads, as the open list names it. */
   const SEVERITY_LABEL = 'Severity';
 
-  /** The state GitHub gives an advisory that was published, as it names it. */
   const PUBLISHED = 'Published';
 
-  /** The state GitHub gives an advisory that was closed, as it names it. */
   const CLOSED = 'Closed';
 
-  /** What stands where the crawl has found no done advisory. */
   const EMPTY_TEXT = 'Not found';
 
-  /** What says a collection is filling the list. */
   const LOADING_TEXT = 'Loading...';
 
-  /**
-   * The verb every failure on this surface carries: the header's own, the line
-   * for a list page the walk could not take, and the line for an advisory no
-   * read landed for.
-   */
   const FAILED_PREFIX = 'Failed to load';
 
-  /**
-   * What says the list is short of the two states and nothing further is
-   * coming: the walk ended on pages GitHub would not serve.
-   */
   const FAILED_TEXT = `${FAILED_PREFIX} all advisories`;
 
-  /** What the view says where a reason cannot be written from here. */
   const UNREADABLE_MESSAGE = 'Error: cannot set reason';
 
-  /** Every rule the done view adds to the page. */
   const STYLE_TEXT = [
     '.bghsa-done-chips { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }',
-    // `currentColor` is what a foreground falls back to: the page's own text
-    // color reads in either theme, where a fixed one would be wrong in one.
+    // Use the page text color as the fallback in both themes.
     '.bghsa-done-meta { color: var(--fgColor-muted, currentColor); }',
     '.bghsa-done-observed { color: var(--fgColor-muted, currentColor); white-space: nowrap; }',
-    // The closure reason select carries the longest reason and a Save button
-    // beside it, so the control is wider than this line. A value longer than
-    // the line wraps inside it, and a value with no break in it breaks
-    // anywhere, so the control stays the widest thing in the cell.
+    // Wrap long duplicate IDs within the control width to preserve column alignment.
     '.bghsa-done-duplicate-line { color: var(--fgColor-muted, currentColor);' +
       ' max-width: 12rem; overflow-wrap: anywhere; }',
     '.bghsa-done-empty { color: var(--fgColor-muted, currentColor); }',
@@ -167,8 +125,7 @@ if (typeof require === 'function') {
   const held = new WeakMap();
 
   /**
-   * The collection each document has running, the repository it is for, and the
-   * queue its requests go through.
+   * Track each document's active collection and repository queue.
    *
    * @type {WeakMap<
    *   Document,
@@ -205,13 +162,12 @@ if (typeof require === 'function') {
     return next;
   }
 
-  /** Which repository the list surface says the page is on. */
   const refOf = globalThis.bghsa.table.refOf;
 
   /**
    * @param {Document} doc
    * @param {{ owner: string, repo: string }} ref
-   * @returns {boolean} whether the page still names that repository.
+   * @returns {boolean} Whether the page still identifies that repository.
    */
   function names(doc, ref) {
     const table = globalThis.bghsa.table;
@@ -220,14 +176,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * What the view holds for this document, with a corpus collected on a
-   * repository the page no longer names dropped.
-   *
-   * GitHub replaces the turbo frame on a soft navigation and keeps the
-   * document, so one document covers one repository's advisory list and then
-   * another's. A corpus is a hundred-odd advisories of one repository, and the
-   * rows built from it say nothing about the next one. What the view holds is
-   * therefore keyed to the repository, as the list surface's refresh is.
+   * Discard data from the previous repository after GitHub replaces the frame
+   * within the same document.
    *
    * @param {Document} doc
    * @returns {Held}
@@ -238,20 +188,11 @@ if (typeof require === 'function') {
     return setState(doc, { corpus: null, ref: null, failures: [] });
   }
 
-  /** How every surface builds an element. */
   const element = globalThis.bghsa.dom.element;
 
   /**
-   * The stored closure of one advisory, its reason and what it duplicates, with
-   * a write this page has made standing over the advisory the write was made
-   * on.
-   *
-   * The corpus holds each advisory as the crawl read it, and a save from here
-   * writes to GitHub and to the cache without reading the page again, so the
-   * advisory in hand is a page from before the write. `edit.preferred` is the
-   * state the detail panel draws from after one, which is the write's own until
-   * a read catches up with it, so a row here shows the reason a save landed the
-   * way the panel does.
+   * Use locally saved closure state until the corpus includes that write,
+   * through the same edit.preferred check as the detail panel.
    *
    * @param {import('../common/parse-detail.js').ParsedDetail | null} advisory
    * @returns {{ reason: string | null, duplicateOf: string | null }}
@@ -271,21 +212,11 @@ if (typeof require === 'function') {
   }
 
   /**
-   * When the advisory ended, and the word the line under the title names that
-   * ending by. Closing and publishing are the two endings REQUIREMENTS.md
-   * section 10 measures separately, and a row takes the one its state names.
+   * Display the last close or publication for the current advisory state.
+   * Statistics measure durations to the first occurrence. An end date requires
+   * a detail read with the corresponding timeline event.
    *
-   * The last such event is the instant, so an advisory closed, reopened, and
-   * closed again reads the close it is sitting in. The statistics measure to
-   * the earliest of them, because a duration runs to when the advisory first
-   * reached that ending; a row says when it ended.
-   *
-   * The instant is off the timeline, so it needs an advisory read. A member no
-   * read backs has no ending here, and neither has one whose timeline records
-   * no such event or whose state is neither ending.
-   *
-   * @param {string | null} state The state the row shows, as either page named
-   *   it.
+   * @param {string | null} state The displayed state.
    * @param {import('../common/parse-detail.js').ParsedDetail | null} advisory
    * @returns {{ ending: string | null, endedAt: number | null }}
    */
@@ -306,15 +237,9 @@ if (typeof require === 'function') {
   }
 
   /**
-   * One row per corpus member, ordered by the instant the advisory ended,
-   * newest first. A row whose ending is unknown stands below every row whose
-   * ending is known, in the identifier order the corpus holds. Two rows that
-   * ended at one instant hold that same identifier order.
-   *
-   * The order is this view's own. `corpus.js` holds its members by identifier
-   * so that two collections of one corpus come out the same way, and the
-   * statistics are over that same corpus, so the rows are sorted here and the
-   * corpus is left as it stands.
+   * Sort rows by latest ending first, with unknown endings last. Preserve
+   * corpus identifier order for equal or missing dates and leave the shared
+   * corpus order unchanged.
    *
    * @param {import('./corpus.js').Corpus | null} corpus
    * @returns {DoneRow[]}
@@ -326,8 +251,7 @@ if (typeof require === 'function') {
       const closure = closureOf(advisory);
       const state = advisory?.state ?? member.row.state ?? member.state;
       const ending = endingOf(state, advisory);
-      // The color comes from whichever read supplied the level, so a severity
-      // the advisory page has since changed is not painted the old one's color.
+      // Take the color from the same source as the severity label.
       const read = advisory?.severityLabel ?? advisory?.severity ?? null;
       return {
         ghsaId: member.ghsaId,
@@ -347,8 +271,7 @@ if (typeof require === 'function') {
         writable: advisory !== null && advisory.ref !== null,
       };
     });
-    // A sort that holds equal keys in the order they arrived leaves the rows
-    // with no ending in the identifier order the corpus handed them over in.
+
     return rows.sort((left, right) => {
       if (left.endedAt === right.endedAt) return 0;
       if (left.endedAt === null) return 1;
@@ -367,10 +290,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The state one row is in, as the view reads it. The crawl names a state in
-   * the `?state=` value and the advisory's own page names it as GitHub displays
-   * it, so the two differ in case and the chip, the filter and the rules below
-   * read the one form.
+   * Normalize casing between list query states and detail page labels.
    *
    * @param {DoneRow} row
    * @returns {string | null}
@@ -380,11 +300,9 @@ if (typeof require === 'function') {
   }
 
   /**
-   * How the state chip is colored: purple for a closed advisory and green for a
-   * published one, which is the pair GitHub colors the two endings with. A state
-   * that is neither takes no tone.
+   * Match GitHub's colors for closed and published states.
    *
-   * @param {string} state What {@link stateNameOf} read.
+   * @param {string} state The normalized state label.
    * @returns {import('../common/chips.js').Chip['tone']}
    */
   function stateToneOf(state) {
@@ -394,18 +312,9 @@ if (typeof require === 'function') {
   }
 
   /**
-   * What the two filters offer, in the order they offer them.
-   *
-   * The reason is a closed advisory's. A published advisory holds none and
-   * carries no control for one, so it stands in the list while that filter is
-   * holding it to nothing and falls out of every value of it, the `None` value
-   * included. `None` is what a backfill works from: the closed advisories a
-   * read backs and no reason has been set on.
-   *
-   * The severity is a published advisory's. REQUIREMENTS.md section 10 has
-   * publication settle the rating and a closed advisory carry no severity at
-   * all, and a closed row shows none, so the filter is over the rows that show
-   * one.
+   * Filter closure reasons on closed advisories. None selects fetched closed
+   * advisories without a stored reason. Severity applies to published advisories
+   * (REQUIREMENTS.md section 10).
    *
    * @type {readonly import('../list/table.js').Facet<DoneRow>[]}
    */
@@ -430,11 +339,10 @@ if (typeof require === 'function') {
     {
       key: 'severity',
       label: SEVERITY_LABEL,
-      // The order the open list offers the levels in, highest first.
+
       values: ['Critical', 'High', 'Moderate', 'Low'],
       applies: (row) => stateNameOf(row) === PUBLISHED,
-      // A level read off a list row arrives lowercased, so it is cased here the
-      // way the chip beside it is cased.
+      // Normalize lowercase list values to the displayed severity labels.
       valuesOf: (row) =>
         row.severityLabel === null
           ? []
@@ -443,9 +351,7 @@ if (typeof require === 'function') {
   ];
 
   /**
-   * What each filter is holding one document's list to, by facet key. It is held
-   * here rather than read off the controls, because a draw takes the view out
-   * and puts a new one back, and what a maintainer picked has to survive that.
+   * Retain selected filters across view rebuilds.
    *
    * @type {WeakMap<Document, Record<string, string>>}
    */
@@ -453,8 +359,7 @@ if (typeof require === 'function') {
 
   /**
    * @param {Document} doc
-   * @returns {Record<string, string>} what each filter is holding the list to,
-   *   which is nothing until a control says otherwise.
+   * @returns {Record<string, string>} The selected value for each active facet.
    */
   function filtersOf(doc) {
     return filters.get(doc) ?? {};
@@ -462,18 +367,14 @@ if (typeof require === 'function') {
 
   /**
    * @param {Document} doc
-   * @returns {boolean} whether any filter is holding the list to a value. From
-   *   there the reset has nothing to do, and an empty list is empty because the
-   *   crawl found nothing rather than because a filter kept nothing.
+   * @returns {boolean} Whether any filter is active.
    */
   function filtering(doc) {
     return Object.values(filtersOf(doc)).some((value) => value !== '');
   }
 
   /**
-   * The rows the filters keep, in the order they were in. Nothing is read again
-   * and nothing is fetched: this is a view over the rows the corpus already
-   * holds, and a row it has not read yet is still a row.
+   * Filter collected rows locally while preserving their order.
    *
    * @param {readonly DoneRow[]} rows
    * @param {Record<string, string>} held
@@ -490,11 +391,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The stored state of one advisory, and everything a save from here needs. It
-   * is `edit.contextFor`, which is what the panel builds from on the advisory's
-   * own page, with the render pass this surface runs. The advisory it reads is
-   * the one the crawl read and the cache holds, so the members and the branches
-   * this page has seen reach the pickers the same way the panel's do.
+   * Use the shared editor context with this view's redraw callback.
    *
    * @param {Document} doc
    * @param {import('../common/parse-detail.js').ParsedDetail} advisory
@@ -511,20 +408,15 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Writes a closure reason onto one advisory from here.
-   *
-   * REQUIREMENTS.md section 10 has the reason settable retroactively, and it
-   * goes out through the same store and the same writer every other stored track
-   * uses: the value is staged against the advisory, and the save fetches the
-   * advisory page, merges onto the state that page carries, and refuses on a
-   * rival claim. Nothing here writes a comment of its own.
+   * Save closure reasons through the shared editor and its concurrency checks
+   * (REQUIREMENTS.md section 10).
    *
    * @param {Document} doc
    * @param {string} ghsaId
    * @param {string | null} reason
    * @param {WriteOptions} [options]
-   * @returns {Promise<import('../detail/state.js').StateWriteResult | null>} null
-   *   where the view holds no read of that advisory.
+   * @returns {Promise<import('../detail/state.js').StateWriteResult | null>} The save
+   *   result, or null if detail data is unavailable or a save is already pending.
    */
   async function setReason(doc, ghsaId, reason, options) {
     const corpus = current(doc).corpus;
@@ -534,10 +426,7 @@ if (typeof require === 'function') {
       draw(doc);
       return null;
     }
-    // The controls are disabled for the flight, so a second press is not one a
-    // maintainer can make. A caller that asks anyway is refused here rather
-    // than reaching the write with a sequence number the first save has not
-    // landed on yet.
+    // Reject concurrent saves before reading a potentially outdated sequence.
     if (saving.has(ghsaId)) return null;
     notes.delete(ghsaId);
     const edit = globalThis.bghsa.edit;
@@ -554,19 +443,14 @@ if (typeof require === 'function') {
   }
 
   /**
-   * What the view says about the last press on one advisory, where the editing
-   * store holds nothing to say. It holds what a save reports; this holds the
-   * refusals that never reach one.
+   * Record refusals that occur before the shared editor handles the save.
    *
    * @type {Map<string, { ok: boolean, message: string }>}
    */
   const notes = new Map();
 
   /**
-   * The advisories a save started from this view is out for, by GHSA
-   * identifier. REQUIREMENTS.md section 3: the controls that fed a save are
-   * held still until it settles, so the values written are the values on
-   * screen and no second press lands on the write in flight.
+   * Track pending saves by advisory ID to disable their controls across redraws.
    *
    * @type {Set<string>}
    */
@@ -575,8 +459,7 @@ if (typeof require === 'function') {
   /**
    * @param {DoneRow} row
    * @param {import('./corpus.js').Corpus | null} corpus
-   * @returns {{ ok: boolean, message: string } | null} what the row says about
-   *   the last press on it.
+   * @returns {{ ok: boolean, message: string } | null} The latest row status, or null.
    */
   function noteFor(row, corpus) {
     if (saving.has(row.ghsaId)) {
@@ -588,20 +471,18 @@ if (typeof require === 'function') {
     if (advisory === null) return null;
     const edit = globalThis.bghsa.edit;
     const held = edit.results.get(edit.keyOf(advisory)) ?? null;
-    // A result with nothing to say draws no line, so the row carries no empty
-    // one where a save reported by saying nothing.
+
     return held === null || held.message === '' ? null : held;
   }
 
   /**
-   * The closure control on one row: what the advisory carries, or what a press
-   * on this page has staged and not yet written.
+   * Prefer pending closure edits over stored values.
    *
    * @param {Document} doc
    * @param {DoneRow} row
    * @param {import('./corpus.js').Corpus | null} corpus
-   * @param {{ owner: string, repo: string } | null} ref The repository the list
-   *   is of, which is the one a duplicate names an advisory of.
+   * @param {{ owner: string, repo: string } | null} ref The repository used for duplicate
+   *   advisory links.
    * @returns {Element}
    */
   function buildClosure(doc, row, corpus, ref) {
@@ -613,9 +494,7 @@ if (typeof require === 'function') {
       advisory === null ? undefined : edit.editsFor(edit.keyOf(advisory)).closureReason;
     const current = staged === undefined ? row.closureReason : staged;
 
-    // The option for an advisory carrying no reason reads blank, so a row with
-    // one set is the row that has words in the control. The control is named
-    // for a reader who cannot see that.
+    // Supply an accessible label for the select's blank option.
     const control = edit.selectControl(
       doc,
       'mr-1 bghsa-done-reason',
@@ -629,13 +508,7 @@ if (typeof require === 'function') {
     save.setAttribute('type', 'button');
 
     /**
-     * What the two controls are offered for.
-     *
-     * Both fed the save that is out, and both are held still until it settles:
-     * what the write carries is what the row shows. Save is offered only once
-     * the select has moved, which is the gate the panel's Save carries. The
-     * store prunes a pick equal to the advisory's stored reason, so a select
-     * put back where it started leaves nothing staged and nothing to press.
+     * Disable controls during saves and enable Save only for pending changes.
      *
      * @returns {void}
      */
@@ -652,11 +525,8 @@ if (typeof require === 'function') {
       if (advisory === null) return;
       const picked = /** @type {{ value?: unknown }} */ (/** @type {unknown} */ (control)).value;
       const value = typeof picked === 'string' ? picked : '';
-      // The reason is staged against the advisory's stored state, which is what
-      // decides whether this pick is a change at all, and reading it hashes the
-      // values the confirmations bind to. The press that writes stages the
-      // value it reads off this control, so a pick still landing here when it
-      // comes is not a pick that press can miss.
+      // Staging waits for the editor context. Save also reads the control directly
+      // to include the latest choice.
       void (async () => {
         const context = await contextFor(doc, advisory);
         const reason = value === '' ? null : value;
@@ -674,10 +544,7 @@ if (typeof require === 'function') {
     controls.append(save);
     box.append(controls);
 
-    // What the advisory duplicates stands under the control, on a line held to
-    // a width the control is wider than. The cell holds every row's control in
-    // one column, and a line the control is wider than leaves that column where
-    // it stands whatever a maintainer typed.
+    // Constrain duplicate text width to preserve closure-control alignment.
     if (row.closureDuplicateOf !== null) {
       const line = element(doc, 'div', 'mt-1 text-small bghsa-done-duplicate-line');
       line.append(
@@ -694,18 +561,11 @@ if (typeof require === 'function') {
   }
 
   /**
-   * One row: the title, the line under it, the severity, and then the reason,
-   * the state, and when this row's data was read.
-   *
-   * The three cells are in the order the open list puts its own three in, so a
-   * maintainer moving between the two views finds the state and the observation
-   * in the same place. The state chip stands in a cell of its own carrying the
-   * color of the ending the advisory came to.
+   * Align state and observation cells with the open list.
    *
    * @param {Document} doc
    * @param {DoneRow} row
-   * @param {Held} state What the view holds: the corpus a row reads its note
-   *   from, and the repository a duplicate names an advisory of.
+   * @param {Held} state
    * @returns {Element}
    */
   function buildRow(doc, row, state) {
@@ -715,10 +575,8 @@ if (typeof require === 'function') {
 
     /** @type {import('../common/chips.js').ChipSpec[]} */
     const chips = [];
-    // REQUIREMENTS.md section 10: the severity stands on a published advisory
-    // and a closed one carries none. Publishing an advisory settles its
-    // severity, so the chip is filled there as a confirmed one is on the open
-    // list. Nothing is read or stored to decide it: the state is the whole rule.
+    // Publication confirms severity; closed rows omit it
+    // (REQUIREMENTS.md section 10).
     if (row.severityLabel !== null && ending !== CLOSED) {
       chips.push({
         text: globalThis.bghsa.chips.sentenceCase(row.severityLabel),
@@ -737,8 +595,7 @@ if (typeof require === 'function') {
 
     /** @type {Element[]} */
     const cells = [];
-    // REQUIREMENTS.md section 10: the reason is a closed advisory's, so a
-    // published row carries no control for one.
+    // Closure reasons apply to closed advisories (REQUIREMENTS.md section 10).
     if (ending !== PUBLISHED) {
       const closure = built.cell(doc, '');
       closure.append(buildClosure(doc, row, corpus, state.ref));
@@ -773,13 +630,11 @@ if (typeof require === 'function') {
   }
 
   /**
-   * What one filter offers: the item that holds the list to nothing, then the
-   * values the rows hold.
+   * Build filter choices from all collected rows.
    *
    * @param {Document} doc
    * @param {import('../list/table.js').Facet<DoneRow>} facet
-   * @param {readonly DoneRow[]} rows Every row the corpus holds, so the values
-   *   come off the whole list and not off what the filters have left of it.
+   * @param {readonly DoneRow[]} rows
    * @param {string} selected
    * @returns {Element[]}
    */
@@ -802,13 +657,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The filters this surface puts on the bar, beside the open list's, and the
-   * way back to the list unfiltered.
-   *
-   * They sit on the bar the toggles sit on, which is where the open list's own
-   * filters are, so both views are worked from one strip. The bar stands
-   * outside the view a draw replaces, so a read landing draws the rows and
-   * leaves the control a maintainer is pointing at where it is.
+   * Place filters outside the replaced view to keep menus stable during reads.
    *
    * @param {Document} doc
    * @returns {Element}
@@ -845,18 +694,14 @@ if (typeof require === 'function') {
 
   /**
    * @param {Document} doc
-   * @returns {Element | null} the filters on the bar, and null before the list
-   *   surface has drawn one.
+   * @returns {Element | null} The rendered filter controls, or null if absent.
    */
   function controlsIn(doc) {
     return doc.querySelector(`#${globalThis.bghsa.table.ROOT_ID} .bghsa-done-controls`);
   }
 
   /**
-   * Draws the filters again from what they are now holding the list to, which
-   * is what puts every menu on the item that view names and every summary on
-   * the value it is holding to. A press is what asks for this; a read landing
-   * asks for {@link syncControls}.
+   * Rebuild filters after a selection changes. New data uses {@link syncControls}.
    *
    * @param {Document} doc
    * @returns {void}
@@ -872,9 +717,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Puts the values the filters offer on what the corpus now holds. A read
-   * landing can turn up a closure reason no row carried before, and the control
-   * offers it from then on.
+   * Update offered values when newly fetched rows add closure reasons.
    *
    * @param {Document} doc
    * @returns {void}
@@ -892,20 +735,12 @@ if (typeof require === 'function') {
   }
 
   /**
-   * What the view says when a page of the walk or an advisory read failed.
-   * REQUIREMENTS.md section 11 displays what it can, marks the result
-   * incomplete, and shows a banner. The banner is the
-   * failures themselves; nothing stands above them saying that some of this
-   * could not be read, because each line already says it.
-   *
-   * The header's own progress chip is not that banner. A walk that has not
-   * reached its last page is one a navigation stopped as readily as one GitHub
-   * refused, and a read that failed leaves a row standing as unread, which is
-   * also what a row nothing has got to yet looks like.
+   * List failed pages and advisories while retaining readable results
+   * (REQUIREMENTS.md section 11).
    *
    * @param {Document} doc
    * @param {readonly string[]} failures
-   * @returns {Element | null} the banner, and null where nothing failed.
+   * @returns {Element | null} The failure banner, or null if every read succeeded.
    */
   function buildBanner(doc, failures) {
     if (failures.length === 0) return null;
@@ -917,17 +752,10 @@ if (typeof require === 'function') {
   }
 
   /**
-   * How the list is standing: filling, short of the states with nothing further
-   * coming, or whole.
-   *
-   * A collection running says so from the view, which knows one is out, and
-   * from the corpus, which is assembled inside the walk that fills it. A
-   * corpus a finished pass left short of the states is one the walk gave up on,
-   * and no more of it is coming until a page load takes the work back.
+   * Report active collection or an incomplete result after collection stops.
    *
    * @param {Held} state
-   * @returns {string | null} what the header says about the list, and null
-   *   where there is nothing to say.
+   * @returns {string | null} The loading or incomplete status, or null when complete.
    */
   function statusTextOf(state) {
     if (state.reading || state.corpus?.running === true) return LOADING_TEXT;
@@ -936,26 +764,13 @@ if (typeof require === 'function') {
   }
 
   /**
-   * What the header says about the collection: what it is doing now, or that the
-   * list is short of the two states with nothing further coming.
-   *
-   * What it reports is the collection this document holds. A collection can be
-   * put down under the view, which is what the list surface asks for when a
-   * render finds no advisory list on the page, and a corpus the walk assembled
-   * goes on saying it is being filled after the collection filling it has gone.
-   * Read off the entry, the header says a collection is running while one is,
-   * and says nothing once none is.
-   *
-   * The chip is the open list's own, read off the same queue, so a maintainer
-   * looking at either surface is told the same thing the same way. A walk that
-   * has queued nothing yet says it is loading, because the walk is what finds
-   * out how many there are; a pass reading the advisories the walk found counts
-   * what it has still to read, which is what tells a crawl that is working from
-   * one that has stopped.
+   * Read progress from the active collection because a retained corpus may
+   * still have its running flag after cancellation. Use the shared queue
+   * progress chip while collecting and report incomplete results afterward.
    *
    * @param {Document} doc
    * @param {Held} state
-   * @returns {Element | null} the chip, and null where there is nothing to say.
+   * @returns {Element | null} The progress or failure chip, or null if absent.
    */
   function buildStatus(doc, state) {
     const table = globalThis.bghsa.table;
@@ -974,12 +789,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Writes what the collection is doing where it stands.
-   *
-   * The queue serves the open list as well, and a read of theirs moves what it
-   * has left without moving a row here, so the header is written on its own
-   * and the rows are left as they are. It is how the open list's own header
-   * keeps up with its refresh.
+   * Refresh progress independently of rows because open-list reads also advance
+   * the shared queue.
    *
    * @param {Document} doc
    * @returns {void}
@@ -998,9 +809,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The rows, and what stands where there are none. Reaching the done view
-   * starts the collection, so a view with no corpus yet is one whose first page
-   * has not landed.
+   * Show loading before the first corpus page arrives.
    *
    * @param {Document} doc
    * @param {readonly DoneRow[]} rows
@@ -1010,8 +819,7 @@ if (typeof require === 'function') {
   function buildBody(doc, rows, state) {
     const list = element(doc, 'ul', 'bghsa-done-rows');
     if (rows.length === 0) {
-      // A list the filters emptied is not a repository with nothing on it, and
-      // the table already has words for both.
+      // Distinguish an empty corpus from a filter without matches.
       let empty = EMPTY_TEXT;
       if (state.corpus === null) empty = statusTextOf(state) ?? EMPTY_TEXT;
       else if (filtering(doc)) empty = globalThis.bghsa.table.EMPTY_TEXT;
@@ -1023,12 +831,6 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The done view: a Box carrying the count and the advisories.
-   *
-   * It carries no statistics. REQUIREMENTS.md section 10 gives them a view of
-   * their own: they are not a property of the done list, and they are over the
-   * open half of the corpus as well.
-   *
    * @param {Document} doc
    * @returns {Element}
    */
@@ -1044,9 +846,7 @@ if (typeof require === 'function') {
     const shown = applyFilters(rows, filtersOf(doc));
     const countText = globalThis.bghsa.table.viewCountText(shown.length, rows.length);
     header.append(element(doc, 'span', 'ml-2 text-normal bghsa-done-count', countText));
-    // What the list is of, which is not a statistic: a maintainer reading a row
-    // has to be able to tell whether more are on their way, and whether the
-    // ones that are missing are coming at all.
+
     const status = buildStatus(doc, state);
     if (status !== null) header.append(status);
     root.append(header);
@@ -1058,12 +858,11 @@ if (typeof require === 'function') {
     return root;
   }
 
-  /** How the list surface holds a node out of view. */
   const setHidden = globalThis.bghsa.table.setHidden;
 
   /**
    * @param {Document} doc
-   * @returns {void} adds the done view's stylesheet once.
+   * @returns {void}
    */
   function ensureStyle(doc) {
     if (doc.getElementById(STYLE_ID) !== null) return;
@@ -1074,15 +873,11 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Draws the view into the list surface, under the bar both toggles sit on.
-   *
-   * The view is rebuilt whole. What a maintainer picked and has not written is
-   * in the editing store and not in the control, so a rebuilt control comes back
-   * holding it.
+   * Rebuild the view below the shared toolbar. The editing store restores
+   * pending values in the new controls.
    *
    * @param {Document} doc
-   * @returns {Element | null} the view, and null where the list surface is not
-   *   on the page.
+   * @returns {Element | null} The view, or null if the list surface is absent.
    */
   function draw(doc) {
     const table = globalThis.bghsa.table;
@@ -1094,16 +889,12 @@ if (typeof require === 'function') {
     else surface.append(root);
     ensureStyle(doc);
     setHidden(root, table.viewMode(doc) !== MODE);
-    // The filters stand on the bar, which this draw does not touch. What a read
-    // landing changes there is the values they offer.
+
     syncControls(doc);
     return root;
   }
 
   /**
-   * The toggle this surface puts on the bar, beside the one that restores
-   * GitHub's view.
-   *
    * @param {Document} doc
    * @returns {Element}
    */
@@ -1117,8 +908,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Switches between this view and the table. The list surface holds which of
-   * the three views the page is on, so a press here cannot leave two showing.
+   * The list surface owns view selection to keep only one view visible.
    *
    * @param {Document} doc
    * @returns {void}
@@ -1132,12 +922,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Draws the view under whichever of the three views the page is on.
-   *
-   * GitHub's own view carries GitHub's controls. This toggle opens a view of
-   * the extension's own, so it goes out of view with the table and comes back
-   * with it, leaving one control on the bar there: the one that brings the
-   * extension's views back.
+   * Hide extension toggles in GitHub's native view.
    *
    * @param {Document} doc
    * @param {string} mode
@@ -1157,21 +942,14 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Walks the done states and reads the advisories they name.
-   *
-   * The crawl is a hundred-odd reads on a repository like `containerd/containerd`
-   * and it goes through the queue the list surface already holds for this
-   * repository, taken from `table.queueFor`. One throttled serial queue serves a
-   * repository: a second instance would hold the rate privately, so both
-   * surfaces spend the same one request a second and the same persisted claim.
-   *
-   * It starts when the view is first asked for, not when the page loads, because
-   * it is a hundred requests and nobody has asked for them yet.
+   * Collect done advisories when this view is first requested. Share the
+   * repository queue from table.queueFor to enforce one request rate across
+   * the open and completed views.
    *
    * @param {Document} doc
    * @param {CollectOptions} [options]
-   * @returns {Promise<import('./corpus.js').Corpus | null>} null where the page
-   *   is not an advisory list, or does not say which repository it belongs to.
+   * @returns {Promise<import('./corpus.js').Corpus | null>} The corpus, or null outside an
+   *   identified advisory list.
    */
   function collect(doc, options = {}) {
     const table = globalThis.bghsa.table;
@@ -1189,18 +967,13 @@ if (typeof require === 'function') {
 
     /** @type {(ghsaId: string, entry: import('../common/cache.js').CacheEntry) => void} */
     const listener = (ghsaId, entry) => {
-      // A read landing fills one member in where it stands, so the corpus grows
-      // current under the reader rather than in one jump at the end.
+      // Update each member as its detail read arrives.
       if (!names(doc, ref)) return;
       const corpus = stateOf(doc).corpus;
       const member = corpus === null ? null : memberOf(corpus, ghsaId);
       const advisory = member === null ? null : globalThis.bghsa.record.advisoryFrom(entry.record);
       if (corpus === null || member === null || advisory === null) {
-        // Nothing here to fill a row with: the view holds no corpus yet, or the
-        // read is one the queue took for the open list, or the record did not
-        // read back as an advisory. The queue has one fewer to read whichever
-        // it is, and the header says so from the first read after the view
-        // opens, which is well before the walk this collection is waiting on.
+        // Shared queue progress can change before this corpus has a matching row.
         drawStatus(doc);
         return;
       }
@@ -1215,8 +988,7 @@ if (typeof require === 'function') {
 
     /**
      * @param {string} message
-     * @returns {void} puts one failure in the banner, named once however many
-     *   attempts it took to give the page up.
+     * @returns {void}
      */
     const noteFailure = (message) => {
       if (!names(doc, ref)) return;
@@ -1238,8 +1010,7 @@ if (typeof require === 'function') {
           noteFailure(`${FAILED_PREFIX} ${url}`);
         },
         onPage: (corpus) => {
-          // A page landing after the maintainer has gone to another repository
-          // is a page of the one they left.
+          // Ignore results for a repository the document has left.
           if (!names(doc, ref)) return;
           setState(doc, { corpus });
           draw(doc);
@@ -1256,28 +1027,17 @@ if (typeof require === 'function') {
       })
       .finally(() => {
         listening.delete(listener);
-        // A collection of another repository may have taken the entry over
-        // while this one was finishing, and that one is the one still running.
-        // Reporting it finished here would take the Reading chip off a crawl
-        // that is still going, and where that crawl has no corpus yet the view
-        // would say the repository has no advisories while it is fetching them.
-        // The repository is not asked about on top of this: a collection the
-        // document still holds is the one whose end this is, whichever
-        // repository the page has come to name since.
+        // Clear only this collection's entry; another repository's collection may
+        // have replaced it while the request was pending.
         if (running.get(doc)?.started === started) {
           running.delete(doc);
           setState(doc, { reading: false });
         }
-        // The view is drawn either way. What a collection put down under it
-        // left on the header is what the end of that collection settles, and
-        // where another one has the entry the draw reads that one.
+        // Redraw using the current collection after either completion or replacement.
         draw(doc);
       });
-    // The queue is the repository's, and this collection's walk waits its turn
-    // behind whatever the open list's refresh already has on it. The wait is
-    // part of the collection: the entry stands before the view is drawn, so the
-    // header says the view is loading from the moment it is asked and the count
-    // moves with the queue while the walk waits.
+    // Register before drawing to show loading while this collection waits for
+    // other work in the shared queue.
     running.set(doc, { key, queue, started });
     setState(doc, { reading: true, ref, failures: [] });
     draw(doc);
@@ -1285,24 +1045,11 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Puts down a collection running for a repository the page no longer names.
-   *
-   * A collection is a walk of two list pages and then a read of every advisory
-   * they name, a hundred-odd requests on a repository like
-   * `containerd/containerd`. A maintainer who follows a link out of the list
-   * has left it, and the rate this extension puts on github.com is one request
-   * a second per repository: a collection left running there spends that second
-   * on a repository nobody is looking at, and it spends it beside whatever the
-   * page they moved to is spending. The list surface stops its own refresh on
-   * the same reading of the page.
-   *
-   * The walk stops after the request in flight and the reads are never taken
-   * up. What is left stays in the progress entry, so a maintainer who comes
-   * back takes the collection back where it stood and reads no advisory twice.
+   * Stop collection after navigation to another repository or away from the list.
+   * The current request finishes and saved queue progress supports resumption.
    *
    * @param {Document} doc
-   * @param {string | null} key The repository the page names now, and null
-   *   where it names none.
+   * @param {string | null} key The current repository key, or null outside an identified list.
    * @returns {void}
    */
   function left(doc, key) {
@@ -1342,8 +1089,6 @@ if (typeof require === 'function') {
 
   globalThis.bghsa.view = exported;
 
-  // The list surface holds the choice of view and the bar the toggles sit on,
-  // so this one takes its place there as soon as it loads.
   globalThis.bghsa.table.addSurface({ control: buildToggle, controls: buildControls, show, left });
 
   if (typeof module !== 'undefined') {

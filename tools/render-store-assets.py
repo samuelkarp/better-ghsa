@@ -3,17 +3,13 @@
 
     python3 tools/render-store-assets.py docs
 
-Writes store-icon-128.png, the listing icon, which Google asks for as 96x96 of
-artwork centered in a 128x128 canvas with transparent padding, and
-promo-small-440x280.png, the small promotional tile.
+Write store-icon-128.png with 96x96 artwork centered on a transparent 128x128
+canvas, and promo-small-440x280.png with the small promotional tile.
 
-The mark is the one src/icons carries, drawn from the same geometry: a shield
-with a band across its head and a check on its face. On the tile it stands on
-the field directly, because the badge behind it in the extension icon is the
-same color as the tile.
+Both images use the shield geometry from src/icons. The tile background
+matches the icon background, allowing the tile to omit the rounded square.
 
-pycairo does the drawing. Text is set in Liberation Sans, which fontconfig
-resolves on this machine.
+Rendering requires pycairo and the Liberation Sans font.
 """
 
 import math
@@ -22,13 +18,13 @@ import sys
 
 import cairo
 
-# The palette src/icons uses.
+# These colours match src/icons.
 BG = (0x14 / 255, 0x1B / 255, 0x27 / 255)
 SHIELD = (0xE8 / 255, 0xED / 255, 0xF4 / 255)
 ACCENT = (0xF0 / 255, 0x8C / 255, 0x28 / 255)
 MUTED = (0x9A / 255, 0xA6 / 255, 0xB8 / 255)
 
-# The shield, in unit coordinates, as tools/render-icon.py draws it.
+# These unit coordinates match tools/render-icon.py.
 LEFT, RIGHT = 0.220, 0.780
 TOP, BOTTOM = 0.160, 0.862
 SHOULDER = 0.050
@@ -42,7 +38,7 @@ TAGLINE = ["Triage tracking for", "GitHub Security Advisories"]
 
 
 def quad_to(ctx, qx, qy, x, y):
-    """A quadratic segment, which cairo takes as its cubic equivalent."""
+    """Convert a quadratic segment to a cubic segment for cairo."""
     px, py = ctx.get_current_point()
     ctx.curve_to(
         px + 2 / 3 * (qx - px),
@@ -55,7 +51,7 @@ def quad_to(ctx, qx, qy, x, y):
 
 
 def shield_path(ctx):
-    """The shield outline, closed, in unit coordinates."""
+    """Draw a closed shield outline in unit coordinates."""
     ctx.new_path()
     ctx.move_to(LEFT, TOP + SHOULDER)
     ctx.arc(LEFT + SHOULDER, TOP + SHOULDER, SHOULDER, math.pi, 1.5 * math.pi)
@@ -77,10 +73,9 @@ def rounded_rect(ctx, x, y, w, h, r):
 
 
 def draw_mark(ctx, x, y, size, badge):
-    """The mark at (x, y) filling a square of `size`.
+    """Draw the mark at (x, y), scaled to a square of side length `size`.
 
-    With `badge`, the rounded slate square behind it is drawn too, which is the
-    extension icon. Without it the shield stands on whatever it is placed on.
+    Set `badge` to include the extension icon's rounded slate background.
     """
     ctx.save()
     ctx.translate(x, y)
@@ -95,7 +90,6 @@ def draw_mark(ctx, x, y, size, badge):
     shield_path(ctx)
     ctx.fill()
 
-    # The band across the head, kept inside the shield.
     ctx.save()
     shield_path(ctx)
     ctx.clip()
@@ -118,7 +112,7 @@ def draw_mark(ctx, x, y, size, badge):
 
 
 def store_icon(path):
-    """128x128, with the artwork held to the middle 96 and the rest clear."""
+    """Write a 128x128 icon with centered 96x96 artwork and transparent padding."""
     surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, 128, 128)
     ctx = cairo.Context(surface)
     draw_mark(ctx, 16, 16, 96, badge=True)
@@ -127,19 +121,14 @@ def store_icon(path):
 
 
 def centered_text(ctx, text, width, baseline):
-    """Draw `text` centered across `width`, sitting on `baseline`."""
+    """Draw `text` centered across `width` at `baseline`."""
     extents = ctx.text_extents(text)
     ctx.move_to((width - extents.width) / 2 - extents.x_bearing, baseline)
     ctx.show_text(text)
 
 
 def promo_small(path):
-    """440x280, the shield above the name.
-
-    Sizes and placements are measured rather than guessed: the shield is scaled
-    by the height it should occupy, and each line is centered from its own
-    extents.
-    """
+    """Write a 440x280 promotional tile with the shield above the name."""
     w, h = 440, 280
     surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, w, h)
     ctx = cairo.Context(surface)
@@ -148,8 +137,7 @@ def promo_small(path):
     ctx.rectangle(0, 0, w, h)
     ctx.fill()
 
-    # The unit square is scaled so the shield inside it stands this tall, and
-    # offset so the shield's own top edge lands where the layout wants it.
+    # Scale and position the shield using its bounds within the unit square.
     shield_height = 116
     size = shield_height / (BOTTOM - TOP)
     shield_top = 36

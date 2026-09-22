@@ -22,7 +22,6 @@ function parseFixture(name) {
   return /** @type {Document} */ (/** @type {unknown} */ (parseHTML(html).document));
 }
 
-/** The one parse of each large fixture in this file. */
 const triageDoc = parseFixture('triage-thread.html');
 const draftDoc = parseFixture('draft.html');
 
@@ -45,9 +44,6 @@ function text(node) {
 }
 
 /**
- * A merged state carrying `warnings` and nothing else, which is what marking
- * the comments reads.
- *
  * @param {import('../src/common/merge.js').MergeWarning[]} warnings
  * @returns {import('../src/common/merge.js').MergedState}
  */
@@ -80,8 +76,7 @@ function alert(id, kind) {
 }
 
 /**
- * A document holding one comment, with or without the role badge GitHub wraps
- * in a tooltip.
+ * GitHub wraps the role badge in a tooltip.
  *
  * @param {string} id
  * @param {boolean} badged
@@ -136,8 +131,7 @@ test('a second pass over an unchanged document changes nothing', () => {
   const placed = comments.markComments(triageDoc, mergeOf(triageDoc));
   assert.strictEqual(placed.length, 1);
   assert.strictEqual(triageDoc.querySelectorAll(CHIP).length, 1);
-  // The same node, so a pass over an unchanged document raises no mutation and
-  // cannot feed the observer that called it.
+  // Reusing the node avoids triggering another mutation observer callback.
   assert.ok(placed[0] === before, 'the chip was taken out and put back');
 });
 
@@ -152,8 +146,6 @@ test('a snapshot excluded for failing validation marks its comment', () => {
   assert.strictEqual(placed.length, 1);
   const chip = /** @type {Element} */ (placed[0]);
   assert.strictEqual(text(chip), 'Unable to parse tracking state');
-  // Not the tone a snapshot from outside the organization takes: that one is
-  // the only chip here a maintainer has to act on.
   assert.strictEqual(chip.getAttribute('class'), 'Label Label--secondary bghsa-tone-attention');
   const group = chip.closest('div.timeline-comment-group');
   assert.ok(group?.id === 'advisory-comment-282849', 'the chip is on the wrong comment');
@@ -165,7 +157,6 @@ test('a comment carrying no snapshot is named as such', () => {
   const placed = comments.markComments(doc, merged([warning]));
   assert.strictEqual(placed.length, 1);
   assert.strictEqual(text(placed[0] ?? null), 'Unable to parse tracking state');
-  // What the merge had to say is the whole tooltip, with nothing before it.
   assert.strictEqual(placed[0]?.getAttribute('title'), warning.message);
 });
 

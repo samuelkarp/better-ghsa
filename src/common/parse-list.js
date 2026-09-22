@@ -16,12 +16,9 @@ if (typeof require === 'function') {
  * @property {string | null} href The advisory's path on github.com.
  * @property {string | null} title
  * @property {string | null} state `Triage`, `Draft`, `Published`, or `Closed`.
- * @property {string | null} severity The severity, lowercased, and null where
- *   the advisory sets none.
+ * @property {string | null} severity The lowercase severity, or null if unset.
  * @property {string | null} severityLabel The severity as displayed.
- * @property {string | null} severityClass The color GitHub paints the severity
- *   chip with, as the `Label--` modifiers it carries, and null where the chip
- *   carries none.
+ * @property {string | null} severityClass GitHub's severity color classes.
  * @property {string | null} openedAt The time the report was opened.
  * @property {string | null} reporter The login the row names as opening it.
  */
@@ -30,8 +27,7 @@ if (typeof require === 'function') {
  * @typedef {object} StateTab
  * @property {string} state The `?state=` value the tab links to.
  * @property {string | null} label The state as displayed.
- * @property {number | null} count The advisories in that state, and null where
- *   the tab's text does not open with a number.
+ * @property {number | null} count The advisory count, or null if unreadable.
  * @property {string} href
  * @property {boolean} selected Whether the page is showing this tab.
  */
@@ -39,7 +35,7 @@ if (typeof require === 'function') {
 /**
  * @typedef {object} NextPage
  * @property {string} href
- * @property {number | null} page The `?page=` the link walks to.
+ * @property {number | null} page The link's page parameter.
  */
 
 /**
@@ -50,15 +46,14 @@ if (typeof require === 'function') {
  * @property {StateTab[]} tabs
  * @property {string | null} selectedState The `?state=` the page is showing.
  * @property {NextPage | null} next
- * @property {number | null} openCount The advisories in the open states, and
- *   null where either tab's count went unread.
+ * @property {number | null} openCount The combined triage and draft count,
+ *   or null if either count is unreadable.
  */
 
 (() => {
   /**
-   * The advisory states GitHub's list page offers, as the `?state=` value and as
-   * the name it displays. The four tabs are mutually exclusive, so the open set
-   * is the union of `triage` and `draft`.
+   * The state tabs are mutually exclusive. Open advisories comprise triage
+   * and draft.
    *
    * @type {Readonly<Record<string, string>>}
    */
@@ -78,10 +73,8 @@ if (typeof require === 'function') {
   /** A state tab link, as `/{owner}/{repo}/security/advisories?state={state}`. */
   const LIST_HREF = /^\/([^/?#]+)\/([^/?#]+)\/security\/advisories(?:[?#]|$)/;
 
-  /** How every reader here squares up the text a page carries. */
   const collapse = globalThis.bghsa.text.collapse;
 
-  /** How every reader here reads an empty value as nothing. */
   const orNull = globalThis.bghsa.text.orNull;
 
   /**
@@ -107,8 +100,7 @@ if (typeof require === 'function') {
 
   /**
    * @param {string} name
-   * @returns {string | null} the state `name` says, as the `?state=` value, and
-   *   null for a name that is not one of GitHub's four.
+   * @returns {string | null} The normalized state, or null if unrecognized.
    */
   function stateKey(name) {
     const wanted = name.trim().toLowerCase();
@@ -116,9 +108,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The state a row's tooltip names. The tooltip reads `{State} advisory`, and it
-   * is the one state signal every row carries: a row whose advisory holds no
-   * severity and no state Label still carries it.
+   * The `{State} advisory` tooltip is present even when state and severity
+   * labels are absent.
    *
    * @param {Element} row
    * @returns {string | null} the state as GitHub displays it.
@@ -134,17 +125,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The severity a row shows, and null where the advisory sets none.
-   *
-   * The row's `title` is what names the level. Neither position nor the modifier
-   * class does: the state Label and the severity Label are both `span.Label`,
-   * the state Label comes first, and it takes `Label--secondary`, which is also
-   * a severity color. A row carrying no `Severity: {level}` title states no
-   * severity, whatever else it labels, so a Label this reader does not know
-   * yields nothing rather than a level nobody set.
-   *
-   * The class is carried out beside the level so the extension's own chip can be
-   * painted the color GitHub painted this one.
+   * The `Severity: {level}` title identifies severity. State labels share
+   * `span.Label` and some color classes with severity labels.
    *
    * @param {Element} row
    * @returns {{ severity: string | null, severityLabel: string | null,
@@ -166,11 +148,10 @@ if (typeof require === 'function') {
   }
 
   /**
-   * One advisory as the list page renders it. Everything here is read from the
-   * row, so the table paints these values with no advisory fetched.
+   * Read initial row data directly from the list page.
    *
    * @param {Element} row A `div.Box-row--drag-hide`.
-   * @returns {ListRow | null} null for a row carrying no advisory link.
+   * @returns {ListRow | null} Null if the advisory link is absent.
    */
   function parseRow(row) {
     const link = row.querySelector('a.Link--primary[href*="/security/advisories/GHSA-"]');
@@ -206,8 +187,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The four state tabs, with the count each carries. The counts give the corpus
-   * size before anything is crawled.
+   * Tab counts provide the corpus size before crawling.
    *
    * @param {ParentNode} scope
    * @returns {StateTab[]} in the order the page lists them.
@@ -236,10 +216,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The link to the next page of the current state, and null on the last page.
-   *
-   * GitHub marks both the numbered link for the next page and the `Next` button
-   * `rel="next"`, so more than one anchor matches and the first is taken.
+   * GitHub marks both the next numbered page link and the Next button with
+   * `rel="next"`.
    *
    * @param {ParentNode} scope
    * @returns {NextPage | null}
@@ -254,10 +232,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Everything the list table reads from one page of the advisory list.
-   *
    * @param {Document | Element} root
-   * @returns {ParsedList | null} null when the document carries no advisory list.
+   * @returns {ParsedList | null} Null if the advisory list is absent.
    */
   function parseList(root) {
     const self = 'matches' in root && root.matches('#advisories') ? root : null;
