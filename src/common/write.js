@@ -27,7 +27,9 @@ if (typeof require === 'function') {
  * Missing field names come from REQUIRED_EDIT_FIELDS.
  * @typedef {{ code: 'edit-form-missing-fields', missingFields: string[] } |
  *   { code: 'comment-form-missing' } |
- *   { code: 'edit-form-missing', targetCommentFound: boolean }} WriteDiagnostic
+ *   { code: 'edit-form-missing', targetCommentFound: boolean } |
+ *   { code: 'save-unconfirmed', status: number, commentContainersFound: boolean | null,
+ *     expectedContentFound: boolean | null }} WriteDiagnostic
  */
 
 /**
@@ -392,9 +394,17 @@ if (typeof require === 'function') {
    * @returns {boolean}
    */
   function commentContains(doc, expected) {
-    const collapsed = expected.map((string) => collapse(string)).filter((string) => string !== '');
-    if (collapsed.length === 0) return false;
+    return inspectComments(doc, expected).expectedContentFound;
+  }
 
+  /**
+   * Uses the same response checks for save confirmation and diagnostics.
+   * @param {Document} doc
+   * @param {readonly string[]} expected
+   * @returns {{ commentContainersFound: boolean, expectedContentFound: boolean }}
+   */
+  function inspectComments(doc, expected) {
+    const collapsed = expected.map((string) => collapse(string)).filter((string) => string !== '');
     /** @type {Set<Element>} */
     const bodies = new Set();
     for (const root of [doc.documentElement, doc.body]) {
@@ -402,12 +412,11 @@ if (typeof require === 'function') {
       if (root.matches(COMMENT_BODY)) bodies.add(root);
       for (const body of root.querySelectorAll(COMMENT_BODY)) bodies.add(body);
     }
-
-    for (const body of bodies) {
+    const expectedContentFound = collapsed.length > 0 && [...bodies].some((body) => {
       const text = collapse(renderedText(body));
-      if (collapsed.every((string) => text.includes(string))) return true;
-    }
-    return false;
+      return collapsed.every((string) => text.includes(string));
+    });
+    return { commentContainersFound: bodies.size > 0, expectedContentFound };
   }
 
   /**
@@ -690,15 +699,23 @@ if (typeof require === 'function') {
 
     const toDocument =
       options.parseDocument ?? ((html) => new DOMParser().parseFromString(html, 'text/html'));
-    let written = false;
+    /** @type {Extract<WriteDiagnostic, { code: 'save-unconfirmed' }>} */
+    const diagnostic = {
+      code: 'save-unconfirmed',
+      status,
+      commentContainersFound: null,
+      expectedContentFound: null,
+    };
     try {
-      written = commentContains(toDocument(await response.text()), expected);
+      Object.assign(diagnostic, inspectComments(toDocument(await response.text()), expected));
     } catch (error) {
       log('the write could not be confirmed', error);
-      return result(false, 'unwritten', status, UNCONFIRMED_MESSAGE);
     }
-    if (!written) {
-      return result(false, 'unwritten', status, UNCONFIRMED_MESSAGE);
+    if (diagnostic.expectedContentFound !== true) {
+      return {
+        ...result(false, 'unwritten', status, UNCONFIRMED_MESSAGE),
+        diagnostic,
+      };
     }
     // A write that landed says nothing here. Every surface that starts one has
     // its own words for what it just wrote, and a message set here would be

@@ -922,3 +922,44 @@ test('the hold is released on every path that sends nothing', async () => {
   assert.deepStrictEqual(threw.events, [`take ${key}`, `release ${key} sent=false`, 'threw']);
   assert.strictEqual(threw.outcome, null);
 });
+
+test('unconfirmed responses report structural checks without response content', async () => {
+  for (const sample of [
+    { html: '<div>PRIVATE RESPONSE</div>', found: false },
+    { html: '<div class="comment-body">PRIVATE RESPONSE</div>', found: true },
+    { html: '<div class="comment-body"><textarea>expected secret</textarea></div>', found: true },
+    { html: '<div class="comment-body">expected</div><div class="comment-body">secret</div>', found: true },
+  ]) {
+    const fake = fakeFetch(202, sample.html);
+    const outcome = await write.createComment(options({ fetch: fake.send, expected: ['expected', 'secret'] }));
+    assert.strictEqual(outcome.ok, false);
+    assert.strictEqual(outcome.reason, 'unwritten');
+    assert.strictEqual(fake.calls.length, 1);
+    assert.deepStrictEqual(outcome.diagnostic, {
+      code: 'save-unconfirmed', status: 202,
+      commentContainersFound: sample.found, expectedContentFound: false,
+    });
+  }
+});
+
+test('unreadable save responses report unknown checks after the POST', async () => {
+  for (const failure of ['read', 'parse']) {
+    let sent = 0;
+    const outcome = await write.createComment(options({
+      fetch: async () => {
+        sent += 1;
+        return { status: 200, text: async () => {
+          if (failure === 'read') throw new Error('PRIVATE RESPONSE');
+          return '<div>PRIVATE RESPONSE</div>';
+        } };
+      },
+      parseDocument: () => { throw new Error('PRIVATE PARSE ERROR'); },
+    }));
+    assert.strictEqual(sent, 1);
+    assert.strictEqual(outcome.ok, false);
+    assert.deepStrictEqual(outcome.diagnostic, {
+      code: 'save-unconfirmed', status: 200,
+      commentContainersFound: null, expectedContentFound: null,
+    });
+  }
+});

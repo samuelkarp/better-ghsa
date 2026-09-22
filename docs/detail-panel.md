@@ -140,6 +140,13 @@ missing edit form, it also reports whether the target comment was found. The
 report excludes form values and advisory content. If copying fails, the details
 remain visible for manual copying. The extension keeps these details in the page.
 
+A successful HTTP response whose saved comment cannot be confirmed also includes
+"Diagnostic details". The report gives the HTTP status, whether matching
+response containers were found, and whether one contained all the expected
+content. These containers can include the advisory description and preview.
+Checks that could not run read "unknown". The report states that the POST was
+sent and the comment may have been saved.
+
 ## Untrusted and unreadable state
 
 A snapshot counts toward the advisory's state only when GitHub badges its author

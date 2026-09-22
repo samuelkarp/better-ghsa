@@ -2455,3 +2455,62 @@ for (const operation of ['create', 'edit']) {
     }
   });
 }
+
+for (const responseKind of ['missing', 'different', 'unreadable']) {
+  test(`an unconfirmed save with a ${responseKind} response has copyable diagnostics`, async () => {
+    forget();
+    const page = fixture('triage-thread.html');
+    const remote = fixture('triage-thread.html');
+    const talk = session(remote);
+    /** @type {import('../src/common/write.js').WriteFetch} */
+    const fetch = async (url, init) => {
+      const response = await talk.fetch(url, init);
+      if (init.method !== 'POST') return response;
+      // GitHub saved the comment, but its response cannot confirm the save.
+      return { status: 202, text: async () => {
+        if (responseKind === 'unreadable') throw new Error('PRIVATE RESPONSE ERROR');
+        return responseKind === 'different'
+          ? '<div class="comment-body">PRIVATE RESPONSE TEXT</div>'
+          : '<div>PRIVATE RESPONSE TEXT</div>';
+      } };
+    };
+    const options = { fetch, parseDocument: talk.parseDocument };
+    const first = await editorFor(page, options);
+    choose(control(first.editor, 'select.bghsa-triage'), 'evaluating');
+    const outcome = await edit.save(first.context);
+    assert.strictEqual(outcome.ok, false);
+    assert.strictEqual(outcome.reason, 'unwritten');
+    assert.strictEqual(talk.posts().length, 1, 'the save sent more than one POST');
+    const next = await editorFor(page, options);
+    assert.strictEqual(text(control(next.editor, '.bghsa-save-result')), 'Error: failed to validate save');
+    const details = control(next.editor, 'details.bghsa-diagnostic');
+    assert.strictEqual(details.hasAttribute('open'), false);
+    const expected = [
+      'Extension: unknown',
+      'Operation: save tracking state',
+      'Diagnostic: save-unconfirmed',
+      'HTTP response status: 202',
+      `Matching response containers found: ${responseKind === 'unreadable' ? 'unknown' : responseKind === 'different' ? 'yes' : 'no'}`,
+      `Expected content found in one matching container: ${responseKind === 'unreadable' ? 'unknown' : 'no'}`,
+      'Save unconfirmed: the comment may have been saved.',
+      'Comment POST sent: yes',
+    ].join('\n');
+    assert.strictEqual(control(details, 'pre').textContent, expected);
+    const previous = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    /** @type {string[]} */
+    const copied = [];
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      value: { clipboard: { writeText: async (/** @type {string} */ value) => { copied.push(value); } } },
+    });
+    try {
+      press(next.editor, '.bghsa-copy-diagnostic');
+      await until(() => text(control(details, '.bghsa-copy-status')) === 'Copied.');
+      assert.deepStrictEqual(copied, [expected]);
+    } finally {
+      if (previous !== undefined) Object.defineProperty(globalThis, 'navigator', previous);
+      else Reflect.deleteProperty(globalThis, 'navigator');
+      forget();
+    }
+  });
+}

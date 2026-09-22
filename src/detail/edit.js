@@ -1089,18 +1089,37 @@ if (typeof require === 'function') {
     const details = element(doc, 'details', 'mt-2 bghsa-diagnostic');
     details.append(element(doc, 'summary', '', 'Diagnostic details'));
     const version = globalThis.bghsa.storage.api()?.runtime?.getManifest?.().version ?? 'unknown';
+    /** @param {boolean | null} value */
+    const answer = (value) => value === null ? 'unknown' : value ? 'yes' : 'no';
+    /** @type {string[]} */
+    let facts;
+    switch (diagnostic.code) {
+      case 'edit-form-missing-fields':
+        facts = [`Missing: ${diagnostic.missingFields.join(', ')}`];
+        break;
+      case 'edit-form-missing':
+        facts = ['Missing: edit comment form', `Target comment found: ${answer(diagnostic.targetCommentFound)}`];
+        break;
+      case 'comment-form-missing':
+        facts = ['Missing: new comment form'];
+        break;
+      case 'save-unconfirmed':
+        facts = [
+          `HTTP response status: ${diagnostic.status}`,
+          `Matching response containers found: ${answer(diagnostic.commentContainersFound)}`,
+          `Expected content found in one matching container: ${answer(diagnostic.expectedContentFound)}`,
+          'Save unconfirmed: the comment may have been saved.',
+        ];
+        break;
+    }
     const report = [
       `Extension: ${version}`,
-      diagnostic.code === 'comment-form-missing'
+      diagnostic.code === 'comment-form-missing' || diagnostic.code === 'save-unconfirmed'
         ? 'Operation: save tracking state'
         : 'Operation: edit tracking comment',
       `Diagnostic: ${diagnostic.code}`,
-      ...(diagnostic.code === 'edit-form-missing-fields'
-        ? [`Missing: ${diagnostic.missingFields.join(', ')}`]
-        : diagnostic.code === 'edit-form-missing'
-          ? ['Missing: edit comment form', `Target comment found: ${diagnostic.targetCommentFound ? 'yes' : 'no'}`]
-          : ['Missing: new comment form']),
-      'Comment POST sent: no',
+      ...facts,
+      `Comment POST sent: ${diagnostic.code === 'save-unconfirmed' ? 'yes' : 'no'}`,
     ].join('\n');
     const text = element(doc, 'pre', 'mt-2', report);
     text.setAttribute('style', 'white-space: pre-wrap; overflow-wrap: anywhere');
