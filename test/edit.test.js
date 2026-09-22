@@ -2574,3 +2574,56 @@ for (const operation of ['create', 'edit']) {
     }
   });
 }
+
+for (const failure of ['unrecognized', 'unreadable', 'different']) {
+  test(`a fetched page with ${failure} identity has collapsed copyable diagnostics`, async () => {
+    forget();
+    const page = fixture('triage-thread.html');
+    const remote = fixture('triage-thread.html');
+    if (failure === 'unrecognized') {
+      remote.querySelector('.gh-header-meta')?.remove();
+    } else {
+      for (const region of remote.querySelectorAll('div.js-socket-channel[data-url]')) {
+        if (failure === 'unreadable') region.removeAttribute('data-url');
+        else region.setAttribute('data-url', '/PRIVATE/REPO/security/advisories/GHSA-0000-0000-0000/body');
+      }
+    }
+    const talk = session(remote);
+    const options = { fetch: talk.fetch, parseDocument: talk.parseDocument };
+    const first = await editorFor(page, options);
+    choose(control(first.editor, 'select.bghsa-triage'), 'evaluating');
+    const outcome = await edit.save(first.context);
+    assert.strictEqual(outcome.reason, 'mismatch');
+    assert.strictEqual(talk.posts().length, 0);
+    const next = await editorFor(page, options);
+    assert.strictEqual(text(control(next.editor, '.bghsa-save-result')), 'Error: unexpected response');
+    const details = control(next.editor, 'details.bghsa-diagnostic');
+    assert.strictEqual(details.hasAttribute('open'), false);
+    const report = [
+      'Extension: unknown',
+      'Operation: save tracking state',
+      'Diagnostic: advisory-page-mismatch',
+      `Advisory parser recognized page: ${failure === 'unrecognized' ? 'no' : 'yes'}`,
+      `Advisory identity read: ${failure === 'unrecognized' ? 'unknown' : failure === 'unreadable' ? 'no' : 'yes'}`,
+      `Identity matches requested advisory: ${failure === 'different' ? 'no' : 'unknown'}`,
+      'Comment POST sent: no',
+    ].join('\n');
+    assert.strictEqual(control(details, 'pre').textContent, report);
+    const previous = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    /** @type {string[]} */
+    const copied = [];
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      value: { clipboard: { writeText: async (/** @type {string} */ value) => { copied.push(value); } } },
+    });
+    try {
+      press(next.editor, '.bghsa-copy-diagnostic');
+      await until(() => text(control(details, '.bghsa-copy-status')) === 'Copied.');
+      assert.deepStrictEqual(copied, [report]);
+    } finally {
+      if (previous !== undefined) Object.defineProperty(globalThis, 'navigator', previous);
+      else Reflect.deleteProperty(globalThis, 'navigator');
+      forget();
+    }
+  });
+}

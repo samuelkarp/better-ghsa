@@ -996,3 +996,28 @@ for (const operation of ['create', 'edit']) {
     }
   });
 }
+
+test('fetched-page diagnostics distinguish parser, identity, and mismatch failures', async () => {
+  for (const sample of [
+    { page: '<div>PRIVATE PAGE</div>', recognized: false, readable: null, matches: null },
+    { page: '<div class="gh-header-meta">PRIVATE HEADER</div>', recognized: true, readable: false, matches: null },
+    ...[
+      { owner: 'private-owner' }, { repo: 'private-repo' }, { ghsaId: 'GHSA-0000-0000-0000' },
+    ].map((ref) => ({ page: advisoryHtml(ref), recognized: true, readable: true, matches: false })),
+  ]) {
+    const fake = exchange({ page: sample.page });
+    const { outcome, run } = await write.runWrite({
+      ref: REF, fetch: fake.send, parseDocument: document,
+      prepare: () => { throw new Error('an unidentified page reached write preparation'); },
+    });
+    assert.strictEqual(outcome.reason, 'mismatch');
+    assert.strictEqual(outcome.message, 'Error: unexpected response');
+    assert.strictEqual(run, null);
+    assert.strictEqual(fake.calls.length, 1);
+    assert.strictEqual(fake.calls[0]?.init.method, 'GET');
+    assert.deepStrictEqual(outcome.diagnostic, {
+      code: 'advisory-page-mismatch', pageRecognized: sample.recognized,
+      identityReadable: sample.readable, identityMatches: sample.matches,
+    });
+  }
+});

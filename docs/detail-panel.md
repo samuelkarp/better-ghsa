@@ -153,6 +153,12 @@ embedded credentials, advisory endpoint, or target comment path. It identifies
 whether the operation creates or edits a tracking comment and confirms that no
 comment POST was sent. The report excludes the form's URL and identifiers.
 
+When the page fetched before a save cannot be identified as the requested
+advisory, "Diagnostic details" reports whether the advisory parser recognized
+the page, whether it read an identity, and whether that identity matched.
+Checks that could not run read "unknown". The report confirms that no comment
+POST was sent and excludes URLs and advisory identifiers.
+
 ## Untrusted and unreadable state
 
 A snapshot counts toward the advisory's state only when GitHub badges its author

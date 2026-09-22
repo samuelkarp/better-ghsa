@@ -29,6 +29,8 @@ if (typeof require === 'function') {
  * Missing field names come from REQUIRED_EDIT_FIELDS.
  * @typedef {{ code: 'edit-form-missing-fields', missingFields: string[] } |
  *   { code: 'comment-form-missing' } |
+ *   { code: 'advisory-page-mismatch', pageRecognized: boolean, identityReadable: boolean | null,
+ *     identityMatches: boolean | null } |
  *   { code: 'form-destination-mismatch', operation: 'create' | 'edit', failedCheck: DestinationCheck } |
  *   { code: 'edit-form-missing', targetCommentFound: boolean } |
  *   { code: 'save-unconfirmed', status: number, commentContainersFound: boolean | null,
@@ -911,7 +913,15 @@ if (typeof require === 'function') {
       const advisory = globalThis.bghsa.parseDetail.parseDetail(page);
       if (advisory === null || advisory.ref === null || !sameRef(advisory.ref, ref)) {
         log(`the page read for ${ref.owner}/${ref.repo} ${ref.ghsaId} is another advisory`);
-        outcome = result(false, 'mismatch', null, MISMATCH_MESSAGE);
+        outcome = {
+          ...result(false, 'mismatch', null, MISMATCH_MESSAGE),
+          diagnostic: {
+            code: 'advisory-page-mismatch',
+            pageRecognized: advisory !== null,
+            identityReadable: advisory === null ? null : advisory.ref !== null,
+            identityMatches: advisory === null || advisory.ref === null ? null : false,
+          },
+        };
         return { outcome, run: null };
       }
       const freshName = `${advisory.ref.owner}/${advisory.ref.repo}`;

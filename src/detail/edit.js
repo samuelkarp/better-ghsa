@@ -1114,6 +1114,13 @@ if (typeof require === 'function') {
         facts = [`Failed check: ${checks[diagnostic.failedCheck]}`];
         break;
       }
+      case 'advisory-page-mismatch':
+        facts = [
+          `Advisory parser recognized page: ${answer(diagnostic.pageRecognized)}`,
+          `Advisory identity read: ${answer(diagnostic.identityReadable)}`,
+          `Identity matches requested advisory: ${answer(diagnostic.identityMatches)}`,
+        ];
+        break;
       case 'save-unconfirmed':
         facts = [
           `HTTP response status: ${diagnostic.status}`,
@@ -1128,6 +1135,7 @@ if (typeof require === 'function') {
       diagnostic.code === 'form-destination-mismatch'
         ? `Operation: ${diagnostic.operation} tracking comment`
         : diagnostic.code === 'comment-form-missing' || diagnostic.code === 'save-unconfirmed'
+          || diagnostic.code === 'advisory-page-mismatch'
           ? 'Operation: save tracking state'
           : 'Operation: edit tracking comment',
       `Diagnostic: ${diagnostic.code}`,
