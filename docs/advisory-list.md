@@ -1,96 +1,89 @@
 # The advisory list
 
-On a repository's advisory list, `https://github.com/{owner}/{repo}/security/advisories`,
-the extension replaces the rows GitHub shows with a table of its own. The table
-covers the open advisories, those in triage and in draft. Published and closed
-ones are on [the completed view](completed.md).
+On a repository's advisory list,
+`https://github.com/{owner}/{repo}/security/advisories`, the extension replaces
+GitHub's rows with a table of open advisories in triage and draft. Published
+and closed advisories appear in [the completed view](completed.md).
 
-The point of the table is the order: the advisory most in need of attention is
-at the top, and the chips under each title say why it is there.
+The default order puts advisories needing attention first. Chips under each
+title show their status.
 
 ## The control bar
 
 Above the table:
 
-- "Show GitHub's view" restores GitHub's own state tabs, query form, rows, and
-  pagination, and hides the extension's table. The button then reads "Show
-  Better GHSA".
-- "Show completed" and "Show statistics" open the other two views. Both are
-  hidden while GitHub's view is showing.
+- "Show GitHub's view" restores GitHub's state tabs, query form, rows, and
+  pagination. The button then reads "Show Better GHSA".
+- "Show completed" and "Show statistics" open the other two views. Both toggles
+  are hidden in GitHub's view.
 
-The page always opens on the extension's table. Which view you were on, how you
-sorted, and what you filtered are not remembered across a reload.
+The page opens on the extension's table. Reloading resets the selected view,
+sort order, and filters.
 
-The heading reads "Better GHSA" with a count beside it: "N advisories", or "M of
-N advisories" while a filter is hiding rows.
+The heading reads "Better GHSA" with a count: "N advisories", or "M of N
+advisories" when filters exclude rows.
 
 ## What a row shows
 
-- The advisory title, as a link.
-- Beneath it, the GHSA identifier, the date the report was opened, and the
-  reporter's login, in the form `GHSA-xxxx-xxxx-xxxx opened 2026-03-14 by
-  someone`.
-- Beneath that, the chips.
-- The owners, as profile pictures linking to each account, in the style of issue
-  assignees. Absent when nobody owns the advisory.
-- In its own cell, GitHub's state: "Triage" or "Draft".
-- "Observed" and the time this extension last read that advisory's own page, in
-  UTC. A row whose advisory has never been read reads "Not read".
+- The advisory title as a link.
+- The GHSA identifier, report date, and reporter's login, in the form
+  `GHSA-xxxx-xxxx-xxxx opened 2026-03-14 by someone`.
+- Status chips beneath that line.
+- Owners' profile pictures linking to their accounts. This cell is empty when
+  the advisory has no owners.
+- GitHub's state, "Triage" or "Draft", in a separate cell.
+- "Observed" with the UTC time the extension last read the advisory page, or
+  "Not read" if it has not read the advisory.
 
-The state and the observation stand in the last two cells here and on the
-completed view, which draws its rows from the same builder.
+The open and completed views use the same row builder. Both put the state and
+observation time in the last two cells.
 
-An unread row carries no chips beyond the severity GitHub's own markup supplied.
-Nothing has been read to say what else holds.
+Unread rows show only the severity chip supplied by GitHub's list markup.
+Other chips require data from the advisory page.
 
 ## The chips
 
-**Waiting.** What the advisory is waiting on. Where a triage value is stored,
-the chip is that value, sentence-cased: "Evaluating", "Awaiting reporter",
-"Awaiting maintainer input". Where none is, the chip is what the thread and the
-timeline say:
+**Waiting.** A stored triage value appears in sentence case: "Evaluating",
+"Awaiting reporter", or "Awaiting maintainer input". Without a stored value,
+the chip reflects the comments and timeline:
 
-- "Never reviewed": no org member has commented on it or acted on it.
-- "New activity": the newest comment from someone outside the org is newer than
-  anything a maintainer said or did.
-- "Blocked on us": neither of those holds and nothing says where the advisory
-  stands.
+- "Never reviewed": an organization member has neither commented nor acted on
+  the advisory.
+- "New activity": the newest comment from outside the organization is newer
+  than the latest maintainer comment or action.
+- "Blocked on us": neither condition applies and triage is unset.
 
-A row carries both chips when the derived reading says something the stored
-value does not, which is "Never reviewed" and "New activity". The derived chip
-comes first:
+"Never reviewed" or "New activity" also appears alongside a stored triage
+value. The derived chip comes first:
 
     [New activity] [Evaluating] [No patch yet] [High]
 
-The two values a maintainer has to move, "Evaluating" and "Awaiting maintainer
-input", are one derived reading, so the row says which of them was set.
+"Evaluating" and "Awaiting maintainer input" both require maintainer action.
+Their chips display the stored value.
 
-The color says which side owes the next move. "Never reviewed", "Blocked on us",
-"Evaluating" and "Awaiting maintainer input" are what a maintainer owes and take
-the louder color; "New activity" and "Awaiting reporter" take the quieter one.
+"Never reviewed", "Blocked on us", "Evaluating", and "Awaiting maintainer
+input" use the stronger color for maintainer action. "New activity" and
+"Awaiting reporter" use the quieter color.
 
-The filter menu and the order run off the derived reading, so a row reading
-"Evaluating" or "Awaiting maintainer input" filters and sorts under "Blocked on
-us", and a row reading "Awaiting reporter" under "Blocked on the reporter".
+Filters and sorting classify "Evaluating" and "Awaiting maintainer input" as
+"Blocked on us". They classify "Awaiting reporter" as "Blocked on the reporter".
 
-**Patch**, on draft advisories. "Patch in review" when the advisory's private
-fork holds an open pull request, "No patch yet" when it does not, and "Unknown"
-when a pull request's state could not be read.
+**Patch**, on draft advisories. "Patch in review" means the private fork has an
+open pull request. "No patch yet" means it has none. "Unknown" means a pull
+request's state could not be read.
 
-The fork's list shows open pull requests only: merging deletes the fork, and a
-closed pull request is not shown there. This chip counts preparation.
+The fork lists open pull requests only. Merging deletes the fork, and closed
+pull requests are absent from its list. This chip measures patch preparation.
 
-**Backports**, when backport targets are set: "Backports 1 of 3", counting the
-targets that have a pull request prepared against them.
+**Backports**, when targets are set. "Backports 1 of 3" counts targets with a
+prepared pull request.
 
-**CVE.** The identifier once assigned, otherwise "CVE requested" or "CVE not
-applicable".
+**CVE.** The assigned identifier, "CVE requested", or "CVE not applicable".
 
-**Severity.** The level, and ", unconfirmed" appended when no maintainer has
-confirmed the scoring. A confirmed severity is a filled chip in the color GitHub
-paints that level. An unconfirmed severity is dimmed and unfilled. The severity
-on an unread row is dimmed too, because nothing has been read that could confirm
-it.
+**Severity.** The level with ", unconfirmed" appended until a maintainer
+confirms the scoring. Confirmed severity uses a filled chip in GitHub's color
+for that level. Unconfirmed severity is dimmed and unfilled. Unread rows also
+have dimmed severity chips.
 
 **Embargo.** One of "Embargo lifts 2026-04-01", "Embargo overdue since
 2026-04-01", or "Embargo, no lift date".
@@ -99,79 +92,75 @@ it.
 
 By default:
 
-1. Every draft advisory before every advisory in triage. A draft has been
-   accepted and needs work.
-2. Within draft, by group: embargo overdue, then new activity, then blocked on
-   us, then blocked on the reporter.
-3. Within triage, by group: embargo overdue, then blocked on us, then never
-   reviewed, then new activity, then blocked on the reporter.
-4. Within a group, by severity: every severity a maintainer confirmed first,
-   highest first, then every unconfirmed severity, highest first, then
-   advisories with no severity.
+1. Draft advisories precede triage advisories.
+2. Draft groups are ordered: embargo overdue, new activity, blocked on us,
+   blocked on the reporter.
+3. Triage groups are ordered: embargo overdue, blocked on us, never reviewed,
+   new activity, blocked on the reporter.
+4. Within each group, confirmed severities precede unconfirmed severities.
+   Each is ordered highest first, followed by advisories without severity.
 5. Then longest waiting first.
 
-An advisory answering to more than one group takes the first it matches. An
-advisory with no triage value set is not blocked on anyone, so in triage it
-sorts with the never reviewed and in draft it sorts with blocked on us.
+An advisory belongs to the first group it matches. Without a stored triage
+value, it sorts with never reviewed in triage and blocked on us in draft.
 
-The order does not shift while background reads land. The table re-sorts once a
-refresh pass finishes, so rows do not move under you as you read.
+Rows stay in place during background reads. The table sorts again after the
+refresh finishes.
 
 ## Filters and sorts
 
-Seven filter menus: "Waiting", "Severity", "Owner", "State", "Patch",
-"Backports", and "Embargo". A menu holding a value reads it in its own label,
-as "Severity: Critical". "Any" clears that one menu.
+Seven filter menus are available: "Waiting", "Severity", "Owner", "State",
+"Patch", "Backports", and "Embargo". A selected value appears in the label,
+as "Severity: Critical". "Any" clears that menu.
 
-Each menu offers only the values the rows in front of you carry. A menu also
-offers "None" when at least one advisory that has been read holds nothing for
-that value, which selects exactly those advisories. An advisory nothing has been
-read on passes every filter, because no value has been looked up that could
-exclude it.
+Menus offer values from the displayed rows. "None" appears when at least one
+read advisory lacks a value and selects those advisories. Unread advisories
+pass every filter.
 
-The filter values worth knowing by their wording: "Patch" offers "In review" and
-"No patch"; "Backports" offers "Outstanding" and "Complete"; "Embargo" offers
-"Overdue" and "In force", and an overdue embargo matches both.
+"Patch" offers "In review" and "No patch". "Backports" offers "Outstanding"
+and "Complete". "Embargo" offers "Overdue" and "In force"; an overdue embargo
+matches both.
 
-A draft whose pull request state could not be read shows the "Unknown" patch
-chip and matches neither patch value.
+A draft with an unreadable pull request state shows "Unknown" and matches
+neither patch value.
 
-"Sort" offers three orders: "Default", the order above; "Highest severity",
-which puts every confirmed severity above every unconfirmed one and orders each
-of those by level; and "Longest waiting", which puts the advisory that has sat
-in its current triage value the longest at the top and advisories whose waiting
-time could not be read at the bottom.
+"Sort" offers:
 
-"Reset" clears every filter and returns the sort to the default. It is the only
-clear, and it is disabled while nothing is set.
+- "Default": the order above.
+- "Highest severity": confirmed severities first, then unconfirmed severities,
+  each ordered by level.
+- "Longest waiting": longest time in the current triage value first, with
+  unknown waiting times last.
 
-When a filter keeps no rows, the table reads "No matches".
+"Reset" clears every filter and restores the default sort. It is disabled
+when the view already has those settings.
+
+The table reads "No matches" when filters exclude every row.
 
 ## Reading and refreshing
 
-The table paints immediately from the local cache and from the list markup
-already on the page. Then a refresh runs: it walks the triage and draft list
-pages, then reads each advisory's own page, stalest first, updating rows in
-place as the reads land.
+The table initially displays cached data and the list markup already on the
+page. A refresh then crawls the triage and draft lists and reads advisory pages,
+stalest first. Each read updates its row in place.
 
-Requests go out one per second per repository, through a single queue that this
-page, the completed view, and the statistics view all share.
+The advisory list, completed view, and statistics view share one request
+queue per repository. It sends one request per second.
 
-A chip beside the heading reports progress: "Loading..." while walking the list
-pages, "Loading (12 left)..." while reading advisories, and nothing when the
-pass is done.
+The heading shows "Loading..." during the list crawl and "Loading (12 left)..."
+during advisory reads. The progress chip disappears when the refresh finishes.
 
-An advisory in triage or draft is re-read when its last read is more than five
-minutes old. A repository does not start a second refresh pass within five
-minutes of finishing one. Leaving the repository stops the pass after the
-request already in flight, and returning resumes it.
+Triage and draft advisories are refreshed when their observations are more
+than five minutes old. A new refresh starts at least five minutes after the
+previous one finishes. Leaving the repository stops the refresh after its
+current request. Returning resumes it.
 
-The list page shows no banner when a read fails. A page GitHub refused shows up
-as rows that stay "Not read".
+Failed reads leave rows marked "Not read". The list omits failure banners.
 
 ## On a repository the settings do not list
 
-Nothing on this page is the extension's. GitHub's own advisory list is what the
-page shows, no table is drawn, no refresh runs, and nothing about the repository
-is read or stored. Adding the repository in the settings starts the extension on
-the page, and removing it stops the extension and puts GitHub's own list back.
+On an unlisted repository, the extension adds nothing to the page. GitHub's
+advisory list remains visible. The extension leaves the repository's data
+unread and unstored and skips refreshes.
+
+Adding the repository in settings starts the extension on the page. Removing
+it stops the extension and restores GitHub's list.

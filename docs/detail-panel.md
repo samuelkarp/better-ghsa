@@ -2,50 +2,42 @@
 
 On an advisory page,
 `https://github.com/{owner}/{repo}/security/advisories/GHSA-xxxx-xxxx-xxxx`, the
-extension adds a panel to the main column, above the box holding the report. It
-is headed "Better GHSA".
+extension adds a "Better GHSA" panel to the main column above the report.
 
-The panel reads the page in front of it. Drawing it sends no requests. Saving
-does.
+The panel reads the open page. Rendering does not send requests; saving does.
 
 ## What it shows
 
 ### The header chips
 
-A chip for what the advisory is waiting on, the same one its row carries on
-[the advisory list](advisory-list.md), so the reason it sits where it does in
-the queue is the first thing its page says. Where a triage value is stored the
-chip is that value, and where none is it is the derived reading, "Never
-reviewed", "New activity", or "Blocked on us". Both appear, the derived one
-first, when the derived reading says something the value does not. The stored
-value also has its own row below, under "Triage", with how long it has been
-held. Published and closed advisories carry no waiting chip.
+The waiting chips match those on [the advisory list](advisory-list.md).
+A stored triage value appears as a chip. Without a stored value, the chip shows
+"Never reviewed", "New activity", or "Blocked on us", derived from the page.
+When the derived state adds information, both chips appear with the derived
+state first. The "Triage" row also shows the stored value and how long it has
+been set. Waiting chips are hidden on published and closed advisories.
 
-On a draft advisory, a chip for the patch: "Patch in review" when the private
-fork holds an open pull request, "No patch yet" when it does not, "Unknown" when
+Draft advisories show a patch chip: "Patch in review" when the private fork
+lists an open pull request, "No patch yet" when it does not, or "Unknown" when
 a pull request's state could not be read.
 
 An "Unknown" chip appears in place of the waiting chip when the advisory's state
 could not be read.
 
-The panel does not repeat what the advisory page already shows, which is why the
-severity and the CVE are not on it.
+Severity and CVE appear on GitHub's page outside the panel.
 
 ### Confirmations
 
-Three lines, "Title", "Description", and "Severity", each reading "Confirmed",
-"Not confirmed", or "Unknown". "Unknown" means the value on the page could not
-be read, so nothing can be judged against it.
+The "Title", "Description", and "Severity" lines each show "Confirmed",
+"Not confirmed", or "Unknown". "Unknown" means the extension could not read the
+value on the page.
 
-A confirmation binds to what was confirmed. When the title, the description, or
-the score changes after someone confirmed it, the line goes back to "Not
-confirmed" and reads exactly like one nobody has confirmed, because the next
-thing to do is the same either way.
+A confirmation applies to a specific value. Changing the title, description,
+or score returns its line to "Not confirmed". A confirmed line names the
+maintainer and confirmation time.
 
-A confirmed line names who confirmed it and when.
-
-The "Description" line carries a second chip saying whether the description is
-still the reporter's original text: "Not updated", "Updated", or "Unknown".
+The "Description" line also shows whether the description is the reporter's
+original text: "Not updated", "Updated", or "Unknown".
 
 This block is hidden on published and closed advisories.
 
@@ -53,22 +45,21 @@ This block is hidden on published and closed advisories.
 
 One row for each value that has been set:
 
-- "Triage", the triage value and how long it has been held.
+- "Triage", the triage value and how long it has been set.
 - "Owners", one chip per maintainer.
 - "Backport targets", one chip per release branch.
 - "Embargo", reading "No lift date", "Lifts 2026-04-01", or "Overdue since
   2026-04-01".
-- "Closed as", the closure reason, and the advisory it duplicates when the
-  reason is a duplicate. That pointer is a link when it is exactly a GHSA
-  identifier, which reads as an advisory of the repository you are on, or
-  exactly the address of an issue or a pull request on github.com, which reads
-  as "#412" for one of this repository and "owner/repo#412" for one of another.
-  Anything else is shown as it was typed.
+- "Closed as", the closure reason and, for a duplicate, its reference. An exact
+  GHSA identifier links to that advisory in the current repository. An exact
+  github.com issue or pull request URL becomes a link labeled "#412" within the
+  current repository or "owner/repo#412" for another repository. Other values
+  display as entered.
 
 ### Original report
 
-A row that preserves the reporter's words. See below. It is hidden on published
-and closed advisories.
+The "Original report" row offers report preservation, described below. It is
+hidden on published and closed advisories.
 
 ## Editing
 
@@ -78,59 +69,57 @@ advisory.
 - **Triage**: a dropdown of "Not set", "evaluating", "awaiting reporter",
   "awaiting maintainer input". Acceptance and rejection are not in this list;
   they are GitHub's own advisory states.
-- **Owners**: a chip per current owner with a "Remove" control, plus a text box
-  and an "Add" button. The box suggests org members this extension has seen, and
-  falls back to the advisory's collaborators. Any login is accepted. Any
-  maintainer can set any maintainer.
+- **Owners**: a chip per owner with a "Remove" control, plus a text box and an
+  "Add" button. Suggestions use observed organization members, falling back to
+  the advisory's collaborators. Any maintainer can assign any login.
 - **Backport targets**: the same shape, suggesting release branches seen on this
   repository, newest version first. GitHub's affected-version data can suggest
   branches, and containerd's supported branches are not contiguous, so the
   suggestion is not authoritative.
-- **Embargo**: an "In force" checkbox and a lift date. The date is disabled while
-  the checkbox is clear. Clearing the checkbox leaves the date in the box, so
-  ticking it again before you save restores it; saving with the embargo off
-  stores no lift date and redraws the box empty.
-- **Closed as**: a dropdown of "Not closed" and the seven closure reasons, read
-  as the completed view reads them, and a box for the duplicated GHSA identifier
-  that is enabled only for "Duplicate".
-- **Confirmed**: checkboxes for "Title", "Description", and "Severity". Ticking
-  one records you and a fingerprint of the value on the page right now. A value
-  the extension could not read is disabled and marked "Unavailable".
+- **Embargo**: an "In force" checkbox and a lift date. Clearing the checkbox
+  disables the date field and retains its value until you save. Checking it
+  again before saving restores the date. Saving with the embargo off clears
+  the stored date and empties the field.
+- **Closed as**: a dropdown with "Not closed" and the seven closure reasons
+  shown in the completed view. A box for the duplicated GHSA identifier is
+  enabled only for "Duplicate".
+- **Confirmed**: checkboxes for "Title", "Description", and "Severity".
+  Checking a box records you and a fingerprint of the current value. If the
+  extension cannot read a value, its checkbox is disabled and marked
+  "Unavailable".
 
-Changes accumulate. Nothing is written until "Save". "Discard changes" throws
-them away. While unsaved changes exist the panel names them, as
-"Unsaved changes: Triage, Owners."
+"Save" writes your changes. "Discard changes" clears them. The panel lists
+pending changes, for example "Unsaved changes: Triage, Owners."
 
-Putting a control back where it started removes it from the unsaved list, and so
-does another maintainer saving the same value.
+A value leaves the unsaved list when you restore its original value or another
+maintainer saves the same value.
 
 ### Leaving with unsaved changes
 
-Leaving the page asks first. A link GitHub handles in place asks
-"Better GHSA: Leave without saving your changes?"; cancelling stays put. A full
-page load gets the browser's own leave-site dialog. Going back to an advisory
-you cancelled on brings the staged changes back.
+Leaving with unsaved changes requires confirmation. Links handled by GitHub
+within the current page ask "Better GHSA: Leave without saving your changes?"
+Cancelling keeps you on the page. A full page load uses the browser's leave-site
+dialog. Returning to an advisory after cancelling restores its pending changes.
 
 ### Saving
 
-"Save" re-reads the advisory, merges your changes onto whatever the advisory now
-carries, and posts or edits your state comment. You get one state comment per
-advisory: the first save creates it, later saves edit it. No maintainer's save
-ever touches another maintainer's comment.
+"Save" rereads the advisory, merges your changes with its current state, and
+posts or edits your state comment. The first save creates your comment; later
+saves edit it. Each maintainer's save changes only their own comment.
 
-While a save is in flight every control is disabled and the panel reads
-"Saving...". Then it reads "Saved." or an error. The ones worth recognizing:
+During a save, every control is disabled and the panel shows "Saving...".
+It then shows "Saved." or an error:
 
 - "Error: concurrent edits". Someone else wrote to this advisory between the
   read and the write. Nothing was written and nothing you typed is lost. The
   panel redraws with their values so you can reapply yours.
-- "Error: update the extension". The advisory carries state written by a newer
-  version of this extension than the one you are running.
+- "Error: update the extension". The advisory contains state from a newer
+  version of the extension.
 - "Error: unparsed tracking state". See untrusted and unreadable state below.
 - "Error: {owner}/{repo} is not on this extension's allowlist." Writes to this
   repository are refused.
-- "Error: failed to save", "Error: failed to validate save", and the rest of the
-  failure messages. Nothing the extension could confirm was written.
+- "Error: failed to save", "Error: failed to validate save", and other failure
+  messages. The extension could not confirm that the comment was saved.
 
 Save failures caused by a missing new-comment form, a missing edit form, or
 missing required edit-form fields include a collapsed "Diagnostic details"
@@ -161,77 +150,69 @@ POST was sent and excludes URLs and advisory identifiers.
 
 ## Untrusted and unreadable state
 
-A snapshot counts toward the advisory's state only when GitHub badges its author
-as an Owner or a Member of the organization. Security advisors are org members,
-so their snapshots count.
+Only snapshots from authors with GitHub's Owner or Member organization badge
+count toward the advisory's state. Security advisors count as organization
+members.
 
-Snapshots the extension refused are marked on the comment that carries them, in
-the thread, next to the badge GitHub already put there:
+Excluded snapshots get a warning chip next to the comment's GitHub role badge:
 
-- "Ignored: non-member state": the author is not an org member, so nothing in
-  that snapshot counts.
-- "Unable to parse tracking state": the author is trusted and the snapshot could
-  not be read. Hovering names what was wrong with it.
-- "Tracking state from a newer extension": the snapshot names a schema this
-  build does not understand.
+- "Ignored: non-member state": the author is not an organization member.
+- "Unable to parse tracking state": the author is trusted but the snapshot is
+  unreadable. Hover over the chip for details.
+- "Tracking state from a newer extension": the snapshot uses an unsupported
+  schema.
 
-An unreadable snapshot from a trusted author still carries a claim about
-ordering, so changing state on that advisory takes one explicit confirmation: an
-"Override" row appears with a "Supersede unparsed state" checkbox, and a save
-without it fails with "Error: unparsed tracking state". Ticking it lets one save
-through, and the value you write then supersedes the unreadable one.
+An unreadable snapshot from a trusted author still has an ordering claim.
+Saving over it requires explicit confirmation. Check "Supersede unparsed state"
+in the "Override" row to allow one save. Otherwise, saving fails with
+"Error: unparsed tracking state". The new snapshot supersedes the unreadable one.
 
-A snapshot from a schema this build does not understand puts the panel into read
-only: the editor is replaced by "Update the extension to edit". The values that
-could be read still display.
+An unsupported schema makes the panel read-only. The editor is replaced by
+"Update the extension to edit". Readable values remain visible.
 
-The role labels on the comments themselves are GitHub's own. The extension adds
-only the warning chips above.
+GitHub supplies the role labels. The extension adds the warning chips.
 
 ## Preserving the original report
 
-Maintainers rewrite an advisory's title and description for publication, in
-place, over the reporter's words. Nothing on GitHub recovers what was there for
-the title, and the description's revision history is the only trace.
+Editing an advisory for publication replaces the reporter's title and
+description. GitHub retains description revision history but does not provide
+title recovery.
 
 The "Original report" row offers a "Preserve" button, with the note "Preserve
 the title and description in a comment." Pressing it posts one comment holding
 the advisory's current title and description, verbatim, inside a collapsed
 block whose summary reads "Original report preserved by Better GHSA".
 
-This works only before the rewrite. Pressing it afterward preserves the rewrite.
-Nothing recovers the original once it is gone.
+Preserve the report before rewriting it. Afterward, the button preserves the
+edited text. The original cannot be recovered once it is gone.
 
-The button is offered at most once per advisory. Once a preservation comment
-exists, the row reads "Preserved" and links to it. A press whose result the
-extension could not confirm leaves the row reading "Reload page" and offers no
-second press, because a duplicate permanent comment would be visible to the
-reporter.
+The button is offered at most once per advisory. When a preservation comment
+exists, the row shows "Preserved" and links to it. An unconfirmed attempt shows
+"Reload page" and disables another attempt until reload to prevent duplicate
+comments.
 
-The row is not shown on published or closed advisories. Those are dealt with,
-and capturing the reporter's wording then serves nothing.
+The row is hidden on published and closed advisories.
 
 The extension refuses to write when it cannot tell whether the description on
 the page is the reporter's original text.
 
 ## Who sees all this
 
-Both comments the extension writes are ordinary advisory comments, posted under
-your GitHub account. Everyone who can read the advisory's conversation reads
-them, the reporter included, on a published advisory as much as on one in
-triage. Posting a comment notifies the advisory's participants.
+Both comment types are posted under your GitHub account. Everyone with access
+to the advisory conversation can read them, including the reporter, on both
+published and triage advisories. Posting a comment notifies the participants.
 
-Nothing in the vocabulary is encoded or obfuscated. Every value it can store is
-one a maintainer should be willing to say to the reporter.
+Stored values use plain language. Save only values you are willing to share
+with the reporter.
 
 ## On a repository the settings do not list
 
-There is no panel. Nothing about the advisory is read or stored, and the page is
-GitHub's own. Adding the repository in the settings puts the panel on the page,
-and removing it takes the panel off.
+The panel is hidden, and the extension does not read or store advisory data.
+Adding the repository in settings displays the panel. Removing it hides the
+panel.
 
 ## What the panel never touches
 
-The extension writes its two comment types and nothing else. It does not change
-an advisory's title, description, severity, CVSS vector, CWEs, CVE, state, or
-collaborators, and it has no control that would.
+The extension writes tracking-state and preserved-report comments. It does not
+change an advisory's title, description, severity, CVSS vector, CWEs, CVE, state,
+or collaborators.

@@ -1,108 +1,92 @@
 # The completed view
 
-The completed view lists the advisories that are finished: everything in the
-published and closed states, which the advisory list leaves out. It is where a
-closure reason is recorded on an advisory that was closed before this extension
-existed. The statistics view sits beside it and is documented at the bottom of
-this page.
+The completed view lists published and closed advisories. It also lets you add
+closure reasons to closed advisories. The statistics view is documented below.
 
 ## Getting there
 
-Both views are reached from a repository's advisory list,
-`https://github.com/{owner}/{repo}/security/advisories`. The extension puts a
-row of toggles above the table:
+Both views open from a repository's advisory list,
+`https://github.com/{owner}/{repo}/security/advisories`. The toolbar has three
+toggles:
 
-- "Show completed" opens this view. While it is open the toggle reads
-  "Show open".
-- "Show statistics" opens the statistics view. Its toggle also reads
-  "Show open" while it is open.
-- "Show GitHub's view" hands the page back to GitHub. While GitHub's own rows
-  are showing, that toggle reads "Show Better GHSA" and the other two are
-  hidden.
+- "Show completed" opens this view. Its toggle reads "Show open" while the
+  view is open.
+- "Show statistics" opens statistics. Its toggle also reads "Show open" while
+  that view is open.
+- "Show GitHub's view" restores GitHub's rows. Its toggle then reads "Show
+  Better GHSA", and the other two toggles are hidden.
 
-"Show open" returns to the extension's table of open advisories.
-
-One view shows at a time.
+"Show open" returns to the extension's table of open advisories. One view is
+visible at a time.
 
 ## What a row shows
 
-The heading reads "Completed" with the number of advisories beside it.
-Advisories are ordered by the instant each one ended, newest first: a closed
-advisory by its last close and a published one by its last publication, so an
-advisory closed, reopened, and closed again ends at the close it is sitting in.
-Two that ended on one day are ordered by the time of day, which the row does not
-show. An advisory with no ending stands below every advisory that has one, in
-GHSA identifier order. An advisory has no ending where nothing has read it, and
-where a read of it finds no close or publication matching the state it is in.
+The heading reads "Completed" with an advisory count. Rows are ordered by end
+time, newest first. Closed advisories use their latest closure; published
+advisories use their latest publication. The order includes time of day even
+though rows display only the date.
 
-Each row carries:
+Advisories with unknown end times appear last, in GHSA identifier order. An
+end time requires a closure or publication event from the advisory page,
+matching the current state.
 
-- The advisory title, as a link. An advisory whose title has not been read shows
-  its GHSA identifier instead.
-- A line beneath it with the GHSA identifier, the date the report was opened,
-  the reporter's login, and the date the advisory ended, in the form
-  `GHSA-xxxx-xxxx-xxxx opened 2026-03-14 by someone closed 2026-08-02`. A
-  published advisory reads `published` there in place of `closed`. Any part
-  that has not been read is left out.
-- A severity chip, unless the row is closed. On a published row it is filled
-  with the color GitHub paints that level, because publishing an advisory
-  settles its severity.
-- The closure reason control, unless the row is published, and under it what
-  the advisory duplicates where one is stored.
-- In its own cell, a state chip: "Published" as a filled green chip and "Closed"
-  as a filled purple one, the colors GitHub gives the two endings. A state that
-  is neither, which happens when the advisory's own page disagrees with the list
-  it was found under, is uncolored.
-- "Observed" with the time the row's data was read, in UTC. A row backed by no
-  advisory read reads "Not read".
+Each row shows:
 
-The state and the observation stand in the last two cells here and on the open
-advisory list, which draws its rows from the same builder.
+- The title as a link, or the GHSA identifier if the title is unavailable.
+- The identifier, report date, reporter, and end date, in the form
+  `GHSA-xxxx-xxxx-xxxx opened 2026-03-14 by someone closed 2026-08-02`.
+  Published advisories use `published` in place of `closed`. Unread values
+  are omitted.
+- A severity chip, except on closed advisories. Published advisories use a
+  filled chip in GitHub's color for that level. Publication confirms severity.
+- A closure reason control, except on published advisories. A stored duplicate
+  reference appears beneath it.
+- A state chip in a separate cell: filled green for "Published" and filled
+  purple for "Closed". Other states are uncolored. These can appear when the
+  advisory page disagrees with the list where it was found.
+- "Observed" with the UTC time the extension read the advisory page, or
+  "Not read" if detail data is unavailable.
 
-Before the first page of results arrives, the list reads "Loading...". A
-finished search that found nothing reads "Not found".
+The open and completed views use the same row builder. Both put state and
+observation time in the last two cells.
 
-A chip beside the heading stands from the moment the view is opened and reads
-"Loading...". Once advisories are being read it counts what is left, as
-"Loading (37 left)...", the same words the open advisory list uses. One queue
-serves both views and serves it in order, so a view opened while the open list
-is refreshing waits its turn: the count follows the queue through that wait,
-counting the open list's advisories as well as this view's, and the rows arrive
-when this view's own walk lands. It moves as reads land, so a read that failed
-shows up as a larger step at the next one. The chip goes when the collection
-ends, and with it when the page puts it down.
+Before the first page arrives, the list reads "Loading...". A completed search
+without results reads "Not found".
+
+The heading also shows a progress chip: "Loading..." during the list crawl and
+"Loading (37 left)..." during advisory reads. The count comes from the queue
+shared with the open list and includes both views' pending advisories.
+Collection waits for requests already queued by the open list. Completed rows
+arrive as this view's list pages are read.
+
+The count updates after each successful read. Failed reads are reflected in
+the next update. The progress chip disappears when collection finishes or
+stops.
 
 ## Filters
 
-Three filter menus sit on the bar above the list, where the open advisory list's
-own filters are: "State", "Closure reason", and "Severity". The set that belongs
-to the view on screen is the set you see. A menu holding a value reads it in its
-own label, as "State: Closed". "Any" clears that one menu and "Reset" clears all
-three. While a filter is keeping rows out, the count beside the heading reads
+Three menus appear above the completed list: "State", "Closure reason", and
+"Severity". The toolbar shows the current view's filters. Selected values
+appear in their labels, as "State: Closed". "Any" clears one menu; "Reset"
+clears all three. When filters exclude rows, the heading count reads
 "2 of 5 advisories".
 
-Each menu offers only the values the rows in front of you carry. "Closure
-reason" also offers "None" when at least one closed advisory that has been read
-carries no reason, which selects exactly the advisories a reason has still to be
-set on. An advisory nothing has been read on passes every filter, because no
-value has been looked up that could exclude it.
+Menus offer values from the displayed rows. "Closure reason" also offers
+"None" when at least one read closed advisory lacks a reason. It selects
+those advisories. Unread advisories pass every filter.
 
-"Closure reason" is over closed advisories alone. A published advisory has no
-closure reason, so it matches no value of that menu, "None" included, and it
-shows while that menu is clear.
+"Closure reason" applies only to closed advisories. Published advisories are
+excluded whenever that filter is active, including when "None" is selected.
 
-"Severity" is over published advisories alone. Publishing an advisory settles
-its rating and a closed row shows no severity, so a closed advisory matches no
-value of that menu and shows while it is clear.
+"Severity" applies only to published advisories. Closed advisories are
+excluded whenever that filter is active.
 
-When the filters keep no rows, the list reads "No matches".
+The list reads "No matches" when filters exclude every row.
 
 ## Recording a closure reason
 
-A row carries a dropdown labeled "Closure reason" and a "Save" button unless it
-is published. A published advisory has no closure reason. The first option is
-blank, which is what a row carries until a reason is set on it, so a row with
-one reads it at a glance. The rest are:
+Each unpublished row has a "Closure reason" dropdown and a "Save" button.
+The first option is blank for an unset reason. The remaining options are:
 
 - Duplicate
 - Not a vulnerability
@@ -112,115 +96,100 @@ one reads it at a glance. The rest are:
 - No reporter response
 - Withdrawn by reporter
 
-An advisory carrying a reason this version does not recognize keeps that value
-in the dropdown so a save does not discard it.
+An unrecognized stored reason remains available in the dropdown.
 
-An advisory that duplicates another carries that pointer on a line under the
-dropdown, reading "of" and then the value. It is a link when the value is
-exactly a GHSA identifier, which reads as an advisory of the repository you are
-on, or exactly the address of an issue or a pull request on github.com, which
-reads as "#412" for one of this repository and "owner/repo#412" for one of
-another. Anything else is shown as it was typed. A value longer than the line
-wraps inside it, so the dropdown stands in one column down the list. The pointer
-is set from the advisory's own page.
+A duplicate reference appears below the dropdown as "of" followed by the
+stored value. An exact GHSA identifier links to that advisory in the current
+repository. An exact github.com issue or pull request URL displays as "#412"
+for the current repository or "owner/repo#412" for another repository. Other
+values appear as typed. Long references wrap within the column. Set the
+duplicate reference from the advisory's own page.
 
-"Save" becomes available once the dropdown has moved away from the value stored
-on the advisory. Putting it back where it started disables the button again.
-Both controls are disabled while a save is in flight.
+"Save" is enabled when the selection differs from the stored reason. Restoring
+the stored value disables it. Both controls are disabled during a save.
 
-Saving writes to GitHub. It is the same write every other stored value goes
-through: the extension re-reads the advisory page, merges the closure reason
-onto the state that page carries, and posts or edits your state comment on the
-advisory thread. Everyone who can read the advisory's conversation sees it, the
-reporter included. Nothing else about the advisory changes.
+Saving re-reads the advisory, merges the closure reason into its tracking
+state, and creates or edits your state comment on GitHub. Everyone with access
+to the conversation, including the reporter, can see the comment. Other
+advisory fields remain unchanged.
 
-The row reports what happened underneath the control: "Saving..." while the
-write is in flight, "Saved." when it lands, and an error otherwise. A save that
-lands leaves the dropdown on the reason it wrote. The errors
-worth recognizing are "Error: concurrent edits", which means another maintainer
-wrote to that advisory between the read and the write and the change was not
-applied, and "Error: {owner}/{repo} is not on this extension's allowlist.",
-which means writes to that repository are refused.
+The row reports "Saving...", then "Saved." or an error below the controls.
+After success, the dropdown shows the saved reason. "Error: concurrent edits"
+means another maintainer wrote to the advisory between the read and write;
+your change was not applied. "Error: {owner}/{repo} is not on this extension's
+allowlist." means writes to that repository are refused.
 
-Changing the dropdown on a row that has no advisory read behind it stages
-nothing and saves nothing.
+A closure reason can be staged and saved only after the advisory page has
+been read.
 
 ## Reading and refreshing
 
-Opening this view starts a walk of the repository's published and closed
-advisory lists and then reads each advisory's own page. On a repository with a
-hundred finished advisories that is a hundred requests, sent one per second
-through a single queue shared with the advisory list. Rows paint immediately
-from the local cache and fill in as reads land.
+Opening this view crawls the published and closed lists, then reads each
+advisory page. A hundred completed advisories require a hundred requests,
+sent one per second through the queue shared with the open list. Rows initially
+use cached data and update as reads finish.
 
-Navigating to another repository stops the walk after the request already in
-flight. Progress is kept, so returning resumes where it stopped.
+Navigating to another repository stops collection after the current request.
+Saved progress allows collection to resume when you return.
 
-Failures are named above the rows: "Failed to load {url}" for each list page
-that could not be read, and "Failed to load {GHSA id}" for each advisory page
-that never arrived. The lines cover the reading this opening of the view did,
-so a later opening that reads everything shows no banner. A walk that finished
-without reaching the last page shows "Failed to load all advisories" beside the
-heading.
+Failures appear above the rows as "Failed to load {url}" for list pages and
+"Failed to load {GHSA id}" for advisory pages. The banner lists failures from
+the current collection. A later collection that succeeds clears it. A crawl
+that stops before the last page shows "Failed to load all advisories" beside
+the heading.
 
 ## The statistics view
 
-Statistics cover the whole corpus, open advisories and finished ones together,
-because they describe work in progress as much as work completed. The view
-reads only what the extension already holds. It sends no requests of its own,
-so its numbers describe how much of the repository has been read so far.
-Everything is computed in the page. Nothing is sent anywhere.
+Statistics cover both open and completed advisories. The view uses data already
+collected by the extension, with coverage limited to what has been read.
+Calculations run locally in the page. The statistics view sends no requests
+or data.
 
-A repository nothing has been read on shows "Nothing has been read on this
+A repository without collected data shows "Nothing has been read on this
 repository".
 
-A row of chips at the top says what the numbers are over: the total, how many
-are open, how many are done, how many have never been read, how many GitHub's
-own tab counts say exist, and whether either half is partly crawled or not
-crawled at all. "Reading" appears while a walk is running, which means the
-numbers can move while you look at them.
+Chips above the statistics show the total and the open and completed counts.
+They identify unread advisories, incomplete or unstarted crawls, and GitHub's
+tab counts. "Reading" appears during collection; the numbers can change as
+results arrive.
 
 ### Counts
 
-Four sections: "Closure reason", "State", "Severity", and "Month". Each names
-how many advisories it counted out of the corpus, and each row gives a value, a
-count, and a percentage of the counted advisories. Advisories carrying no value
-for that section appear as a "None" row with a count and no percentage. Months
-are UTC, as `YYYY-MM`.
+Four sections show "Closure reason", "State", "Severity", and "Month". Each
+reports its sample size as "N of M". Rows show a value, its count, and its
+percentage of the sample. Missing values appear as "None" with a count. Months
+use UTC and the format `YYYY-MM`.
 
-"Closure reason" is how a finished advisory finished, so it is over the
-published and closed advisories and its "N of M" counts those. "Published" is a
-row of it, beside each reason a closed advisory was closed for. "None" is the
-closed advisories that have been read and given no reason, which is the set a
-backfill works from; on this section alone that row is counted with the rest and
-carries a percentage of its own. An advisory in triage or in draft has not ended
-and is in none of it. Neither is a closed advisory nobody has read: nothing has
-been read to say what reason it carries, so counting it under "None" would
-overstate that row.
+"Closure reason" counts completed outcomes: "Published", each stored closure
+reason, and "None" for fetched closed advisories without a reason. All these
+rows have percentages, including "None". Open advisories and unread closed
+advisories are excluded from this section.
+
+The other sections calculate percentages over supplied values. Their "None"
+rows show a count without a percentage.
 
 ### Timings
 
-Four sections, each measured from the time the report was opened: "Time to
-first response", "Time to accept", "Time to close", and "Time to publish". Each
-gives "Min", "Median", "Mean", and "Max".
+Four sections measure elapsed time from the report: "Time to first response",
+"Time to accept", "Time to close", and "Time to publish". Each shows "Min",
+"Median", "Mean", and "Max".
 
-Advisories that cannot be measured are excluded from those four numbers and
-counted on a row of their own: "No response", "Never accepted", "Never closed",
-"Never published". They are never counted as zero and never estimated.
+Unavailable durations are excluded from these calculations and counted in
+separate rows: "No response", "Never accepted", "Never closed", and "Never
+published". They are neither estimated nor counted as zero.
 
-What these can see bounds what they mean. First response is the earliest comment
-by an org member that this extension did not write, so a maintainer who answered
-by email or who acted without commenting is invisible to it. Acceptance,
-closure, and publication are read from the wording of the advisory's timeline
-events, and a timing runs to the first such event: an advisory closed,
-reopened, and closed again is measured to the close that first resolved it.
+First response uses the earliest comment by an organization member, excluding
+the extension's state and preservation comments. Email responses and actions
+without comments are outside this measurement. Acceptance, closure, and
+publication use the first matching timeline event. An advisory that is closed,
+reopened, and closed again is measured to its first closure.
 
 ### Export
 
-"Export CSV", in the statistics heading, downloads the whole corpus as a file
-named `{owner}-{repo}-advisories-{date}.csv`. The columns are `ghsa_id`,
-`title`, `state`, `severity`, `closure_reason`, `reported_at`, `month`,
+"Export CSV" in the statistics heading downloads the whole corpus as
+`{owner}-{repo}-advisories-{date}.csv`. Its columns are `ghsa_id`, `title`,
+`state`, `severity`, `closure_reason`, `reported_at`, `month`,
 `time_to_first_response_ms`, `time_to_accept_ms`, `time_to_close_ms`,
-`time_to_publish_ms`, `detail_fetched`, and `observed_at`. Durations are
-milliseconds, and a duration that could not be measured is blank. The file is
-built in the browser and never leaves it.
+`time_to_publish_ms`, `detail_fetched`, and `observed_at`. Durations use
+milliseconds; unavailable durations are blank. The browser generates the file
+locally without transmitting it.

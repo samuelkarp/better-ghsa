@@ -21,46 +21,41 @@ This extension keeps it on the advisory.
 
 ## Where the state lives
 
-Each maintainer's triage state is written into a comment on the advisory
-itself: one comment per maintainer per advisory, created on that maintainer's
-first save and edited on every save after that. The comment is a collapsed
-`<details>` block holding a JSON snapshot. The extension reads every
-maintainer's state comment on an advisory and merges them into one current
-state.
+Each maintainer saves triage state in one comment per advisory. The first save
+creates the comment; later saves edit it. The comment contains a JSON snapshot
+inside a collapsed `<details>` block. The extension merges the maintainers'
+snapshots into the advisory's current state.
 
-There is no server and no database. Nothing is synchronized between browsers.
-An advisory carries its own state. One maintainer can use the extension while
-the others work through GitHub's own interface, and a maintainer who uninstalls
-it loses nothing that was saved.
+The advisory comments hold the shared state. The extension does not use a
+separate server or database, or synchronize browser storage. You can use it
+while other maintainers use GitHub's own interface. Saved comments remain on
+GitHub after you uninstall the extension.
 
-The reporter of an advisory can read the whole thread, state comments included.
-The vocabulary the extension uses is written to be read that way: nothing is
-encoded or obfuscated. Saving posts or edits a comment. Posting notifies the
-advisory's participants, the reporter among them.
+The reporter can read the state comments. Their values use plain language.
+Saving posts or edits a comment. Posting notifies the advisory's participants,
+including the reporter.
 
-The extension keeps a local cache so pages draw immediately. The cache is never
-authoritative and is always rebuildable by re-reading the advisories.
+A local cache lets pages display data immediately. It is not authoritative
+and can be rebuilt by rereading the advisories.
 
 ## The three surfaces
 
-**The advisory detail panel** sits on an advisory page. It shows what the
-extension derived from the page (patch progress in the private fork, CVE state,
-how long the advisory has been waiting, whether anyone has reviewed it), shows
-and edits the stored triage state, and offers a button that preserves the
-reporter's original title and description in a comment before maintainers
-rewrite them for publication. See [docs/detail-panel.md](docs/detail-panel.md).
+**The advisory detail panel** shows patch progress in the private fork, CVE
+state, waiting time, and review status. It lets you edit stored triage state
+and preserve the reporter's title and description in a comment before you
+rewrite them for publication.
+See [docs/detail-panel.md](docs/detail-panel.md).
 
-**The advisory list** replaces the body of a repository's advisory list with a
-table of open advisories, ordered so that the ones needing attention are at the
-top, with chips for waiting state, patch progress, confirmations, CVE,
-severity, and embargo, and with filters and sorts over them. A toggle restores
-GitHub's own view. See [docs/advisory-list.md](docs/advisory-list.md).
+**The advisory list** replaces GitHub's list body with a table of open
+advisories, with those needing attention first. Chips show waiting state, patch
+progress, confirmations, CVE, severity, and embargo. Filters and sorts help you
+choose what to work on.
+A toggle restores GitHub's own view. See [docs/advisory-list.md](docs/advisory-list.md).
 
-**The completed view** lists published and closed advisories and records a
-closure reason on each, including retroactively on advisories closed before the
-extension existed. A statistics view sits beside it with counts and response
-timings over the whole corpus and a CSV export. See
-[docs/completed.md](docs/completed.md).
+**The completed view** lists published and closed advisories. You can record
+closure reasons, including on older advisories. The statistics view shows counts
+and response timings across open and completed advisories and offers a CSV
+export. See [docs/completed.md](docs/completed.md).
 
 ## Private-fork pull request diffs
 
@@ -80,14 +75,14 @@ Firefox 140 or later: install it from
 Chrome: install it from the
 [Chrome Web Store](https://chromewebstore.google.com/detail/better-ghsa/khihhmkhgehggnbjdendcdhkjplcoljm).
 
-Firefox 140 is the floor. The manifest declares that the extension collects no
-data, in the key Firefox reads from 140 and Firefox for Android reads from 142.
-Earlier versions neither read that declaration nor show it at install.
+Firefox 140 and Firefox for Android 142 are the minimum supported versions.
+During installation, these versions display the manifest's declaration that
+the extension does not collect data. Earlier versions do not read or display
+that declaration.
 
 ### From a clone, for working on the extension
 
-The extension is the repository contents, loaded from disk. There is no build
-step.
+Load the repository directly from disk; a build step is not required.
 
 Firefox 140 or later:
 
@@ -96,8 +91,7 @@ Firefox 140 or later:
 3. Press "Load Temporary Add-on" and choose the `manifest.json` at the top of
    the clone.
 
-A temporary add-on is removed when Firefox closes. These steps are repeated
-each session.
+Firefox removes temporary add-ons when it closes. Repeat these steps each session.
 
 Chrome:
 
@@ -112,52 +106,46 @@ loads the extension.
 
 The extension acts only on repositories listed in its settings.
 
-Every advisory list and every advisory page carries one control, a
-`Better GHSA settings` button, which opens the settings in a new tab. On a
-repository that is not listed that button is the whole of what the extension
-does there.
+Every advisory list and detail page shows a `Better GHSA settings` button that
+opens the settings in a new tab. On unlisted repositories, the extension shows
+only this button.
 
-The settings page is also reached from the browser's own add-on manager. In
+You can also open the settings from the browser's add-on manager. In
 Firefox, open `about:addons`, select Extensions, press the `...` button on the
 Better GHSA entry, and choose Preferences (Options on Windows); the page opens
 in a new tab. In Chrome, open `chrome://extensions`, press Details on the Better
 GHSA card, and choose "Extension options".
 
 An entry is `owner/repo`, for example `containerd/containerd`. Case does not
-matter. Removing a repository stops the extension on it; a page already showing
-that repository stops as soon as the entry goes.
+matter. Removing a repository stops the extension on its pages, including pages
+already open.
 
 ## What it can reach
 
 - It acts only on the repositories in its settings. On every other repository it
   does nothing at all: no panel, no table, nothing read, and nothing stored.
-- The only things it ever writes to GitHub are its own two comment types: the
-  state comment and the preserved original report. It never changes an
-  advisory's title, description, severity, CVSS vector, CWEs, CVE, state, or
-  collaborators.
-- It works from the `github.com` session already logged in to the browser. It
-  never asks for a token and never stores a credential.
-- It contacts `github.com`. The owner icons in its advisory list are
-  `github.com` image addresses that GitHub redirects to
-  `avatars.githubusercontent.com`. The browser loads those images from there.
+- It writes two comment types to GitHub: tracking state and preserved reports.
+  It does not change an advisory's title, description, severity, CVSS vector,
+  CWEs, CVE, state, or collaborators.
+- It uses your existing `github.com` browser session. It does not ask for a token
+  or store credentials.
+- It contacts `github.com`. GitHub redirects owner images in the advisory list
+  to `avatars.githubusercontent.com`, where the browser loads them.
 - It does not collect telemetry or send analytics.
 
-[PRIVACY.md](PRIVACY.md) sets out what is stored and where. The settings page
-carries a `Clear cache` button that empties it, and removing a repository from
-the list empties what was stored for that repository.
+[PRIVACY.md](PRIVACY.md) describes stored data and its location. Use `Clear cache`
+in settings to remove cached data. Removing a repository from settings also
+removes its cached data.
 
 ## Limitations
 
-The GitHub REST API exposes neither advisory comments nor the advisory timeline,
-which is where all of this state and most of the derived state lives. So the
-extension reads GitHub's HTML and posts through the same forms the page posts
-through. It depends on undocumented endpoints and on the structure of GitHub's
-pages, and GitHub's changes will break it. When that happens the visible
-symptoms are missing values, an incomplete banner, or a refused write.
+The GitHub REST API does not expose advisory comments or timelines. The
+extension reads GitHub's HTML and submits its comment forms. It depends on
+undocumented endpoints and page structure, and GitHub's changes will break it.
+Symptoms include missing values, an incomplete banner, or a refused write.
 
-Everything it displays is a poll. Other maintainers write through their own
-browsers and GitHub changes derived state without telling the extension. Every
-row and panel carries the time its data was read.
+Other maintainers' changes appear when the extension next reads the advisory.
+Every row and panel shows when its data was read.
 
 Version 1 is built for one repository and one workflow: a containerd maintainer
 working `containerd/containerd`. Cross-repository views, org-wide views, and a
