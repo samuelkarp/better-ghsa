@@ -469,7 +469,12 @@ if (typeof require === 'function') {
         // an account this extension could not read is one it will not write as.
         const viewer = fresh.viewer;
         if (viewer === null) {
-          return stopped('unreadable', 'Error: cannot identify logged-in user');
+          return {
+            ...stopped('unreadable', 'Error: cannot identify logged-in user'),
+            ...(write.findCommentForm(context.page) === null
+              ? { diagnostic: /** @type {const} */ ({ code: 'comment-form-missing' }) }
+              : {}),
+          };
         }
 
         const merged = globalThis.bghsa.merge.mergeSnapshots(fresh.comments);

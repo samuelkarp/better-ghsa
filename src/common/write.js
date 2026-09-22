@@ -24,9 +24,10 @@ if (typeof require === 'function') {
 
 /**
  * Structural facts only: never form values, page content, or identifiers.
- * @typedef {object} WriteDiagnostic
- * @property {'edit-form-missing-fields'} code
- * @property {string[]} missingFields Names from REQUIRED_EDIT_FIELDS only.
+ * Missing field names come from REQUIRED_EDIT_FIELDS.
+ * @typedef {{ code: 'edit-form-missing-fields', missingFields: string[] } |
+ *   { code: 'comment-form-missing' } |
+ *   { code: 'edit-form-missing', targetCommentFound: boolean }} WriteDiagnostic
  */
 
 /**
@@ -721,7 +722,10 @@ if (typeof require === 'function') {
 
     const form = findCommentForm(doc);
     if (form === null) {
-      return result(false, 'no-form', null, NO_FORM_MESSAGE);
+      return {
+        ...result(false, 'no-form', null, NO_FORM_MESSAGE),
+        diagnostic: { code: 'comment-form-missing' },
+      };
     }
     const action = form.getAttribute('action') ?? '';
     if (!actionMatchesRef(action, ref)) {
@@ -761,12 +765,13 @@ if (typeof require === 'function') {
 
     const form = findEditForm(doc, commentId);
     if (form === null) {
-      return result(
-        false,
-        'no-form',
-        null,
-        NO_FORM_MESSAGE
-      );
+      return {
+        ...result(false, 'no-form', null, NO_FORM_MESSAGE),
+        diagnostic: {
+          code: 'edit-form-missing',
+          targetCommentFound: doc.getElementById(`advisory-comment-${commentId}`) !== null,
+        },
+      };
     }
     const action = form.getAttribute('action') ?? '';
     if (!actionMatchesRef(action, ref, commentId)) {

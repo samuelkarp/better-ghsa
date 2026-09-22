@@ -1091,9 +1091,15 @@ if (typeof require === 'function') {
     const version = globalThis.bghsa.storage.api()?.runtime?.getManifest?.().version ?? 'unknown';
     const report = [
       `Extension: ${version}`,
-      'Operation: edit tracking comment',
+      diagnostic.code === 'comment-form-missing'
+        ? 'Operation: save tracking state'
+        : 'Operation: edit tracking comment',
       `Diagnostic: ${diagnostic.code}`,
-      `Missing: ${diagnostic.missingFields.join(', ')}`,
+      ...(diagnostic.code === 'edit-form-missing-fields'
+        ? [`Missing: ${diagnostic.missingFields.join(', ')}`]
+        : diagnostic.code === 'edit-form-missing'
+          ? ['Missing: edit comment form', `Target comment found: ${diagnostic.targetCommentFound ? 'yes' : 'no'}`]
+          : ['Missing: new comment form']),
       'Comment POST sent: no',
     ].join('\n');
     const text = element(doc, 'pre', 'mt-2', report);

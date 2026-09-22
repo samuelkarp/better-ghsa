@@ -360,6 +360,7 @@ test('a page carrying no comment form is not written to', async () => {
   const outcome = await write.createComment(options({ doc: editDoc, fetch: fake.send }));
   assert.strictEqual(outcome.ok, false);
   assert.strictEqual(outcome.reason, 'no-form');
+  assert.deepStrictEqual(outcome.diagnostic, { code: 'comment-form-missing' });
   assert.strictEqual(fake.calls.length, 0);
 });
 
@@ -522,6 +523,7 @@ test('a page carrying no edit form for that comment is not edited', async () => 
   );
   assert.strictEqual(outcome.ok, false);
   assert.strictEqual(outcome.reason, 'no-form');
+  assert.deepStrictEqual(outcome.diagnostic, { code: 'edit-form-missing', targetCommentFound: false });
   assert.strictEqual(fake.calls.length, 0);
   assert.strictEqual(
     outcome.message,

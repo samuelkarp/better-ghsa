@@ -524,6 +524,17 @@ test('a page naming no signed-in account is not written to', async () => {
   assert.strictEqual(calls.length, 1, 'a comment request went out');
 });
 
+test('an unreadable viewer with a comment form is not diagnosed as a missing form', async () => {
+  const page = triagePage();
+  const avatar = page.querySelector('div.timeline-new-comment span.timeline-comment-avatar');
+  assert.ok(avatar !== null);
+  avatar.remove();
+  const { outcome, calls } = await run(page, {});
+  assert.strictEqual(outcome.reason, 'unreadable');
+  assert.strictEqual(outcome.diagnostic, undefined);
+  assert.strictEqual(calls.length, 1, 'a comment request went out');
+});
+
 test('a snapshot this extension could not interpret takes one confirmation', async () => {
   const page = fixture('draft.html');
   const refusal = await run(page, { ref: DRAFT_REF, loadedSeq: 2 });

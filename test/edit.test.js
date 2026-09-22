@@ -2396,3 +2396,62 @@ test('a refused edit exposes copyable structural diagnostics without page data',
     forget();
   }
 });
+
+for (const operation of ['create', 'edit']) {
+  test(`a missing ${operation} form uses the collapsed copyable diagnostic`, async () => {
+    forget();
+    const page = fixture('triage-thread.html');
+    const remote = fixture('triage-thread.html');
+    if (operation === 'create') {
+      for (const doc of [page, remote]) {
+        for (const comment of doc.querySelectorAll('.timeline-comment-group[id^="advisory-comment-"]')) {
+          comment.remove();
+        }
+      }
+      const form = write.findCommentForm(remote);
+      assert.ok(form !== null);
+      form.remove();
+    } else {
+      for (const form of remote.querySelectorAll('form[id$="-edit-form"]')) form.remove();
+    }
+    const talk = session(remote);
+    const options = { fetch: talk.fetch, parseDocument: talk.parseDocument };
+    const first = await editorFor(page, options);
+    choose(control(first.editor, 'select.bghsa-triage'), 'evaluating');
+    const outcome = await edit.save(first.context);
+    assert.strictEqual(outcome.ok, false);
+    assert.strictEqual(talk.posts().length, 0, 'a request went out despite the missing form');
+    const next = await editorFor(page, options);
+    assert.strictEqual(text(control(next.editor, '.bghsa-save-result')), operation === 'create'
+      ? 'Error: cannot identify logged-in user' : 'Error: cannot post');
+    const details = control(next.editor, 'details.bghsa-diagnostic');
+    assert.strictEqual(details.hasAttribute('open'), false);
+    assert.strictEqual(next.editor.querySelectorAll('.bghsa-diagnostic').length, 1);
+    assert.strictEqual(text(control(details, 'summary')), 'Diagnostic details');
+    const report = [
+      'Extension: unknown',
+      operation === 'create' ? 'Operation: save tracking state' : 'Operation: edit tracking comment',
+      operation === 'create' ? 'Diagnostic: comment-form-missing' : 'Diagnostic: edit-form-missing',
+      operation === 'create' ? 'Missing: new comment form' : 'Missing: edit comment form',
+      ...(operation === 'edit' ? ['Target comment found: yes'] : []),
+      'Comment POST sent: no',
+    ].join('\n');
+    assert.strictEqual(control(details, 'pre').textContent, report);
+    const previous = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    /** @type {string[]} */
+    const copied = [];
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      value: { clipboard: { writeText: async (/** @type {string} */ value) => { copied.push(value); } } },
+    });
+    try {
+      press(next.editor, '.bghsa-copy-diagnostic');
+      await until(() => text(control(details, '.bghsa-copy-status')) === 'Copied.');
+      assert.deepStrictEqual(copied, [report]);
+    } finally {
+      if (previous !== undefined) Object.defineProperty(globalThis, 'navigator', previous);
+      else Reflect.deleteProperty(globalThis, 'navigator');
+      forget();
+    }
+  });
+}
