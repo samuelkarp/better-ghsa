@@ -2514,3 +2514,63 @@ for (const responseKind of ['missing', 'different', 'unreadable']) {
     }
   });
 }
+
+for (const operation of ['create', 'edit']) {
+  test(`an unexpected ${operation} destination uses the collapsed diagnostic`, async () => {
+    forget();
+    const page = fixture('triage-thread.html');
+    const remote = fixture('triage-thread.html');
+    if (operation === 'create') {
+      for (const doc of [page, remote]) {
+        for (const comment of doc.querySelectorAll('.timeline-comment-group[id^="advisory-comment-"]')) {
+          comment.remove();
+        }
+      }
+      const form = write.findCommentForm(remote);
+      assert.ok(form !== null);
+      form.setAttribute('action', '/PRIVATE/REPO/security/advisories/GHSA-0000-0000-0000/comments');
+    } else {
+      const form = remote.getElementById(`${OWN_COMMENT}-edit-form`);
+      assert.ok(form !== null);
+      form.setAttribute('action', form.getAttribute('action')?.replace(/\d+$/, '999999') ?? '');
+    }
+    const talk = session(remote);
+    const options = { fetch: talk.fetch, parseDocument: talk.parseDocument };
+    const first = await editorFor(page, options);
+    choose(control(first.editor, 'select.bghsa-triage'), 'evaluating');
+    const outcome = await edit.save(first.context);
+    assert.strictEqual(outcome.reason, 'mismatch');
+    assert.strictEqual(talk.posts().length, 0);
+    const next = await editorFor(page, options);
+    assert.strictEqual(text(control(next.editor, '.bghsa-save-result')), operation === 'create'
+      ? 'Error: unexpected comment form destination' : 'Error: unexpected edit form destination');
+    const details = control(next.editor, 'details.bghsa-diagnostic');
+    assert.strictEqual(details.hasAttribute('open'), false);
+    const report = [
+      'Extension: unknown',
+      `Operation: ${operation} tracking comment`,
+      'Diagnostic: form-destination-mismatch',
+      operation === 'create'
+        ? 'Failed check: destination path matches the advisory comment endpoint'
+        : 'Failed check: destination path matches the target comment',
+      'Comment POST sent: no',
+    ].join('\n');
+    assert.strictEqual(control(details, 'pre').textContent, report);
+    const previous = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    /** @type {string[]} */
+    const copied = [];
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      value: { clipboard: { writeText: async (/** @type {string} */ value) => { copied.push(value); } } },
+    });
+    try {
+      press(next.editor, '.bghsa-copy-diagnostic');
+      await until(() => text(control(details, '.bghsa-copy-status')) === 'Copied.');
+      assert.deepStrictEqual(copied, [report]);
+    } finally {
+      if (previous !== undefined) Object.defineProperty(globalThis, 'navigator', previous);
+      else Reflect.deleteProperty(globalThis, 'navigator');
+      forget();
+    }
+  });
+}

@@ -147,6 +147,12 @@ content. These containers can include the advisory description and preview.
 Checks that could not run read "unknown". The report states that the POST was
 sent and the comment may have been saved.
 
+An unexpected comment-form destination includes the same "Diagnostic details"
+control. Its report names the first failed check: URL syntax, GitHub origin,
+embedded credentials, advisory endpoint, or target comment path. It identifies
+whether the operation creates or edits a tracking comment and confirms that no
+comment POST was sent. The report excludes the form's URL and identifiers.
+
 ## Untrusted and unreadable state
 
 A snapshot counts toward the advisory's state only when GitHub badges its author

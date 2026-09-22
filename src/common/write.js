@@ -22,11 +22,14 @@ if (typeof require === 'function') {
  * @typedef {(url: string, init: RequestInit) => Promise<WriteResponse>} WriteFetch
  */
 
+/** @typedef {'malformed-action' | 'origin' | 'credentials' | 'advisory-path' | 'comment-path'} DestinationCheck */
+
 /**
  * Structural facts only: never form values, page content, or identifiers.
  * Missing field names come from REQUIRED_EDIT_FIELDS.
  * @typedef {{ code: 'edit-form-missing-fields', missingFields: string[] } |
  *   { code: 'comment-form-missing' } |
+ *   { code: 'form-destination-mismatch', operation: 'create' | 'edit', failedCheck: DestinationCheck } |
  *   { code: 'edit-form-missing', targetCommentFound: boolean } |
  *   { code: 'save-unconfirmed', status: number, commentContainersFound: boolean | null,
  *     expectedContentFound: boolean | null }} WriteDiagnostic
@@ -315,19 +318,35 @@ if (typeof require === 'function') {
    * @returns {boolean}
    */
   function actionMatchesRef(action, ref, commentId) {
+    return destinationFailure(action, ref, commentId) === null;
+  }
+
+  /**
+   * Returns the first failed destination check without retaining the URL.
+   * @param {string} action
+   * @param {import('./parse-detail.js').AdvisoryRef} ref
+   * @param {string} [commentId]
+   * @returns {DestinationCheck | null}
+   */
+  function destinationFailure(action, ref, commentId) {
     /** @type {URL} */
     let url;
     try {
       url = new URL(action, 'https://github.com/');
     } catch {
-      return false;
+      return 'malformed-action';
     }
-    if (url.origin !== 'https://github.com') return false;
-    // `origin` drops userinfo, so `https://user:pass@github.com/...` reads as
-    // github.com here and is a request this extension does not send.
-    if (url.username !== '' || url.password !== '') return false;
+    if (url.origin !== 'https://github.com') return 'origin';
+    // URL.origin excludes credentials, which this check rejects separately.
+    if (url.username !== '' || url.password !== '') return 'credentials';
+    const actual = url.pathname.replace(/\/+$/, '').toLowerCase();
     const wanted = commentId === undefined ? commentPath(ref) : editPath(ref, commentId);
-    return url.pathname.replace(/\/+$/, '').toLowerCase() === wanted.toLowerCase();
+    if (actual === wanted.toLowerCase()) return null;
+    const collection = commentPath(ref).toLowerCase();
+    if (commentId !== undefined && (actual === collection || actual.startsWith(`${collection}/`))) {
+      return 'comment-path';
+    }
+    return 'advisory-path';
   }
 
   /**
@@ -745,9 +764,13 @@ if (typeof require === 'function') {
       };
     }
     const action = form.getAttribute('action') ?? '';
-    if (!actionMatchesRef(action, ref)) {
+    const failedCheck = destinationFailure(action, ref);
+    if (failedCheck !== null) {
       log(`the comment form posts to ${action}, not to ${ref.owner}/${ref.repo} ${ref.ghsaId}`);
-      return result(false, 'mismatch', null, COMMENT_FORM_MESSAGE);
+      return {
+        ...result(false, 'mismatch', null, COMMENT_FORM_MESSAGE),
+        diagnostic: { code: 'form-destination-mismatch', operation: 'create', failedCheck },
+      };
     }
 
     const params = cloneForm(form);
@@ -791,12 +814,16 @@ if (typeof require === 'function') {
       };
     }
     const action = form.getAttribute('action') ?? '';
-    if (!actionMatchesRef(action, ref, commentId)) {
+    const failedCheck = destinationFailure(action, ref, commentId);
+    if (failedCheck !== null) {
       log(
         `the edit form posts to ${action}, not to ${ref.owner}/${ref.repo} ${ref.ghsaId}` +
           ` comment ${commentId}`
       );
-      return result(false, 'mismatch', null, EDIT_FORM_MESSAGE);
+      return {
+        ...result(false, 'mismatch', null, EDIT_FORM_MESSAGE),
+        diagnostic: { code: 'form-destination-mismatch', operation: 'edit', failedCheck },
+      };
     }
 
     const params = cloneForm(form);

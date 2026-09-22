@@ -1103,6 +1103,17 @@ if (typeof require === 'function') {
       case 'comment-form-missing':
         facts = ['Missing: new comment form'];
         break;
+      case 'form-destination-mismatch': {
+        const checks = {
+          'malformed-action': 'form action is a valid URL',
+          origin: 'destination origin is https://github.com',
+          credentials: 'destination URL excludes credentials',
+          'advisory-path': 'destination path matches the advisory comment endpoint',
+          'comment-path': 'destination path matches the target comment',
+        };
+        facts = [`Failed check: ${checks[diagnostic.failedCheck]}`];
+        break;
+      }
       case 'save-unconfirmed':
         facts = [
           `HTTP response status: ${diagnostic.status}`,
@@ -1114,9 +1125,11 @@ if (typeof require === 'function') {
     }
     const report = [
       `Extension: ${version}`,
-      diagnostic.code === 'comment-form-missing' || diagnostic.code === 'save-unconfirmed'
-        ? 'Operation: save tracking state'
-        : 'Operation: edit tracking comment',
+      diagnostic.code === 'form-destination-mismatch'
+        ? `Operation: ${diagnostic.operation} tracking comment`
+        : diagnostic.code === 'comment-form-missing' || diagnostic.code === 'save-unconfirmed'
+          ? 'Operation: save tracking state'
+          : 'Operation: edit tracking comment',
       `Diagnostic: ${diagnostic.code}`,
       ...facts,
       `Comment POST sent: ${diagnostic.code === 'save-unconfirmed' ? 'yes' : 'no'}`,

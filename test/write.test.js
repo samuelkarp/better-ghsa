@@ -963,3 +963,36 @@ test('unreadable save responses report unknown checks after the POST', async () 
     });
   }
 });
+
+for (const operation of ['create', 'edit']) {
+  test(`${operation} destination diagnostics name the failed check without the URL`, async () => {
+    const collection = write.commentPath(REF);
+    const cases = [
+      { action: 'https://[invalid/comments', check: 'malformed-action' },
+      { action: 'https://example.invalid/PRIVATE/comments', check: 'origin' },
+      { action: `https://PRIVATE:SECRET@github.com${collection}`, check: 'credentials' },
+      { action: '/PRIVATE/REPO/security/advisories/GHSA-0000-0000-0000/comments', check: 'advisory-path' },
+      ...(operation === 'edit' ? [
+        { action: `${collection}/999999`, check: 'comment-path' },
+        { action: collection, check: 'comment-path' },
+        { action: `${collection}/${EDIT_ID}/unexpected`, check: 'comment-path' },
+      ] : []),
+    ];
+    for (const sample of cases) {
+      const fake = fakeFetch(200, WROTE);
+      let outcome;
+      if (operation === 'create') {
+        const doc = document('<form><textarea name="body"></textarea></form>');
+        one(doc, 'form').setAttribute('action', sample.action);
+        outcome = await write.createComment(options({ doc, fetch: fake.send }));
+      } else {
+        outcome = await write.editComment(editOptions({ doc: editPage(sample.action, EDIT_TOKENS), fetch: fake.send }));
+      }
+      assert.strictEqual(outcome.reason, 'mismatch', sample.action);
+      assert.strictEqual(fake.calls.length, 0, 'a comment POST was sent');
+      assert.deepStrictEqual(outcome.diagnostic, {
+        code: 'form-destination-mismatch', operation, failedCheck: sample.check,
+      });
+    }
+  });
+}
