@@ -585,6 +585,14 @@ if (typeof require === 'function') {
   const loops = new WeakMap();
 
   /**
+   * The exact mounted panel and the external inputs its handlers captured.
+   * Local drafts, disclosure, and save feedback are updated in place.
+   *
+   * @type {WeakMap<Document, { panel: Element, inputs: string }>}
+   */
+  const rendered = new WeakMap();
+
+  /**
    * @param {Document} doc
    * @returns {() => Promise<void>} that document's loop, made on first use.
    */
@@ -643,24 +651,72 @@ if (typeof require === 'function') {
   async function render(doc) {
     const edit = globalThis.bghsa.edit;
     const advisory = globalThis.bghsa.parseDetail.parseDetail(doc);
+
     // A pass over a document showing no advisory is how a departure from one
     // reaches the extension when no click started it.
     if (advisory === null) {
+      rendered.delete(doc);
       edit.panelShows(null);
       return null;
     }
+
     edit.panelShows(edit.keyOf(advisory));
+
     // The panel does not wait on storage: what the page says is on the page.
     void remember(advisory);
+
     // A comment this page wrote is on GitHub and not in this document, so the
     // state a write left behind outranks what the document's comments merge to
     // until the page is read again.
-    const context = await edit.contextFor(advisory, { rerender: () => passFor(doc)() });
-    const placed = injectPanel(doc, advisory, context.derived, context.tracking, context);
+    const context = await edit.contextFor(advisory, {
+      rerender: () => {
+        // Save/discard feedback must refresh even when external data is unchanged.
+        rendered.delete(doc);
+        return passFor(doc)();
+      },
+    });
+
+    // Include write-context metadata, not just visible labels: a handler must
+    // never keep an old sequence, holder, fingerprint, or unknown field.
+    const inputs = JSON.stringify({
+      advisory,
+      merged: context.merged,
+      tracking: context.tracking,
+      fingerprints: context.fingerprints,
+      derived: context.derived,
+      preserve: globalThis.bghsa.preserve.offered(advisory),
+      members: globalThis.bghsa.members.known(advisory.ref),
+      branches: globalThis.bghsa.branches.known(advisory.ref),
+      embargoOverdue: globalThis.bghsa.derive.embargoOverdue(
+        advisory,
+        context.tracking.embargo ? context.tracking.embargoLift : null
+      ),
+    });
+
+    // Read after contextFor yields: another pass may have installed a panel.
+    const held = rendered.get(doc);
+    const place = anchor(doc);
+    const reusable = held !== undefined &&
+      held.inputs === inputs &&
+      doc.getElementById(PANEL_ID) === held.panel &&
+      held.panel.ownerDocument === doc &&
+      held.panel.isConnected &&
+      place !== null &&
+      held.panel.parentElement === place.parent &&
+      held.panel.nextElementSibling === place.before;
+
+    const placed = reusable
+      ? held.panel
+      : injectPanel(doc, advisory, context.derived, context.tracking, context);
+
+    if (placed !== null) rendered.set(doc, { panel: placed, inputs });
+    else rendered.delete(doc);
+
     // The chips carry the extension's tone classes, and a page offering the
     // panel no anchor still gets them.
     ensureStyle(doc);
     globalThis.bghsa.comments.markComments(doc, context.merged);
+
     // What storage holds reaches the panel through a pass of its own, because a
     // member and a branch seen on another advisory are worth drawing again and
     // are not worth holding this pass up for.
@@ -670,6 +726,7 @@ if (typeof require === 'function') {
     ]).then((grew) => {
       if (grew.includes(true)) void passFor(doc)();
     });
+
     return placed;
   }
 
@@ -773,12 +830,15 @@ if (typeof require === 'function') {
    * @returns {void}
    */
   function stop(doc = globalThis.document) {
+    rendered.delete(doc);
+
     const held = attached.get(doc);
     if (held !== undefined) {
       held.observer?.disconnect();
       held.disarm();
       attached.delete(doc);
     }
+
     // Everything the surface wrote answers to the selector a pass already uses
     // to tell its own writing from the page's: the panel, the stylesheet, and
     // the chips this surface put on the comments in the thread.

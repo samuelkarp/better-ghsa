@@ -15,6 +15,30 @@ with the console helpers in `tools/`, which blank session tokens before the
 markup leaves the page, plus a few pages this project invented to hold a shape
 GitHub produced once.
 
+## Tracking editor refreshes
+
+The focused selection is:
+
+```
+node --test --test-concurrency=1 test/panel.test.js test/edit.test.js test/dom.test.js test/content-scripts.test.js
+```
+
+Observer-driven tests check that unrelated body and shadow-host mutations keep
+the same connected panel, input, and disclosure, including drafts and local
+control state. They also check warning repair without rebuilding, real advisory
+and write-metadata changes, candidate arrival and scoping, placement repair,
+embargo expiry, and explicit save/discard feedback. Draft-restoration tests
+deliberately change advisory data to require reconstruction rather than relying
+on a no-op render to rebuild.
+
+These DOM tests do not establish native focus or selection behavior. Validate
+that separately in a fresh browser profile using committed fixtures, in-memory
+storage, disabled network requests, and the actual manifest scripts and observer
+loop. Check activeElement and a nonempty selection across unrelated body UI and
+closed-shadow-host insertion/removal, then verify real updates and placement
+repair. Synthetic mutations are not evidence of genuine IME behavior or a
+particular password manager's mutation records.
+
 ## The closed-advisory capture
 
 One check reads a capture of a real closed advisory:

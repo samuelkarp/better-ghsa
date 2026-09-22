@@ -1113,6 +1113,9 @@ test('half-typed text survives a render pass', async () => {
   // A login is a change once it is added, and text in the control until then.
   typing(control(before, 'input.bghsa-owner-input'), 'kolysh');
 
+  control(page.documentElement, '[name="repository_advisory[title]"]')
+    .setAttribute('value', 'Updated title');
+
   const second = await panel.render(page);
   assert.ok(second !== null, 'the second pass placed no panel');
   const after = /** @type {Element} */ (second);
@@ -1806,6 +1809,9 @@ test('an unsaved change survives a render pass', async () => {
     /** @type {unknown} */ (control(/** @type {Element} */ (first), 'button.bghsa-owner-add'))
   ).click();
 
+  control(page.documentElement, '[name="repository_advisory[title]"]')
+    .setAttribute('value', 'Updated title');
+
   const second = await panel.render(page);
   assert.ok(second !== null, 'the second pass placed no panel');
   const rebuilt = /** @type {Element} */ (second);
@@ -1822,6 +1828,181 @@ test('an unsaved change survives a render pass', async () => {
   );
   assert.strictEqual(note(rebuilt), 'Unsaved changes: Triage, Owners.');
   forget();
+});
+
+test('mounted editors refresh on discard and save, not background mutations', async (t) => {
+  const location = globalThis.location;
+  globalThis.location = /** @type {Location} */ (/** @type {unknown} */ ({
+    pathname: '/git-utensils/Spoon-Knife/security/advisories/GHSA-jmvx-2wfw-xfgj',
+  }));
+
+  try {
+    for (const action of ['discard', 'failed save', 'unchanged save', 'successful save']) {
+      await t.test(action, async () => {
+        forget();
+        const page = fixture('triage-thread.html');
+        const remote = fixture('triage-thread.html');
+
+        if (action === 'failed save') {
+          for (const field of remote.querySelectorAll('[name="repository_advisory_comment[bodyVersion]"]')) {
+            field.remove();
+          }
+        }
+
+        const talk = session(remote);
+        const contextFor = edit.contextFor;
+
+        /** @type {import('../src/detail/edit.js').EditorContext | undefined} */
+        let captured;
+
+        /** @type {() => void} */
+        let release = () => {};
+        const gate = new Promise((resolve) => { release = () => resolve(undefined); });
+
+        // Keep panel.render's real rerender closure; replace only the transport.
+        edit.contextFor = async (advisory, options) => {
+          captured = await contextFor(advisory, {
+            ...options,
+            fetch: async (url, init) => {
+              await gate;
+              return talk.fetch(url, init);
+            },
+            parseDocument: talk.parseDocument,
+          });
+
+          return captured;
+        };
+
+        const loop = panel.passFor(page);
+        let passes = 0;
+        const observer = panel.observe(page, async () => {
+          await loop();
+          passes += 1;
+        });
+
+        /** @returns {Promise<void>} */
+        const backgroundMutation = async () => {
+          const before = passes;
+          page.body.append(page.createElement('div'));
+          await until(() => passes > before);
+        };
+
+        try {
+          const first = await panel.render(page);
+          assert.ok(first);
+          assert.ok(captured);
+          const context = captured;
+
+          const disclosure = control(first, 'details.bghsa-editor-details');
+          disclosure.setAttribute('open', '');
+          press(first, '.bghsa-editor-summary');
+
+          const owner = control(first, 'input.bghsa-owner-input');
+          typing(owner, 'half-login');
+          typing(control(first, 'input.bghsa-backport-input'), 'release/half');
+          tick(control(first, 'input.bghsa-embargo'), false);
+
+          choose(control(first, 'select.bghsa-closure'), 'duplicate');
+          typing(control(first, 'input.bghsa-closure-duplicate'), 'GHSA-half');
+          choose(control(first, 'select.bghsa-closure'), '');
+          choose(control(first, 'select.bghsa-triage'), 'evaluating');
+
+          const date = control(first, 'input.bghsa-embargo-lift');
+          const duplicate = control(first, 'input.bghsa-closure-duplicate');
+          assert.ok(date.hasAttribute('disabled'));
+          assert.ok(duplicate.hasAttribute('disabled'));
+          const unsaved = note(first);
+
+          await backgroundMutation();
+
+          assert.ok(page.getElementById(panel.PANEL_ID) === first, 'background mutation replaced the editor');
+          assert.ok(control(first, 'input.bghsa-owner-input') === owner);
+          assert.ok(owner.isConnected);
+          assert.strictEqual(owner.getAttribute('value'), 'half-login');
+          assert.strictEqual(control(first, 'input.bghsa-backport-input').getAttribute('value'), 'release/half');
+          assert.ok(disclosure.hasAttribute('open'));
+          assert.ok(date.hasAttribute('disabled'));
+          assert.ok(duplicate.hasAttribute('disabled'));
+          assert.strictEqual(note(first), unsaved);
+
+          if (action === 'discard') {
+            press(first, 'button.bghsa-discard');
+          } else if (action === 'unchanged save') {
+            edit.edits.clear();
+            edit.drafts.clear();
+            edit.branchDrafts.clear();
+
+            // A programmatic no-change save still uses the panel's callback.
+            await edit.save(context);
+          } else {
+            // Save just triage, so both outcomes are about transport, not gated values.
+            edit.edits.clear();
+            edit.drafts.clear();
+            edit.branchDrafts.clear();
+
+            choose(control(first, 'select.bghsa-triage'), 'evaluating');
+            press(first, 'button.bghsa-save');
+            assert.strictEqual(note(first), 'Saving...');
+
+            await backgroundMutation();
+
+            assert.ok(page.getElementById(panel.PANEL_ID) === first, 'background mutation replaced saving controls');
+            for (const node of first.querySelectorAll('.bghsa-controls input, .bghsa-controls select, .bghsa-controls button')) {
+              assert.ok(node.hasAttribute('disabled'), 'a saving control became enabled');
+            }
+
+            release();
+          }
+
+          await until(() => page.getElementById(panel.PANEL_ID) !== first);
+
+          const next = page.getElementById(panel.PANEL_ID);
+          assert.ok(next);
+          assert.ok(!first.isConnected);
+          assert.ok(!control(next, 'select.bghsa-triage').hasAttribute('disabled'));
+
+          if (action === 'failed save') {
+            assert.strictEqual(text(control(next, '.bghsa-save-result')), 'Error: unexpected edit form fields');
+            assert.strictEqual(note(next), 'Unsaved changes: Triage.');
+            assert.strictEqual(talk.posts().length, 0);
+
+            const diagnostic = control(next, 'details.bghsa-diagnostic');
+            diagnostic.setAttribute('open', '');
+            const report = text(control(diagnostic, 'pre'));
+
+            await backgroundMutation();
+
+            assert.ok(page.getElementById(panel.PANEL_ID) === next, 'background mutation replaced diagnostics');
+            assert.ok(control(next, 'details.bghsa-diagnostic') === diagnostic);
+            assert.ok(diagnostic.isConnected && diagnostic.hasAttribute('open'));
+            assert.strictEqual(text(control(diagnostic, 'pre')), report);
+          } else {
+            assert.strictEqual(note(next), '');
+            assert.strictEqual(control(next, 'input.bghsa-owner-input').getAttribute('value'), '');
+            assert.ok(control(next, 'button.bghsa-save').hasAttribute('disabled'));
+
+            if (action === 'successful save') {
+              assert.strictEqual(text(control(next, '.bghsa-save-result')), 'Saved.');
+              assert.strictEqual(
+                /** @type {HTMLSelectElement} */ (control(next, 'select.bghsa-triage')).value,
+                'evaluating'
+              );
+              assert.strictEqual(talk.posts().length, 1);
+            } else {
+              assert.strictEqual(talk.calls.length, 0);
+            }
+          }
+        } finally {
+          release();
+          observer?.disconnect();
+          edit.contextFor = contextFor;
+          forget();
+        }
+      });
+    }
+  } finally {
+    globalThis.location = location;
+  }
 });
 
 test('the panel still does not name the author of an untrusted snapshot', async () => {

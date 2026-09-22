@@ -800,7 +800,7 @@ test('a live region whose content is replaced marks its snapshots again', async 
   reset(triageDoc);
   const timeline = region('timeline');
   const refreshed = refreshedCopy(timeline);
-  await panel.render(triageDoc);
+  const drawn = await panel.render(triageDoc);
   const marked = chipCount();
   assert.ok(marked > 0, 'the triage fixture marked no snapshot');
 
@@ -812,6 +812,7 @@ test('a live region whose content is replaced marks its snapshots again', async 
     assert.strictEqual(panel.outOfPlace(triageDoc), false, 'the refresh moved the panel');
     await until(() => chipCount() > 0);
     assert.strictEqual(chipCount(), marked);
+    assert.ok(triageDoc.getElementById(panel.PANEL_ID) === drawn, 'warning repair replaced the panel');
   } finally {
     observer?.disconnect();
   }
@@ -884,6 +885,229 @@ test('the observer runs its passes through the loop it is given', async () => {
   }
 });
 
+test('unrelated page mutations leave the editor mounted', async (t) => {
+  const doc = advisoryPage();
+  const drawn = await panel.render(doc);
+  assert.ok(drawn);
+
+  const input = /** @type {HTMLInputElement} */ (drawn.querySelector('.bghsa-owner-input'));
+  const disclosure = /** @type {Element} */ (drawn.querySelector('details.bghsa-editor-details'));
+  assert.ok(doc.defaultView);
+  input.value = 'half-typed';
+  input.dispatchEvent(new doc.defaultView.Event('input', { bubbles: true }));
+  disclosure.setAttribute('open', '');
+
+  const host = doc.createElement('div');
+  const shadowHost = doc.createElement('div');
+  shadowHost.attachShadow({ mode: 'closed' }).append(doc.createElement('input'));
+
+  const loop = panel.passFor(doc);
+  let passes = 0;
+  const observer = panel.observe(doc, async () => {
+    await loop();
+    passes += 1;
+  });
+
+  try {
+    /** @type {Array<[string, () => void]>} */
+    const mutations = [
+      ['body insertion', () => doc.body.append(host)],
+      ['body modification', () => host.append(doc.createElement('span'))],
+      ['body removal', () => host.remove()],
+      ['shadow host insertion', () => doc.body.append(shadowHost)],
+      ['shadow host removal', () => shadowHost.remove()],
+    ];
+
+    for (const [name, mutate] of mutations) {
+      await t.test(name, async () => {
+        const before = passes;
+        mutate();
+        await until(() => passes > before);
+
+        assert.ok(passes > before, 'the broad observer did not run the loop');
+        assert.ok(doc.getElementById(panel.PANEL_ID) === drawn, 'the mutation replaced the panel');
+        assert.ok(drawn.querySelector('.bghsa-owner-input') === input, 'the input was replaced');
+        assert.ok(drawn.querySelector('details.bghsa-editor-details') === disclosure);
+        assert.ok(input.isConnected);
+        assert.strictEqual(input.value, 'half-typed');
+        assert.ok(disclosure.hasAttribute('open'));
+      });
+    }
+
+    const before = passes;
+    drawn.append(doc.createElement('span'));
+    await delay(dom.RENDER_DELAY_MS + 50);
+    assert.strictEqual(passes, before, 'owned writing scheduled a pass');
+
+    // Linkedom reports attributes even to a child-list-only observer. Whether
+    // a pass runs or not, an attribute-only change must leave the editor alone.
+    doc.body.setAttribute('data-unrelated', 'changed');
+    await delay(dom.RENDER_DELAY_MS + 50);
+    assert.ok(doc.getElementById(panel.PANEL_ID) === drawn, 'attribute-only writing replaced the panel');
+
+    doc.getElementById(panel.STYLE_ID)?.remove();
+    assert.ok(await panel.render(doc) === drawn, 'stylesheet repair replaced the panel');
+    assert.ok(doc.getElementById(panel.STYLE_ID), 'reuse skipped stylesheet repair');
+  } finally {
+    observer?.disconnect();
+    edit.drafts.clear();
+  }
+});
+
+test('only the remembered panel at its anchor can be reused', async (t) => {
+  /** @type {Array<[string, (doc: Document, drawn: Element) => void]>} */
+  const cases = [
+    ['removed panel', (_doc, drawn) => drawn.remove()],
+    ['displaced panel', (doc, drawn) => doc.body.append(drawn)],
+    ['cloned sentinel', (_doc, drawn) => drawn.replaceWith(drawn.cloneNode(true))],
+    ['missing anchor', (doc) => doc.querySelector(parse.DESCRIPTION_HEADER)?.remove()],
+    ['replaced description region', (doc) => {
+      const place = panel.anchor(doc);
+      assert.ok(place);
+      const replacement = doc.createElement('div');
+      replacement.append(place.before.cloneNode(true));
+      place.before.replaceWith(replacement);
+    }],
+    ['replaced frame', (doc) => {
+      const frame = doc.querySelector('div.new-discussion-timeline');
+      assert.ok(frame);
+      frame.replaceWith(frame.cloneNode(true));
+    }],
+  ];
+
+  for (const [name, mutate] of cases) {
+    await t.test(name, async () => {
+      const doc = advisoryPage();
+      const drawn = await panel.render(doc);
+      assert.ok(drawn);
+
+      const loop = panel.passFor(doc);
+      let passes = 0;
+      const observer = panel.observe(doc, async () => {
+        await loop();
+        passes += 1;
+      });
+
+      try {
+        mutate(doc, drawn);
+        const sentinel = doc.getElementById(panel.PANEL_ID);
+
+        if (name === 'cloned sentinel') {
+          // A sentinel-only swap is owned writing to the broad observer; the
+          // next requested pass must not mistake the clone for our controls.
+          await loop();
+        } else {
+          await until(() => passes > 0);
+          assert.ok(passes > 0, 'the observer did not repair placement');
+        }
+
+        const next = doc.getElementById(panel.PANEL_ID);
+        assert.ok(next);
+        assert.ok(next !== drawn, 'the panel was not reconstructed');
+        if (name === 'cloned sentinel') assert.ok(next !== sentinel, 'the cloned sentinel was reused');
+        assert.ok(next.isConnected);
+        assert.strictEqual(doc.querySelectorAll(`#${panel.PANEL_ID}`).length, 1);
+
+        const place = panel.anchor(doc);
+        if (place !== null) assert.ok(next.nextElementSibling === place.before);
+
+        const again = await panel.render(doc);
+        if (place === null) assert.ok(again !== next);
+        else assert.ok(again === next);
+      } finally {
+        observer?.disconnect();
+      }
+    });
+  }
+});
+
+test('departure and stop forget the mounted panel', async (t) => {
+  for (const action of ['departure', 'stop']) {
+    await t.test(action, async () => {
+      const doc = advisoryPage();
+      const drawn = await panel.render(doc);
+      assert.ok(drawn);
+      const place = panel.anchor(doc);
+      assert.ok(place);
+
+      if (action === 'stop') {
+        panel.stop(doc);
+        place.parent.insertBefore(drawn, place.before);
+      } else {
+        const frame = doc.querySelector('div.new-discussion-timeline');
+        assert.ok(frame);
+        const parent = frame.parentElement;
+        assert.ok(parent);
+        frame.remove();
+        assert.strictEqual(await panel.render(doc), null);
+        parent.append(frame);
+      }
+
+      assert.ok(await panel.render(doc) !== drawn);
+    });
+  }
+});
+
+test('write metadata refreshes handlers even when labels are unchanged', async (t) => {
+  for (const field of ['seq', 'unknown']) {
+    await t.test(field, async () => {
+      const doc = advisoryPage();
+      const drawn = await panel.render(doc);
+      assert.ok(drawn);
+
+      const fence = doc.querySelector('#advisory-comment-282847 .highlight-source-json pre');
+      assert.ok(fence);
+      const snapshot = JSON.parse(fence.textContent ?? '');
+      if (field === 'seq') snapshot.seq += 1;
+      else snapshot.future = { retained: true };
+      fence.textContent = JSON.stringify(snapshot);
+
+      const next = await panel.render(doc);
+      assert.ok(next);
+      assert.ok(next !== drawn, 'changed write metadata did not reconstruct the panel');
+      assert.strictEqual(text(next), text(drawn));
+      assert.ok(await panel.render(doc) === next);
+    });
+  }
+});
+
+test('the clock redraws only when the embargo becomes overdue', async () => {
+  const doc = advisoryPage();
+  const now = Date.now;
+
+  try {
+    Date.now = () => Date.parse('2026-09-30T12:00:00Z');
+    const drawn = await panel.render(doc);
+    assert.ok(drawn);
+    assert.strictEqual(rowText(drawn, 'Embargo'), 'Lifts 2026-09-30');
+
+    Date.now = () => Date.parse('2026-09-30T23:00:00Z');
+    assert.ok(await panel.render(doc) === drawn, 'raw time caused a redraw');
+
+    Date.now = () => Date.parse('2026-10-01T00:00:00Z');
+    const next = await panel.render(doc);
+    assert.ok(next);
+    assert.ok(next !== drawn);
+    assert.strictEqual(rowText(next, 'Embargo'), 'Overdue since 2026-09-30');
+  } finally {
+    Date.now = now;
+  }
+});
+
+/**
+ * The captured fragment inside a full document, so body mutations and frame
+ * replacement exercise the same ancestry as the browser.
+ *
+ * @returns {Document}
+ */
+function advisoryPage() {
+  return /** @type {Document} */ (/** @type {unknown} */ (parseHTML(
+    '<!doctype html><html><head></head><body>' +
+    parseFixture('triage-thread.html').documentElement.outerHTML +
+    '</body></html>'
+  ).document));
+}
+
 test('a pass reads the document alone, and a request during one folds into one more', async () => {
   reset(triageDoc);
   const fingerprints = tracking.fingerprints;
@@ -941,6 +1165,7 @@ test('a member storage holds and this page does not reaches the panel', async ()
       'the stored login is not offered as an owner'
     );
     assert.strictEqual(triageDoc.querySelectorAll(`#${panel.PANEL_ID}`).length, 1);
+    assert.ok(triageDoc.getElementById(panel.PANEL_ID) !== drawn);
   } finally {
     members.setStorage(null);
     members.clear();
@@ -964,10 +1189,34 @@ test('a branch storage holds and this page does not reaches the panel', async ()
       'the stored branch is not offered as a backport target'
     );
     assert.strictEqual(triageDoc.querySelectorAll(`#${panel.PANEL_ID}`).length, 1);
+    assert.ok(triageDoc.getElementById(panel.PANEL_ID) !== drawn);
   } finally {
     branches.setStorage(null);
     branches.clear();
     reset(triageDoc);
+  }
+});
+
+test('candidate stores elsewhere do not replace this panel', async () => {
+  const doc = advisoryPage();
+  members.setStorage(fakeStorage({ [members.MEMBERS_KEY]: { elsewhere: ['new-member'] } }));
+  branches.setStorage(fakeStorage({
+    [branches.BRANCHES_KEY]: { 'git-utensils/other-repo': ['release/99.0'] },
+  }));
+
+  try {
+    const drawn = await panel.render(doc);
+    await until(() => members.known({ owner: 'elsewhere' }).includes('new-member'));
+    await panel.passFor(doc)();
+
+    assert.ok(doc.getElementById(panel.PANEL_ID) === drawn, 'unrelated candidates replaced the panel');
+    assert.ok(!offered(doc, 'owner').includes('new-member'));
+    assert.ok(!offered(doc, 'backport').includes('release/99.0'));
+  } finally {
+    members.setStorage(null);
+    branches.setStorage(null);
+    members.clear();
+    branches.clear();
   }
 });
 
@@ -1185,6 +1434,68 @@ test('a panel rebuilt after a press that wrote offers no button', async () => {
   assert.strictEqual(again.querySelector('button.bghsa-preserve'), null);
   assert.strictEqual(rowText(again, 'Original report'), 'Preserved');
   preserve.attempts.clear();
+});
+
+test('preservation completion refreshes a panel reconstructed mid-flight', async () => {
+  preserve.attempts.clear();
+  const doc = advisoryPage();
+  const drawn = await panel.render(doc);
+  assert.ok(drawn);
+  const advisory = parse.parseDetail(doc);
+  assert.ok(advisory);
+
+  const fake = fakeFetch(200, WROTE);
+  let sent = false;
+  /** @type {() => void} */
+  let release = () => {};
+  const gate = new Promise((resolve) => { release = () => resolve(undefined); });
+
+  const pending = panel.press(doc, advisory, preserveButton(drawn), {
+    fetch: async (url, init) => {
+      if (init.method === 'POST') {
+        sent = true;
+        await gate;
+      }
+
+      return fake.send(url, init);
+    },
+    parseDocument: asDocument,
+  });
+
+  try {
+    await until(() => sent);
+
+    // A real comment update reconstructs the panel while the write is held.
+    const comment = doc.querySelector('.js-comment-body');
+    assert.ok(comment);
+    const added = doc.createElement('p');
+    added.textContent = 'Additional context.';
+    comment.append(added);
+
+    const midflight = await panel.render(doc);
+    assert.ok(midflight);
+    assert.ok(midflight !== drawn, 'the comment update did not reconstruct the panel');
+    assert.ok(!drawn.isConnected);
+    assert.strictEqual(rowText(midflight, 'Original report'), preserve.ATTEMPTED_MESSAGE);
+
+    release();
+    assert.strictEqual((await pending).ok, true);
+    assert.strictEqual(fake.posts().length, 1);
+
+    // The original press settles on detached controls; the next pass must heal.
+    assert.strictEqual(rowText(drawn, 'Original report'), 'Preserved');
+    assert.strictEqual(rowText(midflight, 'Original report'), preserve.ATTEMPTED_MESSAGE);
+
+    const completed = await panel.render(doc);
+    assert.ok(completed);
+    assert.strictEqual(rowText(completed, 'Original report'), 'Preserved');
+    assert.strictEqual(completed.querySelector('button.bghsa-preserve'), null);
+    assert.ok(await panel.render(doc) === completed, 'settled preservation should allow reuse');
+  } finally {
+    release();
+    await pending;
+    preserve.attempts.clear();
+  }
 });
 
 test('a failed press leaves one result, not one per press', async () => {
