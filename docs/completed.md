@@ -158,7 +158,7 @@ results arrive.
 
 ### Counts
 
-Five sections show "Outcome", "Closure reason", "State", "Severity", and
+Five sections show "Outcome", "Closure reason", "Open", "Severity", and
 "Month". Each reports its sample size as "N of M". Rows show a value, its
 count, and its percentage of the sample. Missing values appear as "None" with a
 count. Months use UTC and the format `YYYY-MM`.
@@ -176,6 +176,9 @@ advisories: with 56 closed advisories, 5 of them unread, it reads "51 of 56".
 
 "None" in "Closure reason" is a link. Pressing it opens the completed view
 with "State: Closed" and "Closure reason: None" selected.
+
+"Open" counts open advisories as "Triage" or "Draft", with percentages over
+open advisories. Completed advisories are excluded from this section.
 
 The other sections calculate percentages over supplied values. Their "None"
 rows show a count without a percentage.

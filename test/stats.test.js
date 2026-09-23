@@ -502,7 +502,7 @@ test('a timing reports the spread of what it measured', () => {
   assert.strictEqual(none.max, null);
 });
 
-test('the corpus is counted by outcome, closure reason, state, severity, and month', () => {
+test('the corpus is counted by outcome, closure reason, severity, and month', () => {
   const summary = stats.summarize(
     corpusOf([
       member({
@@ -559,10 +559,6 @@ test('the corpus is counted by outcome, closure reason, state, severity, and mon
 
   assert.strictEqual(summary.corpus, 4);
   assert.strictEqual(summary.unread, 1);
-
-  assert.deepStrictEqual({ ...summary.counts.state?.counts }, { closed: 2, published: 2 });
-  assert.strictEqual(summary.counts.state?.counted, 4, 'the list page names every state');
-  assert.strictEqual(summary.counts.state?.missing, 0);
 
   assert.deepStrictEqual(
     { ...summary.counts.severity?.counts },
@@ -626,6 +622,12 @@ test('outcomes count every ending, and reasons every read closure', () => {
     'the two still being worked are no outcome, and the closure nobody read is one'
   );
   assert.strictEqual(summary.counts.outcome?.corpus, 4);
+  assert.deepStrictEqual(
+    { ...summary.counts.open?.counts },
+    { triage: 1, draft: 1 },
+    'the two still being worked are counted by state'
+  );
+  assert.strictEqual(summary.counts.open?.corpus, 2);
 
   assert.deepStrictEqual({ ...summary.counts.reason?.counts }, { duplicate: 1 });
   assert.strictEqual(
@@ -699,7 +701,7 @@ test('a summary says whether it is over the whole corpus', () => {
   assert.strictEqual(partial.corpus, 1, 'and this is what it found');
   assert.deepStrictEqual(partial.expected, { published: 41, closed: 12 });
   assert.strictEqual(partial.unread, 1);
-  assert.strictEqual(partial.counts.state?.corpus, 1);
+  assert.strictEqual(partial.counts.outcome?.corpus, 1);
 });
 
 test('the month a report falls in is read in one zone', () => {
@@ -716,7 +718,7 @@ test('a corpus of one real advisory measures what its page carries', () => {
       member({ ghsaId: 'GHSA-6r4h-2xvq-wm93', state: 'published', advisory: published }),
     ])
   );
-  assert.deepStrictEqual({ ...summary.counts.state?.counts }, { published: 1 });
+  assert.deepStrictEqual({ ...summary.counts.outcome?.counts }, { published: 1 });
   assert.deepStrictEqual({ ...summary.counts.severity?.counts }, { moderate: 1 });
   assert.deepStrictEqual({ ...summary.counts.month?.counts }, { '2026-04': 1 });
   assert.deepStrictEqual(summary.timings.accept?.values, [3434 * 1000]);

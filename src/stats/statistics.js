@@ -97,7 +97,7 @@ if (typeof require === 'function') {
       unreadCounts: true,
       missingOpens: true,
     },
-    { key: 'state', name: 'State', by: 'count' },
+    { key: 'open', name: 'Open', by: 'count' },
     { key: 'severity', name: 'Severity', by: 'count' },
     { key: 'month', name: 'Month', by: 'value' },
   ];

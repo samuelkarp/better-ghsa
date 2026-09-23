@@ -8,6 +8,7 @@ if (typeof require === 'function') {
   require('../common/trust.js');
   require('../common/derive.js');
   require('../common/merge.js');
+  require('../common/parse-list.js');
   require('../detail/tracking.js');
   require('../detail/preserve.js');
   require('./corpus.js');
@@ -49,9 +50,10 @@ if (typeof require === 'function') {
  * @property {number} unread The number of members without detail data.
  * @property {boolean} complete Whether every selected state crawl reached its last page.
  * @property {Record<string, number | null>} expected Counts from GitHub's state tabs.
- * @property {Record<string, Tally>} counts Tallies by outcome, reason, state, severity, and
- *   month. The outcome tally covers published and closed advisories; the reason tally
- *   covers read closed advisories.
+ * @property {Record<string, Tally>} counts Tallies by outcome, reason, open state,
+ *   severity, and month. The outcome tally covers published and closed advisories; the
+ *   reason tally covers read closed advisories; the open tally covers triage and draft
+ *   advisories.
  * @property {Record<string, Timing>} timings Timings keyed by TIMINGS entries.
  * @property {Record<string, string>} uncomputed Unavailable metrics and their reasons.
  */
@@ -68,6 +70,8 @@ if (typeof require === 'function') {
   const PUBLISHED_STATE = 'published';
 
   const CLOSED_STATE = 'closed';
+
+  const OPEN_STATES = globalThis.bghsa.parseList.OPEN_STATES;
 
   /**
    * Match the close phrase after actor removal. Closure reasons are stored
@@ -321,7 +325,8 @@ if (typeof require === 'function') {
    * The outcome tally counts published and closed advisories from list data.
    * The reason tally counts closure reasons of read closed advisories; unread
    * closed advisories are outside its corpus and counted in its `unread`.
-   * Open advisories are excluded from both tallies.
+   * Open advisories are excluded from both tallies. The open tally counts
+   * triage and draft advisories by state.
    *
    * @param {import('./corpus.js').Corpus} held
    * @returns {Summary}
@@ -337,7 +342,7 @@ if (typeof require === 'function') {
 
     let unreadReasons = 0;
     /** @type {(string | null)[]} */
-    const states = [];
+    const opens = [];
     /** @type {(string | null)[]} */
     const severities = [];
     /** @type {(string | null)[]} */
@@ -355,7 +360,7 @@ if (typeof require === 'function') {
       const advisory = member.advisory;
       const state = advisory?.state ?? member.row.state ?? member.state;
       const named = state === null ? null : state.toLowerCase();
-      states.push(named);
+      if (named !== null && OPEN_STATES.includes(named)) opens.push(named);
       if (named === PUBLISHED_STATE || named === CLOSED_STATE) outcomes.push(named);
       if (named === CLOSED_STATE) {
         if (advisory === null) unreadReasons += 1;
@@ -378,7 +383,7 @@ if (typeof require === 'function') {
         // The outcome needs no detail read, so no member of it is unread.
         outcome: tally(outcomes, { corpus: outcomes.length, unread: 0 }),
         reason: tally(reasons, { corpus: reasons.length, unread: unreadReasons }),
-        state: tally(states, over),
+        open: tally(opens, { corpus: opens.length, unread: 0 }),
         severity: tally(severities, over),
         month: tally(months, over),
       },

@@ -415,12 +415,15 @@ test('the statistics are over the whole corpus, open and done', async () => {
     'the corpus is both halves, and both are walked to their last page'
   );
 
-  assert.deepStrictEqual(countLines(doc, 'state'), [
-    'Triage 2 40%',
-    'Closed 1 20%',
-    'Draft 1 20%',
-    'Published 1 20%',
-  ]);
+  assert.deepStrictEqual(
+    countLines(doc, 'open'),
+    ['Triage 2 67%', 'Draft 1 33%'],
+    'the open advisories are counted by state, and the ended ones are left to the outcome'
+  );
+  assert.deepStrictEqual(
+    textsOf(doc, `#${statistics.ROOT_ID} [data-bghsa-count="open"] .Box-header > *`),
+    ['Open', '3 of 3']
+  );
   assert.deepStrictEqual(
     countLines(doc, 'severity'),
     ['High 4 80%', 'Low 1 20%'],
@@ -435,7 +438,7 @@ test('the statistics are over the whole corpus, open and done', async () => {
     Array.from(doc.querySelectorAll(`#${statistics.ROOT_ID} [data-bghsa-count]`)).map((box) =>
       box.getAttribute('data-bghsa-count')
     ),
-    ['outcome', 'reason', 'state', 'severity', 'month'],
+    ['outcome', 'reason', 'open', 'severity', 'month'],
     'the outcome comes first, ahead of the closure reason'
   );
   assert.deepStrictEqual(countLines(doc, 'outcome'), ['Closed 1 50%', 'Published 1 50%']);
@@ -584,11 +587,7 @@ test('a half nothing has crawled says what its numbers are over', async () => {
     '2 done',
     '4 unread',
   ]);
-  assert.deepStrictEqual(countLines(doc, 'state'), [
-    'Triage 2 50%',
-    'Closed 1 25%',
-    'Published 1 25%',
-  ]);
+  assert.deepStrictEqual(countLines(doc, 'open'), ['Triage 2 100%']);
   assert.deepStrictEqual(
     countLines(doc, 'reason'),
     ['Unread 1 —'],
@@ -618,7 +617,7 @@ test('a half nothing has crawled says what its numbers are over', async () => {
     '3 unread',
     '4 on GitHub',
   ]);
-  assert.deepStrictEqual(countLines(other.doc, 'state'), ['Triage 2 67%', 'Draft 1 33%']);
+  assert.deepStrictEqual(countLines(other.doc, 'open'), ['Triage 2 67%', 'Draft 1 33%']);
 });
 
 test('a repository nothing has read says so and offers no export', async () => {
