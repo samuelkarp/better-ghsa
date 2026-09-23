@@ -174,6 +174,9 @@ page has not been read, without a percentage, and appears only when there are
 any. The sample size counts fetched closed advisories out of all closed
 advisories: with 56 closed advisories, 5 of them unread, it reads "51 of 56".
 
+"None" in "Closure reason" is a link. Pressing it opens the completed view
+with "State: Closed" and "Closure reason: None" selected.
+
 The other sections calculate percentages over supplied values. Their "None"
 rows show a count without a percentage.
 

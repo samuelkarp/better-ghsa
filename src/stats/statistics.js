@@ -73,7 +73,8 @@ if (typeof require === 'function') {
    * For closure reasons, missing values count as outcomes in the denominator.
    * Other tallies compute shares among supplied values. A group with
    * `unreadCounts` has unread members outside its tally, shown in their own
-   * row and in the header total.
+   * row and in the header total. A group with `missingOpens` labels its None
+   * row with a control that opens the completed view on those advisories.
    *
    * @typedef {{
    *   key: string,
@@ -81,6 +82,7 @@ if (typeof require === 'function') {
    *   by: 'count' | 'value',
    *   missingCounts?: boolean,
    *   unreadCounts?: boolean,
+   *   missingOpens?: boolean,
    * }} CountGroup
    */
 
@@ -93,6 +95,7 @@ if (typeof require === 'function') {
       by: 'count',
       missingCounts: true,
       unreadCounts: true,
+      missingOpens: true,
     },
     { key: 'state', name: 'State', by: 'count' },
     { key: 'severity', name: 'Severity', by: 'count' },
@@ -401,6 +404,14 @@ if (typeof require === 'function') {
         group.missingCounts === true ? formatRatio(tally.missing / over) : '—'
       );
       line.classList.add('bghsa-stats-missing');
+      if (group.missingOpens === true) {
+        const open = element(doc, 'button', 'btn-link bghsa-stats-open', 'None');
+        open.setAttribute('type', 'button');
+        open.addEventListener('click', () => {
+          globalThis.bghsa.view.showUnreasoned(doc);
+        });
+        line.querySelector('.bghsa-stats-value')?.replaceChildren(open);
+      }
       list.append(line);
     }
     if (unread > 0) {

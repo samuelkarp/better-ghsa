@@ -922,6 +922,22 @@ if (typeof require === 'function') {
   }
 
   /**
+   * Open this view on closed advisories without a closure reason, the
+   * selection its State and Closure reason menus make.
+   *
+   * @param {Document} doc
+   * @returns {void}
+   */
+  function showUnreasoned(doc) {
+    const table = globalThis.bghsa.table;
+    filters.set(doc, { state: CLOSED, reason: table.NO_VALUE });
+    table.setViewMode(doc, MODE);
+    drawControls(doc);
+    table.applyVisibility(doc);
+    void collect(doc);
+  }
+
+  /**
    * Hide extension toggles in GitHub's native view.
    *
    * @param {Document} doc
@@ -1083,6 +1099,7 @@ if (typeof require === 'function') {
     draw,
     show,
     setReason,
+    showUnreasoned,
     collect,
     left,
   };

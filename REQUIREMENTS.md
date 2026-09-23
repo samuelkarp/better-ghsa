@@ -397,6 +397,9 @@ reading the detail page. Exclude unread closed advisories from closure-reason
 ratios until their reason can be determined, and show their count beside the
 closure reasons.
 
+The unset-reason category of the closure-reason statistics links to the done
+page filtered to closed advisories with an unset reason.
+
 Timing, reconstructed from page-observable events:
 
 - Time to first response, measured to the first comment by an org member that

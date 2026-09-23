@@ -507,6 +507,61 @@ test('closure reasons count a close with no reason and list the unread apart', a
   );
 });
 
+test('the closure reason None opens the completed list on those advisories', async () => {
+  const named = ghsa('maaa');
+  const bare = ghsa('mbbb');
+  const unread = ghsa('mccc');
+  const publishedId = ghsa('mddd');
+  const { doc } = await repository({
+    owner: 'stats-todo',
+    states: {
+      published: [{ ghsaId: publishedId }],
+      closed: [{ ghsaId: named }, { ghsaId: bare }, { ghsaId: unread, severity: null }],
+    },
+    reads: [
+      { ghsaId: named, state: 'Closed', closureReason: 'duplicate' },
+      { ghsaId: bare, state: 'Closed' },
+    ],
+    // The statistics count the closed rows on the page; the completed view has
+    // collected nothing.
+    showing: 'closed',
+  });
+
+  statsToggle(doc).click();
+  await statistics.load(doc);
+  const rows = () =>
+    Array.from(doc.querySelectorAll(`#${view.ROOT_ID} li.bghsa-done-row`))
+      .map((row) => row.getAttribute('data-bghsa-ghsa'))
+      .sort();
+  assert.deepStrictEqual(rows(), [], 'the completed view has collected nothing');
+  const opens = doc.querySelectorAll(`#${statistics.ROOT_ID} button.btn-link`);
+  assert.strictEqual(opens.length, 1, 'only the closure reason None is a link');
+  const open = /** @type {HTMLElement} */ (
+    /** @type {unknown} */ (
+      one(doc, `#${statistics.ROOT_ID} [data-bghsa-count="reason"] .bghsa-stats-missing button`)
+    )
+  );
+  assert.strictEqual((open.textContent ?? '').trim(), 'None');
+
+  open.click();
+  await settle();
+
+  assert.strictEqual(table.viewMode(doc), view.MODE, 'the page is on the completed view');
+  assert.ok(one(doc, `#${statistics.ROOT_ID}`).classList.contains(table.HIDDEN_CLASS));
+  const controls = one(doc, `#${table.ROOT_ID} .bghsa-done-controls`);
+  assert.ok(!controls.classList.contains(table.HIDDEN_CLASS), 'its filters are in view');
+  assert.deepStrictEqual(
+    textsOf(controls, 'summary'),
+    ['State: Closed', 'Closure reason: None', 'Severity'],
+    'the menus hold the selection the link made'
+  );
+  assert.deepStrictEqual(
+    rows(),
+    [bare, unread].sort(),
+    'the list shows the closed advisories a reason has still to be set on'
+  );
+});
+
 test('a half nothing has crawled says what its numbers are over', async () => {
   const showing = [ghsa('gggg'), ghsa('hhhh')];
   const { doc } = await repository({
