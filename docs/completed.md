@@ -158,10 +158,9 @@ results arrive.
 
 ### Counts
 
-Five sections show "Outcome", "Closure reason", "Open", "Severity", and
-"Month". Each reports its sample size as "N of M". Rows show a value, its
-count, and its percentage of the sample. Missing values appear as "None" with a
-count. Months use UTC and the format `YYYY-MM`.
+Four sections show "Outcome", "Closure reason", "Open", and "Severity". Each
+reports its sample size as "N of M". Rows show a value, its count, and its
+percentage of the sample. Missing values appear as "None" with a count.
 
 "Outcome" counts completed advisories as "Published" or "Closed". The list
 page supplies both, so unread advisories are counted. Open advisories are
@@ -193,6 +192,23 @@ unread draft, it reads "12 of 14".
 
 The other sections calculate percentages over supplied values. Their "None"
 rows show a count without a percentage.
+
+### Reports by month
+
+"Reports by month" is a table across the full width of the view, below the
+counts. Its columns are "Year", "Jan" through "Dec", and "Total". The table
+ends at the later of the current UTC month and the month of the latest report,
+so a report dated ahead of the browser's clock counts. Each row is a year,
+from the year of the earliest report to the year the table ends, oldest first.
+A cell counts open and completed advisories reported in that month, read in
+UTC: a report at 23:30 on December 31 in New York (UTC-5) counts in January.
+An advisory whose detail read supplies no report time, because it is unread
+or its page shows none, uses the time its list row shows. Months without
+reports show 0, months after the end of the table are blank, and "Total" sums
+the row. A year without reports between two with them appears with all zeros.
+
+The sample size counts advisories with a report time out of all advisories.
+With no report time at all, the table reads "Nothing counted".
 
 ### Timings
 

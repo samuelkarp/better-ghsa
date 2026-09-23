@@ -433,15 +433,10 @@ test('the statistics are over the whole corpus, open and done', async () => {
     ['Open', '3 of 3']
   );
   assert.deepStrictEqual(
-    countLines(doc, 'month'),
-    ['2026-03 3 60%', '2026-04 2 40%'],
-    'and so does the month'
-  );
-  assert.deepStrictEqual(
     Array.from(doc.querySelectorAll(`#${statistics.ROOT_ID} [data-bghsa-count]`)).map((box) =>
       box.getAttribute('data-bghsa-count')
     ),
-    ['outcome', 'reason', 'open', 'severity', 'month'],
+    ['outcome', 'reason', 'open', 'severity'],
     'the outcome comes first, ahead of the closure reason'
   );
   assert.deepStrictEqual(countLines(doc, 'outcome'), ['Closed 1 50%', 'Published 1 50%']);
@@ -461,6 +456,96 @@ test('the statistics are over the whole corpus, open and done', async () => {
     textOf(doc, `#${statistics.ROOT_ID} [data-bghsa-timing="accept"] .bghsa-stats-meta`),
     '1 of 5'
   );
+});
+
+/**
+ * @param {Document} doc
+ * @returns {string[][]} Each row of the reports-by-month table as its cell
+ *   texts, header row first.
+ */
+function monthCells(doc) {
+  return Array.from(
+    doc.querySelectorAll(`#${statistics.ROOT_ID} [data-bghsa-months] tr`)
+  ).map((row) => Array.from(row.children).map((cell) => (cell.textContent ?? '').trim()));
+}
+
+test('reports are counted by month in a table of years', async () => {
+  const crossing = ghsa('maaa');
+  const current = ghsa('mbbb');
+  const early = ghsa('mccc');
+  const earlyUnread = ghsa('mddd');
+  const undated = ghsa('meee');
+  const { doc } = await repository({
+    owner: 'stats-months',
+    states: {
+      triage: [{ ghsaId: crossing }, { ghsaId: current, openedAt: '2026-08-01T00:00:00Z' }],
+      published: [{ ghsaId: early }],
+      closed: [
+        { ghsaId: earlyUnread, openedAt: '2024-03-20T00:00:00Z' },
+        { ghsaId: undated, openedAt: '' },
+      ],
+    },
+    reads: [
+      // 04:30 on the first of January in UTC.
+      { ghsaId: crossing, state: 'Triage', reportedAt: '2025-12-31T23:30:00-05:00' },
+      { ghsaId: early, state: 'Published', reportedAt: '2024-03-10T00:00:00Z' },
+    ],
+    crawl: ['open', 'done'],
+  });
+
+  statsToggle(doc).click();
+  await statistics.load(doc);
+
+  assert.deepStrictEqual(
+    textsOf(doc, `#${statistics.ROOT_ID} [data-bghsa-months] .Box-header > *`),
+    ['Reports by month', '4 of 5'],
+    'the advisory without a report time is outside the table and inside the total'
+  );
+  // The clock reads August 2026, so September to December are blank.
+  assert.deepStrictEqual(monthCells(doc), [
+    [
+      ...['Year', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
+      ...['Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Total'],
+    ],
+    ['2024', '0', '0', '2', '0', '0', '0', '0', '0', '0', '0', '0', '0', '2'],
+    ['2025', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0'],
+    ['2026', '1', '0', '0', '0', '0', '0', '0', '1', '', '', '', '', '2'],
+  ]);
+  assert.deepStrictEqual(
+    Array.from(doc.querySelectorAll(`#${statistics.ROOT_ID} [data-bghsa-months] th`)).map(
+      (cell) => cell.getAttribute('scope')
+    ),
+    [...Array(14).fill('col'), 'row', 'row', 'row'],
+    'the headers name their columns and the years name their rows'
+  );
+
+  const months = one(doc, `#${statistics.ROOT_ID} [data-bghsa-months]`);
+  assert.ok(months.parentElement === one(doc, `#${statistics.ROOT_ID}`), 'on its own row');
+  assert.ok(
+    months.previousElementSibling === one(doc, `#${statistics.ROOT_ID} .bghsa-stats-counts`) &&
+      months.nextElementSibling === one(doc, `#${statistics.ROOT_ID} .bghsa-stats-timings`),
+    'between the counts and the timings'
+  );
+});
+
+test('reports without a time leave the table empty', async () => {
+  const { doc } = await repository({
+    owner: 'stats-undated',
+    states: { triage: [{ ghsaId: ghsa('naaa'), openedAt: '' }] },
+  });
+
+  statsToggle(doc).click();
+  await statistics.load(doc);
+
+  assert.deepStrictEqual(
+    textsOf(doc, `#${statistics.ROOT_ID} [data-bghsa-months] .Box-header > *`),
+    ['Reports by month', '0 of 1']
+  );
+  assert.strictEqual(
+    textOf(doc, `#${statistics.ROOT_ID} [data-bghsa-months] .Box-body`),
+    'Nothing counted'
+  );
+  assert.strictEqual(doc.querySelector(`#${statistics.ROOT_ID} [data-bghsa-months] table`), null);
 });
 
 test('closure reasons count a close with no reason and list the unread apart', async () => {

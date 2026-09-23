@@ -384,8 +384,8 @@ Update the originating row after saving a closure reason.
 
 The statistics view covers all open and completed advisories.
 
-Show counts and ratios by outcome, closure reason, open state, severity, and
-month.
+Show counts and ratios by outcome, closure reason, open state, and severity.
+Show report counts by month in a table of years.
 
 Outcome statistics count completed advisories as published or closed.
 Closure-reason statistics cover closed advisories. Count them by their stored
@@ -412,6 +412,15 @@ closure reasons.
 
 The unset-reason category of the closure-reason statistics links to the done
 page filtered to closed advisories with an unset reason.
+
+The report-month table counts open and completed advisories by the UTC month
+of their report, falling back to the list page's opened time. It ends at the
+later of the current UTC month and the month of the latest report. It has one
+row per year, from the year of the earliest report to the year it ends, and a
+column per month and a total. Every month through its end shows its count,
+zero included; later months are blank. It spans the full width of the
+view, below the counts and above the timings, and shows its sample size as the
+advisories with a report time out of all advisories.
 
 Timing, reconstructed from page-observable events:
 

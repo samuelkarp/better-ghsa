@@ -126,6 +126,55 @@ if (typeof require === 'function') {
   }
 
   /**
+   * One year of report counts. `months` runs January to December; a month
+   * after the end of the range holds null.
+   *
+   * @typedef {object} YearRow
+   * @property {number} year
+   * @property {(number | null)[]} months
+   * @property {number} total
+   */
+
+  /**
+   * Arrange a month tally into years, ascending. The range runs from the
+   * year of the earliest month to its end, the later of the UTC month of `at`
+   * and the latest month. Every month through the end holds its count, zero
+   * when absent, so the totals sum to the tally.
+   *
+   * @param {Readonly<Record<string, number>>} counts Counts keyed by YYYY-MM.
+   * @param {number} at The current instant in milliseconds.
+   * @returns {YearRow[]} No rows when `counts` is empty.
+   */
+  function yearsOf(counts, at) {
+    const keys = Object.keys(counts).sort();
+    const earliest = keys[0];
+    const latest = keys[keys.length - 1];
+    if (earliest === undefined || latest === undefined) return [];
+    const current = new Date(at).toISOString().slice(0, 7);
+    const end = latest > current ? latest : current;
+    const lastYear = Number(end.slice(0, 4));
+    const lastMonth = Number(end.slice(5, 7)) - 1;
+    /** @type {YearRow[]} */
+    const rows = [];
+    for (let year = Number(earliest.slice(0, 4)); year <= lastYear; year += 1) {
+      /** @type {(number | null)[]} */
+      const months = [];
+      let total = 0;
+      for (let month = 0; month < 12; month += 1) {
+        if (year === lastYear && month > lastMonth) {
+          months.push(null);
+          continue;
+        }
+        const count = counts[`${year}-${String(month + 1).padStart(2, '0')}`] ?? 0;
+        months.push(count);
+        total += count;
+      }
+      rows.push({ year, months, total });
+    }
+    return rows;
+  }
+
+  /**
    * Read closure reasons from state comments. Count unknown stored values as
    * written.
    *
@@ -434,6 +483,7 @@ if (typeof require === 'function') {
     TIMINGS,
     UNCOMPUTED,
     monthOf,
+    yearsOf,
     NO_FINGERPRINTS,
     closureReasonOf,
     firstResponseAt,

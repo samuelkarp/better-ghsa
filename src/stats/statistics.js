@@ -72,8 +72,7 @@ if (typeof require === 'function') {
   ];
 
   /**
-   * Sort months chronologically, severities by level, and other tallies by
-   * frequency.
+   * Sort severities by level and other tallies by frequency.
    * For closure reasons, missing values count as outcomes in the denominator.
    * Other tallies compute shares among supplied values. A group with
    * `unreadCounts` has unread members outside its tally, shown in their own
@@ -83,7 +82,7 @@ if (typeof require === 'function') {
    * @typedef {{
    *   key: string,
    *   name: string,
-   *   by: 'count' | 'value' | 'level',
+   *   by: 'count' | 'level',
    *   missingCounts?: boolean,
    *   unreadCounts?: boolean,
    *   missingOpens?: boolean,
@@ -103,7 +102,28 @@ if (typeof require === 'function') {
     },
     { key: 'open', name: 'Open', by: 'count' },
     { key: 'severity', name: 'Severity', by: 'level', unreadCounts: true },
-    { key: 'month', name: 'Month', by: 'value' },
+  ];
+
+  const MONTHS_NAME = 'Reports by month';
+
+  const YEAR_HEADER = 'Year';
+
+  const TOTAL_HEADER = 'Total';
+
+  /** Column headers for January through December. */
+  const MONTH_HEADERS = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
   ];
 
   /**
@@ -135,6 +155,14 @@ if (typeof require === 'function') {
     '.bghsa-stats-meta { color: var(--fgColor-muted, currentColor); }',
     '.bghsa-stats-empty { color: var(--fgColor-muted, currentColor); }',
     '.bghsa-stats-uncomputed { color: var(--fgColor-muted, currentColor); }',
+    '.bghsa-stats-scroll { overflow-x: auto; }',
+    '.bghsa-stats-table { width: 100%; border-collapse: collapse;' +
+      ' font-variant-numeric: tabular-nums; }',
+    '.bghsa-stats-table th, .bghsa-stats-table td { padding: 8px 16px; text-align: right;' +
+      ' white-space: nowrap; border-top: 1px solid var(--borderColor-muted, currentColor); }',
+    '.bghsa-stats-table thead th { border-top: 0; }',
+    '.bghsa-stats-table th[scope="row"], .bghsa-stats-table thead th:first-child' +
+      ' { text-align: left; }',
   ].join('\n');
 
   /** What the view holds for each document. @type {WeakMap<Document, Held>} */
@@ -385,12 +413,11 @@ if (typeof require === 'function') {
 
     const list = element(doc, 'ul', 'bghsa-stats-rows');
     const rank = globalThis.bghsa.order.severityRank;
-    const entries = Object.entries(tally.counts).sort((left, right) =>
-      group.by === 'value'
-        ? left[0].localeCompare(right[0])
-        : (group.by === 'level' ? rank(right[0]) - rank(left[0]) : 0) ||
-          right[1] - left[1] ||
-          left[0].localeCompare(right[0])
+    const entries = Object.entries(tally.counts).sort(
+      (left, right) =>
+        (group.by === 'level' ? rank(right[0]) - rank(left[0]) : 0) ||
+        right[1] - left[1] ||
+        left[0].localeCompare(right[0])
     );
     for (const [value, count] of entries) {
       list.append(
@@ -431,6 +458,56 @@ if (typeof require === 'function') {
       list.append(element(doc, 'li', 'Box-row bghsa-stats-empty', NOTHING_TEXT));
     }
     box.append(list);
+    return box;
+  }
+
+  /**
+   * Count reports in a grid of years by months, through the later of the
+   * current month and the latest report month.
+   *
+   * @param {Document} doc
+   * @param {import('../done/stats.js').Tally | undefined} tally The month tally.
+   * @returns {Element}
+   */
+  function buildMonths(doc, tally) {
+    const box = element(doc, 'div', 'Box mb-3 bghsa-stats-months');
+    box.setAttribute('data-bghsa-months', '1');
+    const counted = tally?.counted ?? 0;
+    box.append(buildHeader(doc, MONTHS_NAME, `${counted} of ${tally?.corpus ?? 0}`));
+    const rows = globalThis.bghsa.stats.yearsOf(
+      tally?.counts ?? {},
+      globalThis.bghsa.cache.now()
+    );
+    if (rows.length === 0) {
+      box.append(element(doc, 'div', 'Box-body bghsa-stats-empty', NOTHING_TEXT));
+      return box;
+    }
+    const grid = element(doc, 'table', 'bghsa-stats-table');
+    const head = element(doc, 'thead', '');
+    const names = element(doc, 'tr', '');
+    for (const name of [YEAR_HEADER, ...MONTH_HEADERS, TOTAL_HEADER]) {
+      const cell = element(doc, 'th', '', name);
+      cell.setAttribute('scope', 'col');
+      names.append(cell);
+    }
+    head.append(names);
+    grid.append(head);
+    const body = element(doc, 'tbody', '');
+    for (const row of rows) {
+      const line = element(doc, 'tr', '');
+      const year = element(doc, 'th', '', String(row.year));
+      year.setAttribute('scope', 'row');
+      line.append(year);
+      for (const count of row.months) {
+        line.append(element(doc, 'td', '', count === null ? '' : String(count)));
+      }
+      line.append(element(doc, 'td', 'text-bold', String(row.total)));
+      body.append(line);
+    }
+    grid.append(body);
+    const scroll = element(doc, 'div', 'bghsa-stats-scroll');
+    scroll.append(grid);
+    box.append(scroll);
     return box;
   }
 
@@ -477,6 +554,8 @@ if (typeof require === 'function') {
       counts.append(buildTally(doc, group, tally));
     }
     parts.push(counts);
+
+    parts.push(buildMonths(doc, summary.counts.month));
 
     const timings = element(doc, 'div', 'bghsa-stats-lists bghsa-stats-timings');
     for (const timing of globalThis.bghsa.stats.TIMINGS) {

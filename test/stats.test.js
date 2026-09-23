@@ -811,11 +811,67 @@ test('a summary says whether it is over the whole corpus', async () => {
   assert.strictEqual(partial.counts.outcome?.corpus, 1);
 });
 
+/**
+ * Run `body` with the process's local time zone set to `zone`, which Node
+ * applies at once, so a check does not depend on the host's zone.
+ *
+ * @param {string} zone
+ * @param {() => void} body
+ */
+function inZone(zone, body) {
+  const had = Object.prototype.hasOwnProperty.call(process.env, 'TZ');
+  const was = process.env.TZ;
+  process.env.TZ = zone;
+  try {
+    body();
+  } finally {
+    if (had) process.env.TZ = was;
+    else delete process.env.TZ;
+  }
+}
+
 test('the month a report falls in is read in one zone', () => {
-  assert.strictEqual(stats.monthOf('2026-03-31T23:30:00Z'), '2026-03');
-  assert.strictEqual(stats.monthOf('2026-04-01T00:30:00+02:00'), '2026-03');
+  // Each instant falls in a different month in the zone it runs under.
+  inZone('Asia/Tokyo', () => {
+    assert.strictEqual(stats.monthOf('2026-03-31T23:30:00Z'), '2026-03');
+    assert.strictEqual(stats.monthOf('2026-04-01T00:30:00+02:00'), '2026-03');
+  });
+  inZone('America/New_York', () => {
+    assert.strictEqual(stats.monthOf('2026-04-01T00:30:00Z'), '2026-04');
+  });
   assert.strictEqual(stats.monthOf(null), null);
   assert.strictEqual(stats.monthOf('not a time'), null);
+});
+
+test('the years of reports run through the later of now and the latest report', () => {
+  // September in UTC, still August in New York.
+  const at = Date.parse('2026-09-01T02:00:00Z');
+  const blank = null;
+  inZone('America/New_York', () => {
+    assert.deepStrictEqual(
+      stats.yearsOf({ '2025-11': 1, '2026-03': 2 }, at),
+      [
+        { year: 2025, months: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0], total: 1 },
+        {
+          year: 2026,
+          months: [0, 0, 2, 0, 0, 0, 0, 0, 0, blank, blank, blank],
+          total: 2,
+        },
+      ],
+      'the months after the latest report through the current UTC month read 0'
+    );
+    assert.deepStrictEqual(
+      stats.yearsOf({ '2026-01': 1, '2026-10': 1 }, at),
+      [{ year: 2026, months: [1, 0, 0, 0, 0, 0, 0, 0, 0, 1, blank, blank], total: 2 }],
+      'a report after the current month is counted'
+    );
+    assert.deepStrictEqual(
+      stats.yearsOf({ '2027-02': 3 }, at),
+      [{ year: 2027, months: [0, 3, ...Array(10).fill(blank)], total: 3 }],
+      'and so is one in a later year'
+    );
+  });
+  assert.deepStrictEqual(stats.yearsOf({}, at), []);
 });
 
 test('a corpus of one real advisory measures what its page carries', async () => {
