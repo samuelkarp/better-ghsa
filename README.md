@@ -40,8 +40,8 @@ and can be rebuilt by rereading the advisories.
 
 ## The three surfaces
 
-**The advisory detail panel** shows patch progress in the private fork, CVE
-state, waiting time, and review status. It lets you edit stored triage state
+**The advisory detail panel** shows patch progress in the private fork,
+waiting time, and review status. It lets you edit stored triage state
 and preserve the reporter's title and description in a comment before you
 rewrite them for publication.
 See [docs/detail-panel.md](docs/detail-panel.md).
@@ -122,8 +122,8 @@ already open.
 
 ## What it can reach
 
-- It acts only on the repositories in its settings. On every other repository it
-  does nothing at all: no panel, no table, nothing read, and nothing stored.
+- On unlisted repositories, it shows only the settings button on advisory
+  pages. It does not read or store advisory data or fetch advisory pages.
 - It writes two comment types to GitHub: tracking state and preserved reports.
   It does not change an advisory's title, description, severity, CVSS vector,
   CWEs, CVE, state, or collaborators.

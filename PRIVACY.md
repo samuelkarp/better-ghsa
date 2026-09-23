@@ -71,9 +71,10 @@ names beginning `release/` by repository for backport suggestions.
 
 ### Which repositories this covers
 
-The extension runs on the advisory pages of the repositories listed in its
-settings, and on no other page. On a repository that is not listed it reads
-nothing, stores nothing, and sends nothing.
+The extension reads advisory data on the advisory pages of repositories listed
+in its settings. It also makes layout adjustments on their GHSA private forks.
+On unlisted repositories, it shows only the settings button on advisory pages.
+It does not read or store advisory data or fetch advisory pages.
 
 Every advisory page includes a `Better GHSA settings` button, including pages
 for unlisted repositories. The button opens the extension's settings without
@@ -82,9 +83,10 @@ reading advisory data, storing data, or sending a request.
 ### Retention
 
 Entries persist until they are removed. Advisory and list reads are refreshed in
-place as pages are re-read. An advisory GitHub has stopped serving has its entry
-removed after three consecutive failures. The `members` and `branches` entries
-accumulate, and nothing ages them out.
+place as pages are re-read. A successful advisory read resets its missing-page
+count. After three HTTP 404 responses without a successful read between them,
+the extension removes the cached advisory entry. The `members` and `branches`
+entries accumulate, and nothing ages them out.
 
 `Clear cache` in settings immediately removes advisory reads, list reads,
 refresh progress, observed members, and observed branches. It preserves your
@@ -116,9 +118,14 @@ browser already has. The extension does not ask for a personal access token,
 does not create one, does not read one, and does not store a credential of any
 kind.
 
+When saving a comment, the extension reads GitHub's comment-form fields,
+including the CSRF token, and submits them back to GitHub. These fields are
+not retained in extension storage.
+
 Some of these requests are sent without a direct click. While a `github.com`
-advisory page is open, the extension refreshes advisories in the background, at
-most one request per second per repository. To GitHub, that traffic is
+advisory page is open, the extension refreshes advisories in the background.
+Background advisory reads are throttled to one request per second within each
+queue. Requests from separate tabs can occur closer together. To GitHub, that traffic is
 indistinguishable from your own browsing, and GitHub records it as it records
 any other request from your session.
 
@@ -152,8 +159,7 @@ detect changes to a confirmed value. It stores a digest of the value and does
 not provide a security guarantee.
 
 **The preserved original report comment**, at most one per advisory. It contains
-the advisory's title and description as they stood when the button was pressed,
-copied verbatim.
+the advisory's current title and description.
 
 Both are ordinary advisory comments, visible to everyone with access to the
 conversation, including the reporter. GitHub notifies advisory participants
@@ -169,11 +175,8 @@ The extension cannot delete its comments. To remove one, use GitHub's interface.
 ## What is never collected
 
 - No browsing history, and no data at all from pages outside
-  `github.com/{owner}/{repo}/security/advisories` on a repository you listed. On
-  every other page the extension reads nothing, stores nothing, and sends
-  nothing.
-- No passwords, tokens, keys, or other credentials.
-- No form contents outside its own controls.
+  `github.com/{owner}/{repo}/security/advisories` on a repository you listed.
+  Private-fork layout adjustments do not collect page contents.
 - No analytics, usage metrics, session recording, crash reports, or device,
   advertising, or user identifiers.
 - No location data.
@@ -188,11 +191,10 @@ GitHub requests described above.
 
 - **`storage`**: for the local storage described above.
 - **Access to `https://github.com/*`**: the extension's script is loaded on every
-  `github.com` page, and stops immediately on any page that is not an advisory
-  page on a repository you listed, without reading it, storing anything, or
-  sending a request. The broad match exists because GitHub replaces page content
-  without a page load. The script has to already be present to notice arriving
-  at an advisory page.
+  `github.com` page to detect navigation when GitHub replaces content without a
+  page load. Advisory features run on listed repositories' advisory pages, and
+  layout adjustments apply on their GHSA private forks. The settings button is
+  available on advisory pages for both listed and unlisted repositories.
 
 The extension requests only storage and `github.com` access. Its code runs in
 open GitHub tabs and the settings page, without a background script. It does

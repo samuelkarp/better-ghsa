@@ -21,8 +21,7 @@ Draft advisories show a patch chip: "Patch in review" when the private fork
 lists an open pull request, "No patch yet" when it does not, or "Unknown" when
 a pull request's state could not be read.
 
-An "Unknown" chip appears in place of the waiting chip when the advisory's state
-could not be read.
+An "Unknown" chip also appears when the advisory's state could not be read.
 
 Severity and CVE appear on GitHub's page outside the panel.
 
@@ -72,10 +71,9 @@ advisory.
 - **Owners**: a chip per owner with a "Remove" control, plus a text box and an
   "Add" button. Suggestions use observed organization members, falling back to
   the advisory's collaborators. Any maintainer can assign any login.
-- **Backport targets**: the same shape, suggesting release branches seen on this
-  repository, newest version first. GitHub's affected-version data can suggest
-  branches, and containerd's supported branches are not contiguous, so the
-  suggestion is not authoritative.
+- **Backport targets**: the same controls, suggesting release branches observed
+  on the repository and release branches already stored as backport targets,
+  newest version first. You can also enter a branch manually.
 - **Embargo**: an "In force" checkbox and a lift date. Clearing the checkbox
   disables the date field and retains its value until you save. Checking it
   again before saving restores the date. Saving with the embargo off clears
@@ -110,9 +108,9 @@ saves edit it. Each maintainer's save changes only their own comment.
 During a save, every control is disabled and the panel shows "Saving...".
 It then shows "Saved." or an error:
 
-- "Error: concurrent edits". Someone else wrote to this advisory between the
-  read and the write. Nothing was written and nothing you typed is lost. The
-  panel redraws with their values so you can reapply yours.
+- "Error: concurrent edits". The tracking state changed since the editor loaded
+  it. Your changes were not saved. The panel redraws with the current values so
+  you can reapply your changes.
 - "Error: update the extension". The advisory contains state from a newer
   version of the extension.
 - "Error: unparsed tracking state". See untrusted and unreadable state below.
@@ -180,7 +178,7 @@ title recovery.
 
 The "Original report" row offers a "Preserve" button, with the note "Preserve
 the title and description in a comment." Pressing it posts one comment holding
-the advisory's current title and description, verbatim, inside a collapsed
+the advisory's current title and description inside a collapsed
 block whose summary reads "Original report preserved by Better GHSA".
 
 Preserve the report before rewriting it. Afterward, the button preserves the

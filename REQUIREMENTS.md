@@ -105,21 +105,24 @@ turned back on. After saving, redraw all controls from stored state; a disabled
 embargo does not have a stored lift date. Returning a control to its stored value
 clears its staged change.
 
-Every snapshot carries a schema version. A reader that encounters a major
-version it does not understand goes read-only and reports that the extension
-needs an update.
+Every snapshot carries a schema version. Apply the trust and schema rules in
+section 4 before using it.
 
 ## 4. Trust
 
 A snapshot is honored only when its comment's author carries the `Member` or
 `Owner` badge. Security advisors are org members and are trusted.
 
-Ignore well-formed snapshots from other authors and display a warning on the
-advisory.
+Ignore snapshots without a valid sequence number and display a warning.
+For snapshots with a valid sequence number:
 
-Ignore uninterpretable snapshots from trusted authors and display a warning.
-If such a snapshot has a valid sequence number, require explicit confirmation
-before a write supersedes it.
+- Ignore state from untrusted authors and display a warning. Their schema
+  versions do not make the editor read-only.
+- For a trusted author with an unsupported major schema version, make the
+  editor read-only and report that the extension needs an update.
+- For a trusted author with a supported schema but an invalid payload, ignore
+  the state and display a warning. Require explicit confirmation before a
+  write supersedes it.
 
 The extension labels every comment in the thread by author role, distinguishing
 org members from everyone else.
@@ -162,8 +165,8 @@ suggestions require maintainer review.
 
 **Embargo.** Whether an embargo applies, and the lift date.
 
-**Closure reason.** Set once at closure, with retroactive entry supported for
-advisories closed before the extension existed. One of:
+**Closure reason.** A maintainer can set, change, or clear it, including
+retroactively on advisories closed before the extension existed. One of:
 
 - `duplicate`, carrying a pointer to the GHSA it duplicates
 - `not a vulnerability`
@@ -432,13 +435,12 @@ Support Chrome and Firefox from one codebase. Use the logged-in `github.com`
 session without requesting a token or storing credentials. Contact only
 `github.com` and do not collect telemetry.
 
-The extension acts only on listed repositories. On other repositories, it
-displays no panel or table, reads nothing, and stores nothing.
+On unlisted repositories, show only the settings button on advisory pages.
+Do not read or store advisory data or fetch advisory pages.
 
 The allowlist starts empty and is edited in settings. Apply allowlist changes
 to open pages without reloading. Every advisory list and detail page has one
-settings control, including repositories outside the allowlist. That control
-is the extension's only addition on an unlisted repository.
+settings control, including repositories outside the allowlist.
 
 On a GHSA private fork's pull request diff page (`/pull/{number}/changes` or
 `/pull/{number}/files`), the extension removes the outer width limit and extra
@@ -470,7 +472,6 @@ actions in derived state.
 
 ## 13. Out of scope for v1
 
-- Private fork surfaces, including CSS styling.
 - Review status of private-fork pull requests. The advisory page omits review
   status; reading it would require one fetch per pull request. Patch state
   treats approved and unreviewed pull requests alike.

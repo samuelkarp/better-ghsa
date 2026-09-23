@@ -73,7 +73,8 @@ clears all three. When filters exclude rows, the heading count reads
 
 Menus offer values from the displayed rows. "Closure reason" also offers
 "None" when at least one read closed advisory lacks a reason. It selects
-those advisories. Unread advisories pass every filter.
+those advisories. Filters use available values even before the advisory's detail
+page has been read. Unknown values on unread advisories pass applicable filters.
 
 "Closure reason" applies only to closed advisories. Published advisories are
 excluded whenever that filter is active, including when "None" is selected.
@@ -115,8 +116,8 @@ advisory fields remain unchanged.
 
 The row reports "Saving...", then "Saved." or an error below the controls.
 After success, the dropdown shows the saved reason. "Error: concurrent edits"
-means another maintainer wrote to the advisory between the read and write;
-your change was not applied. "Error: {owner}/{repo} is not on this extension's
+means the tracking state changed since the editor loaded it. Your changes were
+not saved. "Error: {owner}/{repo} is not on this extension's
 allowlist." means writes to that repository are refused.
 
 A closure reason can be staged and saved only after the advisory page has
@@ -124,10 +125,12 @@ been read.
 
 ## Reading and refreshing
 
-Opening this view crawls the published and closed lists, then reads each
-advisory page. A hundred completed advisories require a hundred requests,
-sent one per second through the queue shared with the open list. Rows initially
-use cached data and update as reads finish.
+Opening this view crawls the published and closed lists, then reads advisory
+pages as needed based on cache freshness. Requests use the queue shared with
+the open list in the same tab. Background advisory reads are throttled to one
+request per second within each queue.
+Requests from separate tabs can occur closer together. Rows initially use
+cached data and update as reads finish.
 
 Navigating to another repository stops collection after the current request.
 Saved progress allows collection to resume when you return.

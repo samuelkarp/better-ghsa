@@ -28,6 +28,7 @@ capture outside this repository and outside any location an assistant reads.
 The test skips when the variable is unset. When set, the test fails if the path
 is invalid or the file cannot be parsed as an advisory.
 
-The check asserts only timestamps. Its output, including failures, does not
-include captured contents. Other checks use `testdata/`. Any future test that
-reads a private capture must use the same environment variable.
+The test checks timestamps, a duration, and a timeline-event count. Assertion
+failures can display these values, but the test does not print the captured
+page. Other checks use `testdata/`. Any future test that reads a private capture
+must use the same environment variable.

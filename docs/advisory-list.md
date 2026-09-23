@@ -65,8 +65,9 @@ Their chips display the stored value.
 input" use the stronger color for maintainer action. "New activity" and
 "Awaiting reporter" use the quieter color.
 
-Filters and sorting classify "Evaluating" and "Awaiting maintainer input" as
-"Blocked on us". They classify "Awaiting reporter" as "Blocked on the reporter".
+The waiting filter prioritizes "Never reviewed", then "New activity", then who
+the stored triage value is waiting on. Sorting follows the separate group
+priorities below.
 
 **Patch**, on draft advisories. "Patch in review" means the private fork has an
 open pull request. "No patch yet" means it has none. "Unknown" means a pull
@@ -114,8 +115,9 @@ Seven filter menus are available: "Waiting", "Severity", "Owner", "State",
 as "Severity: Critical". "Any" clears that menu.
 
 Menus offer values from the displayed rows. "None" appears when at least one
-read advisory lacks a value and selects those advisories. Unread advisories
-pass every filter.
+read advisory lacks a value and selects those advisories. Filters use available
+values even before the advisory's detail page has been read. Unknown values on
+unread advisories pass applicable filters.
 
 "Patch" offers "In review" and "No patch". "Backports" offers "Outstanding"
 and "Complete". "Embargo" offers "Overdue" and "In force"; an overdue embargo
@@ -143,24 +145,27 @@ The table initially displays cached data and the list markup already on the
 page. A refresh then crawls the triage and draft lists and reads advisory pages,
 stalest first. Each read updates its row in place.
 
-The advisory list, completed view, and statistics view share one request
-queue per repository. It sends one request per second.
+The advisory list and completed view share one request queue per repository
+within a tab. The statistics view currently reads available data without
+issuing requests. Background advisory reads are throttled to one request per
+second within each queue. Requests from separate tabs can occur closer together.
 
 The heading shows "Loading..." during the list crawl and "Loading (12 left)..."
 during advisory reads. The progress chip disappears when the refresh finishes.
 
 Triage and draft advisories are refreshed when their observations are more
-than five minutes old. A new refresh starts at least five minutes after the
-previous one finishes. Leaving the repository stops the refresh after its
-current request. Returning resumes it.
+than five minutes old. Refreshes start at least five minutes apart within a
+tab. A new refresh waits until the current one finishes. Leaving the repository
+stops the refresh after its current request. Returning resumes it.
 
-Failed reads leave rows marked "Not read". The list omits failure banners.
+Failed reads leave existing cached data visible. Advisories without cached data
+remain marked "Not read". The list omits failure banners.
 
 ## On a repository the settings do not list
 
-On an unlisted repository, the extension adds nothing to the page. GitHub's
-advisory list remains visible. The extension leaves the repository's data
-unread and unstored and skips refreshes.
+On an unlisted repository, the extension adds only the settings button.
+GitHub's advisory list remains visible. The extension does not read or store
+advisory data or fetch advisory pages.
 
 Adding the repository in settings starts the extension on the page. Removing
 it stops the extension and restores GitHub's list.
