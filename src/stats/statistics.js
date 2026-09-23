@@ -55,6 +55,8 @@ if (typeof require === 'function') {
 
   const READING_TEXT = 'Reading';
 
+  const UNREAD_TEXT = 'Unread';
+
   /**
    * Statistics combine open and completed advisories already collected by the
    * list and done views (REQUIREMENTS.md section 10).
@@ -69,17 +71,29 @@ if (typeof require === 'function') {
   /**
    * Sort months chronologically and other tallies by frequency.
    * For closure reasons, missing values count as outcomes in the denominator.
-   * Other tallies compute shares among supplied values.
+   * Other tallies compute shares among supplied values. A group with
+   * `unreadCounts` has unread members outside its tally, shown in their own
+   * row and in the header total.
    *
-   * @type {readonly {
+   * @typedef {{
    *   key: string,
    *   name: string,
    *   by: 'count' | 'value',
    *   missingCounts?: boolean,
-   * }[]}
+   *   unreadCounts?: boolean,
+   * }} CountGroup
    */
+
+  /** @type {readonly CountGroup[]} */
   const COUNT_GROUPS = [
-    { key: 'reason', name: 'Closure reason', by: 'count', missingCounts: true },
+    { key: 'outcome', name: 'Outcome', by: 'count' },
+    {
+      key: 'reason',
+      name: 'Closure reason',
+      by: 'count',
+      missingCounts: true,
+      unreadCounts: true,
+    },
     { key: 'state', name: 'State', by: 'count' },
     { key: 'severity', name: 'Severity', by: 'count' },
     { key: 'month', name: 'Month', by: 'value' },
@@ -349,7 +363,7 @@ if (typeof require === 'function') {
 
   /**
    * @param {Document} doc
-   * @param {{ key: string, name: string, by: 'count' | 'value', missingCounts?: boolean }} group
+   * @param {CountGroup} group
    * @param {import('../done/stats.js').Tally} tally
    * @returns {Element}
    */
@@ -359,7 +373,8 @@ if (typeof require === 'function') {
     // Include missing values in the denominator only when the group counts
     // them as outcomes.
     const over = group.missingCounts === true ? tally.counted + tally.missing : tally.counted;
-    box.append(buildHeader(doc, group.name, `${over} of ${tally.corpus}`));
+    const unread = group.unreadCounts === true ? tally.unread : 0;
+    box.append(buildHeader(doc, group.name, `${over} of ${tally.corpus + unread}`));
 
     const list = element(doc, 'ul', 'bghsa-stats-rows');
     const entries = Object.entries(tally.counts).sort((left, right) =>
@@ -388,7 +403,13 @@ if (typeof require === 'function') {
       line.classList.add('bghsa-stats-missing');
       list.append(line);
     }
-    if (entries.length === 0 && tally.missing === 0) {
+    if (unread > 0) {
+      // Unread members have no percentage because their values are unknown.
+      const line = buildLine(doc, UNREAD_TEXT, String(unread), '—');
+      line.classList.add('bghsa-stats-unread');
+      list.append(line);
+    }
+    if (entries.length === 0 && tally.missing === 0 && unread === 0) {
       list.append(element(doc, 'li', 'Box-row bghsa-stats-empty', NOTHING_TEXT));
     }
     box.append(list);

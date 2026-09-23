@@ -502,7 +502,7 @@ test('a timing reports the spread of what it measured', () => {
   assert.strictEqual(none.max, null);
 });
 
-test('the corpus is counted by closure reason, state, severity, and month', () => {
+test('the corpus is counted by outcome, closure reason, state, severity, and month', () => {
   const summary = stats.summarize(
     corpusOf([
       member({
@@ -576,22 +576,20 @@ test('the corpus is counted by closure reason, state, severity, and month', () =
 
   assert.deepStrictEqual({ ...summary.counts.month?.counts }, { '2026-03': 2, '2026-04': 2 });
 
-  assert.deepStrictEqual(
-    { ...summary.counts.reason?.counts },
-    { 'not a vulnerability': 2, published: 2 }
-  );
-  assert.strictEqual(summary.counts.reason?.counted, 4);
-  assert.strictEqual(summary.counts.reason?.corpus, 4);
-  assert.strictEqual(summary.counts.reason?.missing, 0);
+  assert.deepStrictEqual({ ...summary.counts.outcome?.counts }, { closed: 2, published: 2 });
   assert.strictEqual(
-    summary.counts.reason?.unread,
-    0,
+    summary.counts.outcome?.counted,
+    4,
     'the list page names a publication, so the published advisory nobody read still ended'
   );
-  assert.strictEqual(summary.counts.reason?.ratios['not a vulnerability'], 0.5);
+
+  assert.deepStrictEqual({ ...summary.counts.reason?.counts }, { 'not a vulnerability': 2 });
+  assert.strictEqual(summary.counts.reason?.corpus, 2, 'only closed advisories have a reason');
+  assert.strictEqual(summary.counts.reason?.missing, 0);
+  assert.strictEqual(summary.counts.reason?.ratios['not a vulnerability'], 1);
 });
 
-test('the endings are counted over the advisories that ended', () => {
+test('outcomes count every ending, and reasons every read closure', () => {
   const summary = stats.summarize(
     corpusOf([
       member({ ghsaId: 'GHSA-aaaa-aaaa-aaaa', state: 'triage' }),
@@ -622,21 +620,27 @@ test('the endings are counted over the advisories that ended', () => {
   );
 
   assert.strictEqual(summary.corpus, 6, 'the corpus is every advisory the crawl found');
-  assert.deepStrictEqual({ ...summary.counts.reason?.counts }, { published: 1, duplicate: 1 });
-  assert.strictEqual(summary.counts.reason?.counted, 2);
+  assert.deepStrictEqual(
+    { ...summary.counts.outcome?.counts },
+    { published: 1, closed: 3 },
+    'the two still being worked are no outcome, and the closure nobody read is one'
+  );
+  assert.strictEqual(summary.counts.outcome?.corpus, 4);
+
+  assert.deepStrictEqual({ ...summary.counts.reason?.counts }, { duplicate: 1 });
   assert.strictEqual(
     summary.counts.reason?.missing,
     1,
     'the closed advisory nobody has given a reason'
   );
-  assert.strictEqual(
-    summary.counts.reason?.corpus,
-    3,
-    'the two still being worked, or the one nobody read, were counted as endings'
-  );
   // An unread closed advisory has an unknown closure reason.
   // Omit it from the metric (REQUIREMENTS.md section 10).
-  assert.strictEqual(summary.counts.reason?.unread, 1);
+  assert.strictEqual(
+    summary.counts.reason?.corpus,
+    2,
+    'the closure nobody read is outside the reasons'
+  );
+  assert.strictEqual(summary.counts.reason?.unread, 1, 'and counted beside them');
 });
 
 test('a closure reason this reader does not interpret is counted as it stands', () => {

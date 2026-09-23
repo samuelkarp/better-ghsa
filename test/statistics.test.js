@@ -431,12 +431,20 @@ test('the statistics are over the whole corpus, open and done', async () => {
     ['2026-03 3 60%', '2026-04 2 40%'],
     'and so does the month'
   );
-  assert.deepStrictEqual(countLines(doc, 'reason'), ['Published 1 50%', 'None 1 50%']);
-  assert.strictEqual(
-    textOf(doc, `#${statistics.ROOT_ID} [data-bghsa-count="reason"] .bghsa-stats-meta`),
-    '2 of 2',
-    'the endings are counted over the advisories that ended'
+  assert.deepStrictEqual(
+    Array.from(doc.querySelectorAll(`#${statistics.ROOT_ID} [data-bghsa-count]`)).map((box) =>
+      box.getAttribute('data-bghsa-count')
+    ),
+    ['outcome', 'reason', 'state', 'severity', 'month'],
+    'the outcome comes first, ahead of the closure reason'
   );
+  assert.deepStrictEqual(countLines(doc, 'outcome'), ['Closed 1 50%', 'Published 1 50%']);
+  assert.strictEqual(
+    textOf(doc, `#${statistics.ROOT_ID} [data-bghsa-count="outcome"] .bghsa-stats-meta`),
+    '2 of 2',
+    'the outcomes are counted over the advisories that ended'
+  );
+  assert.deepStrictEqual(countLines(doc, 'reason'), ['None 1 100%']);
 
   assert.deepStrictEqual(
     timingLines(doc, 'accept'),
@@ -449,7 +457,7 @@ test('the statistics are over the whole corpus, open and done', async () => {
   );
 });
 
-test('the endings list counts a close with no reason and omits one nobody read', async () => {
+test('closure reasons count a close with no reason and list the unread apart', async () => {
   const open = ghsa('kaaa');
   const publishedId = ghsa('kbbb');
   const named = ghsa('kccc');
@@ -463,7 +471,6 @@ test('the endings list counts a close with no reason and omits one nobody read',
       closed: [{ ghsaId: named }, { ghsaId: bare }, { ghsaId: unread }],
     },
     reads: [
-      { ghsaId: publishedId, state: 'Published' },
       { ghsaId: named, state: 'Closed', closureReason: 'duplicate' },
       { ghsaId: bare, state: 'Closed' },
     ],
@@ -473,15 +480,24 @@ test('the endings list counts a close with no reason and omits one nobody read',
   statsToggle(doc).click();
   await statistics.load(doc);
 
+  assert.deepStrictEqual(
+    countLines(doc, 'outcome'),
+    ['Closed 3 75%', 'Published 1 25%'],
+    'the outcomes need no read'
+  );
+  assert.strictEqual(
+    textOf(doc, `#${statistics.ROOT_ID} [data-bghsa-count="outcome"] .bghsa-stats-meta`),
+    '4 of 4'
+  );
   assert.deepStrictEqual(countLines(doc, 'reason'), [
-    'Duplicate 1 33%',
-    'Published 1 33%',
-    'None 1 33%',
+    'Duplicate 1 50%',
+    'None 1 50%',
+    'Unread 1 —',
   ]);
   assert.strictEqual(
     textOf(doc, `#${statistics.ROOT_ID} [data-bghsa-count="reason"] .bghsa-stats-meta`),
-    '3 of 3',
-    'the advisory nobody read is inside the endings'
+    '2 of 3',
+    'the closed advisory nobody read is outside the percentages and inside the total'
   );
 
   assert.deepStrictEqual(countLines(doc, 'severity'), ['High 4 100%', 'None 1 —']);
@@ -518,6 +534,15 @@ test('a half nothing has crawled says what its numbers are over', async () => {
     'Closed 1 25%',
     'Published 1 25%',
   ]);
+  assert.deepStrictEqual(
+    countLines(doc, 'reason'),
+    ['Unread 1 —'],
+    'a closure nobody read leaves only the unread row'
+  );
+  assert.strictEqual(
+    textOf(doc, `#${statistics.ROOT_ID} [data-bghsa-count="reason"] .bghsa-stats-meta`),
+    '0 of 1'
+  );
 
   const other = await repository({
     owner: 'stats-half-other',

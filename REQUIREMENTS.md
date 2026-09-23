@@ -384,17 +384,18 @@ Update the originating row after saving a closure reason.
 
 The statistics view covers all open and completed advisories.
 
-Show counts and ratios by closure reason, state, severity, and month.
+Show counts and ratios by outcome, closure reason, state, severity, and month.
 
-Closure-reason statistics cover completed advisories. Count publication as its
-own category. Count closed advisories by their stored reason, with an explicit
-category for unset reasons. Include that category in the ratios. Other counts
-exclude missing values from their ratios. Exclude triage and draft advisories
-from closure-reason statistics.
+Outcome statistics count completed advisories as published or closed.
+Closure-reason statistics cover closed advisories. Count them by their stored
+reason, with an explicit category for unset reasons. Include that category in
+the ratios. Other counts exclude missing values from their ratios. Exclude
+triage and draft advisories from outcome and closure-reason statistics.
 
-The list page establishes publication. A closure reason requires reading the
-detail page. Exclude unread closed advisories from closure-reason counts and
-ratios until their reason can be determined.
+The list page establishes publication and closure. A closure reason requires
+reading the detail page. Exclude unread closed advisories from closure-reason
+ratios until their reason can be determined, and show their count beside the
+closure reasons.
 
 Timing, reconstructed from page-observable events:
 

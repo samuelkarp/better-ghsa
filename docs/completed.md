@@ -158,15 +158,21 @@ results arrive.
 
 ### Counts
 
-Four sections show "Closure reason", "State", "Severity", and "Month". Each
-reports its sample size as "N of M". Rows show a value, its count, and its
-percentage of the sample. Missing values appear as "None" with a count. Months
-use UTC and the format `YYYY-MM`.
+Five sections show "Outcome", "Closure reason", "State", "Severity", and
+"Month". Each reports its sample size as "N of M". Rows show a value, its
+count, and its percentage of the sample. Missing values appear as "None" with a
+count. Months use UTC and the format `YYYY-MM`.
 
-"Closure reason" counts completed outcomes: "Published", each stored closure
-reason, and "None" for fetched closed advisories without a reason. All these
-rows have percentages, including "None". Open advisories and unread closed
-advisories are excluded from this section.
+"Outcome" counts completed advisories as "Published" or "Closed". The list
+page supplies both, so unread advisories are counted. Open advisories are
+excluded from this section.
+
+"Closure reason" counts closed advisories: each stored closure reason, and
+"None" for fetched closed advisories without a reason. All these rows have
+percentages, including "None". "Unread" counts closed advisories whose detail
+page has not been read, without a percentage, and appears only when there are
+any. The sample size counts fetched closed advisories out of all closed
+advisories: with 56 closed advisories, 5 of them unread, it reads "51 of 56".
 
 The other sections calculate percentages over supplied values. Their "None"
 rows show a count without a percentage.

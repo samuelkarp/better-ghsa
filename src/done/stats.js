@@ -49,8 +49,9 @@ if (typeof require === 'function') {
  * @property {number} unread The number of members without detail data.
  * @property {boolean} complete Whether every selected state crawl reached its last page.
  * @property {Record<string, number | null>} expected Counts from GitHub's state tabs.
- * @property {Record<string, Tally>} counts Tallies by reason, state, severity, and month.
- *   The reason tally covers ended advisories.
+ * @property {Record<string, Tally>} counts Tallies by outcome, reason, state, severity, and
+ *   month. The outcome tally covers published and closed advisories; the reason tally
+ *   covers read closed advisories.
  * @property {Record<string, Timing>} timings Timings keyed by TIMINGS entries.
  * @property {Record<string, string>} uncomputed Unavailable metrics and their reasons.
  */
@@ -317,9 +318,10 @@ if (typeof require === 'function') {
    * Compute statistics from the collected corpus. State, severity, and month
    * fall back to list data; reasons and timings require detail reads.
    *
-   * The reason tally includes publications and closure reasons from fetched
-   * advisories. Unread closed advisories are counted separately in `unread`.
-   * Open advisories are excluded from that tally.
+   * The outcome tally counts published and closed advisories from list data.
+   * The reason tally counts closure reasons of read closed advisories; unread
+   * closed advisories are outside its corpus and counted in its `unread`.
+   * Open advisories are excluded from both tallies.
    *
    * @param {import('./corpus.js').Corpus} held
    * @returns {Summary}
@@ -328,11 +330,12 @@ if (typeof require === 'function') {
     const over = { corpus: held.members.length, unread: held.unread.length };
 
     /** @type {(string | null)[]} */
-    const endings = [];
+    const outcomes = [];
 
-    let ended = 0;
+    /** @type {(string | null)[]} */
+    const reasons = [];
 
-    let unreadEndings = 0;
+    let unreadReasons = 0;
     /** @type {(string | null)[]} */
     const states = [];
     /** @type {(string | null)[]} */
@@ -353,15 +356,10 @@ if (typeof require === 'function') {
       const state = advisory?.state ?? member.row.state ?? member.state;
       const named = state === null ? null : state.toLowerCase();
       states.push(named);
-      if (named === PUBLISHED_STATE) {
-        ended += 1;
-        endings.push(PUBLISHED_STATE);
-      } else if (named === CLOSED_STATE) {
-        if (advisory === null) unreadEndings += 1;
-        else {
-          ended += 1;
-          endings.push(closureReasonOf(advisory));
-        }
+      if (named === PUBLISHED_STATE || named === CLOSED_STATE) outcomes.push(named);
+      if (named === CLOSED_STATE) {
+        if (advisory === null) unreadReasons += 1;
+        else reasons.push(closureReasonOf(advisory));
       }
       severities.push(advisory?.severity ?? member.row.severity);
       months.push(monthOf(advisory?.reportedAt ?? member.row.openedAt));
@@ -377,7 +375,9 @@ if (typeof require === 'function') {
       complete: held.complete,
       expected: held.expected,
       counts: {
-        reason: tally(endings, { corpus: ended, unread: unreadEndings }),
+        // The outcome needs no detail read, so no member of it is unread.
+        outcome: tally(outcomes, { corpus: outcomes.length, unread: 0 }),
+        reason: tally(reasons, { corpus: reasons.length, unread: unreadReasons }),
         state: tally(states, over),
         severity: tally(severities, over),
         month: tally(months, over),
