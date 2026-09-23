@@ -180,6 +180,17 @@ with "State: Closed" and "Closure reason: None" selected.
 "Open" counts open advisories as "Triage" or "Draft", with percentages over
 open advisories. Completed advisories are excluded from this section.
 
+"Severity" counts published advisories and drafts whose severity a maintainer
+has confirmed, the drafts with a filled severity chip in the open list. Triage
+and closed advisories are excluded, and so are drafts whose severity is
+unconfirmed or has changed since its confirmation. Rows run by level:
+"Critical", "High", "Moderate", "Low", any other level, then "None" for
+advisories without a severity. "Unread" counts drafts whose detail page has not
+been read, without a percentage, and appears only when there are any. The
+sample size counts advisories with a severity out of all of these: with 10
+published advisories, 1 of them without a severity, 3 confirmed drafts, and 1
+unread draft, it reads "12 of 14".
+
 The other sections calculate percentages over supplied values. Their "None"
 rows show a count without a percentage.
 

@@ -409,9 +409,9 @@ test(
   }
 );
 
-test('time from report to close is a timing, and nothing is left uncomputed', () => {
+test('time from report to close is a timing, and nothing is left uncomputed', async () => {
   const timeline = timelineFixture('invented-close-timeline.html');
-  const summary = stats.summarize(
+  const summary = await stats.summarize(
     corpusOf([
       member({
         ghsaId: 'GHSA-aaaa-aaaa-aaaa',
@@ -450,14 +450,14 @@ test('time from report to close is a timing, and nothing is left uncomputed', ()
   );
 });
 
-test('an advisory the event is not observable on contributes to no timing', () => {
+test('an advisory the event is not observable on contributes to no timing', async () => {
   const answered = advisory({
     reportedAt: '2026-04-01T00:00:00Z',
     comments: [comment({ author: 'samuelkarp', role: 'Member', at: '2026-04-01T01:00:00Z' })],
     timeline: [event({ at: '2026-04-01T02:00:00Z', text: 'samuelkarp accepted this report' })],
   });
   const silent = advisory({ reportedAt: '2026-04-02T00:00:00Z' });
-  const summary = stats.summarize(
+  const summary = await stats.summarize(
     corpusOf([
       member({ ghsaId: 'GHSA-aaaa-aaaa-aaaa', state: 'published', advisory: answered }),
       member({ ghsaId: 'GHSA-bbbb-bbbb-bbbb', state: 'closed', advisory: silent }),
@@ -502,8 +502,8 @@ test('a timing reports the spread of what it measured', () => {
   assert.strictEqual(none.max, null);
 });
 
-test('the corpus is counted by outcome, closure reason, severity, and month', () => {
-  const summary = stats.summarize(
+test('the corpus is counted by outcome, closure reason, severity, and month', async () => {
+  const summary = await stats.summarize(
     corpusOf([
       member({
         ghsaId: 'GHSA-aaaa-aaaa-aaaa',
@@ -562,11 +562,12 @@ test('the corpus is counted by outcome, closure reason, severity, and month', ()
 
   assert.deepStrictEqual(
     { ...summary.counts.severity?.counts },
-    { high: 2, low: 1, moderate: 1 }
+    { high: 1, moderate: 1 },
+    'the severities of the published advisories, and none of the closed'
   );
   assert.strictEqual(
     summary.counts.severity?.counted,
-    4,
+    2,
     'the list page names the severity of an advisory no read backs'
   );
 
@@ -585,8 +586,8 @@ test('the corpus is counted by outcome, closure reason, severity, and month', ()
   assert.strictEqual(summary.counts.reason?.ratios['not a vulnerability'], 1);
 });
 
-test('outcomes count every ending, and reasons every read closure', () => {
-  const summary = stats.summarize(
+test('outcomes count every ending, and reasons every read closure', async () => {
+  const summary = await stats.summarize(
     corpusOf([
       member({ ghsaId: 'GHSA-aaaa-aaaa-aaaa', state: 'triage' }),
       member({ ghsaId: 'GHSA-bbbb-bbbb-bbbb', state: 'draft' }),
@@ -645,8 +646,114 @@ test('outcomes count every ending, and reasons every read closure', () => {
   assert.strictEqual(summary.counts.reason?.unread, 1, 'and counted beside them');
 });
 
-test('a closure reason this reader does not interpret is counted as it stands', () => {
-  const summary = stats.summarize(
+test('severity counts publications and drafts whose current scoring is confirmed', async () => {
+  /**
+   * @param {string} fp The confirmed scoring fingerprint.
+   * @returns {import('../src/common/parse-detail.js').ParsedComment[]}
+   */
+  const confirming = (fp) => [
+    comment({
+      author: 'samuelkarp',
+      role: 'Member',
+      at: '2026-03-03T00:00:00Z',
+      state: {
+        betterGhsa: '1.0',
+        seq: 1,
+        by: 'samuelkarp',
+        at: '2026-03-03T00:00:00Z',
+        confirmed: { scoring: { by: 'samuelkarp', at: '2026-03-03T00:00:00Z', fp } },
+      },
+    }),
+  ];
+  /**
+   * A scored advisory: its severity selection and an empty vector field.
+   *
+   * @param {string} state
+   * @param {string} severity
+   * @param {import('../src/common/parse-detail.js').ParsedComment[]} comments
+   * @returns {import('../src/common/parse-detail.js').ParsedDetail}
+   */
+  const scored = (state, severity, comments) =>
+    advisory({
+      state,
+      severity,
+      severityField: severity,
+      severityFieldPresent: true,
+      cvssV3: '',
+      cvssV3Present: true,
+      comments,
+    });
+
+  const summary = await stats.summarize(
+    corpusOf([
+      member({ ghsaId: 'GHSA-aaaa-aaaa-aaaa', state: 'published', severity: 'low' }),
+      member({
+        ghsaId: 'GHSA-bbbb-bbbb-bbbb',
+        state: 'published',
+        advisory: advisory({ state: 'Published' }),
+      }),
+      member({
+        ghsaId: 'GHSA-cccc-cccc-cccc',
+        state: 'draft',
+        advisory: scored(
+          'Draft',
+          'critical',
+          confirming(await schema.scoringFingerprint('critical', ''))
+        ),
+      }),
+      member({
+        ghsaId: 'GHSA-dddd-dddd-dddd',
+        state: 'draft',
+        // Confirmed at high, since moved to moderate.
+        advisory: scored(
+          'Draft',
+          'moderate',
+          confirming(await schema.scoringFingerprint('high', ''))
+        ),
+      }),
+      member({
+        ghsaId: 'GHSA-eeee-eeee-eeee',
+        state: 'draft',
+        advisory: scored('Draft', 'high', []),
+      }),
+      member({ ghsaId: 'GHSA-ffff-ffff-ffff', state: 'draft', severity: 'high' }),
+      member({
+        ghsaId: 'GHSA-gggg-gggg-gggg',
+        state: 'triage',
+        advisory: scored('Triage', 'high', confirming(await schema.scoringFingerprint('high', ''))),
+      }),
+      member({
+        ghsaId: 'GHSA-hhhh-hhhh-hhhh',
+        state: 'closed',
+        advisory: scored('Closed', 'high', confirming(await schema.scoringFingerprint('high', ''))),
+      }),
+    ])
+  );
+
+  assert.deepStrictEqual(
+    { ...summary.counts.severity?.counts },
+    { low: 1, critical: 1 },
+    'the published one the list names, and the draft confirmed at its current score'
+  );
+  assert.strictEqual(
+    summary.counts.severity?.missing,
+    1,
+    'the published advisory without a severity'
+  );
+  assert.strictEqual(
+    summary.counts.severity?.corpus,
+    3,
+    'the moved, unconfirmed, triage, and closed advisories are outside the severities'
+  );
+  assert.strictEqual(
+    summary.counts.severity?.unread,
+    1,
+    'the draft nobody read cannot be judged, and is counted beside them'
+  );
+});
+
+test('a closure reason this reader does not interpret is counted as it stands', async () => {
+  const summary = await stats.summarize(
     corpusOf([
       member({
         ghsaId: 'GHSA-aaaa-aaaa-aaaa',
@@ -690,8 +797,8 @@ test('a stored reason named __proto__ is counted and sets no prototype', () => {
   assert.strictEqual(Object.getPrototypeOf(held.counts), null);
 });
 
-test('a summary says whether it is over the whole corpus', () => {
-  const partial = stats.summarize(
+test('a summary says whether it is over the whole corpus', async () => {
+  const partial = await stats.summarize(
     corpusOf([member({ ghsaId: 'GHSA-aaaa-aaaa-aaaa', state: 'published' })], {
       complete: false,
       expected: { published: 41, closed: 12 },
@@ -711,9 +818,9 @@ test('the month a report falls in is read in one zone', () => {
   assert.strictEqual(stats.monthOf('not a time'), null);
 });
 
-test('a corpus of one real advisory measures what its page carries', () => {
+test('a corpus of one real advisory measures what its page carries', async () => {
   const published = fixture('published-containerd.html');
-  const summary = stats.summarize(
+  const summary = await stats.summarize(
     corpusOf([
       member({ ghsaId: 'GHSA-6r4h-2xvq-wm93', state: 'published', advisory: published }),
     ])

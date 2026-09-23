@@ -53,7 +53,8 @@ if (typeof require === 'function') {
  * @property {Record<string, Tally>} counts Tallies by outcome, reason, open state,
  *   severity, and month. The outcome tally covers published and closed advisories; the
  *   reason tally covers read closed advisories; the open tally covers triage and draft
- *   advisories.
+ *   advisories; the severity tally covers published advisories and drafts whose scoring
+ *   a maintainer confirmed.
  * @property {Record<string, Timing>} timings Timings keyed by TIMINGS entries.
  * @property {Record<string, string>} uncomputed Unavailable metrics and their reasons.
  */
@@ -70,6 +71,8 @@ if (typeof require === 'function') {
   const PUBLISHED_STATE = 'published';
 
   const CLOSED_STATE = 'closed';
+
+  const DRAFT_STATE = 'draft';
 
   const OPEN_STATES = globalThis.bghsa.parseList.OPEN_STATES;
 
@@ -132,6 +135,19 @@ if (typeof require === 'function') {
   function closureReasonOf(advisory) {
     const merged = globalThis.bghsa.merge.mergeSnapshots(advisory.comments);
     return globalThis.bghsa.tracking.read(merged.state, NO_FINGERPRINTS).closureReason;
+  }
+
+  /**
+   * A draft's severity counts once a maintainer confirmed its current scoring,
+   * the confirmation the open table shows on its severity chip.
+   *
+   * @param {import('../common/parse-detail.js').ParsedDetail} advisory
+   * @returns {Promise<boolean>}
+   */
+  async function scoringConfirmed(advisory) {
+    const merged = globalThis.bghsa.merge.mergeSnapshots(advisory.comments);
+    const tracking = await globalThis.bghsa.tracking.readAdvisory(advisory, merged);
+    return tracking.scoring.status === 'confirmed';
   }
 
   /**
@@ -328,10 +344,14 @@ if (typeof require === 'function') {
    * Open advisories are excluded from both tallies. The open tally counts
    * triage and draft advisories by state.
    *
+   * The severity tally counts published advisories and drafts whose scoring a
+   * maintainer confirmed. Unread drafts are outside its corpus and counted in
+   * its `unread`.
+   *
    * @param {import('./corpus.js').Corpus} held
-   * @returns {Summary}
+   * @returns {Promise<Summary>}
    */
-  function summarize(held) {
+  async function summarize(held) {
     const over = { corpus: held.members.length, unread: held.unread.length };
 
     /** @type {(string | null)[]} */
@@ -345,6 +365,8 @@ if (typeof require === 'function') {
     const opens = [];
     /** @type {(string | null)[]} */
     const severities = [];
+
+    let unreadSeverities = 0;
     /** @type {(string | null)[]} */
     const months = [];
     /** @type {(number | null)[]} */
@@ -366,7 +388,13 @@ if (typeof require === 'function') {
         if (advisory === null) unreadReasons += 1;
         else reasons.push(closureReasonOf(advisory));
       }
-      severities.push(advisory?.severity ?? member.row.severity);
+      if (named === PUBLISHED_STATE) severities.push(advisory?.severity ?? member.row.severity);
+      if (named === DRAFT_STATE) {
+        if (advisory === null) unreadSeverities += 1;
+        else if (await scoringConfirmed(advisory)) {
+          severities.push(advisory.severity ?? member.row.severity);
+        }
+      }
       months.push(monthOf(advisory?.reportedAt ?? member.row.openedAt));
       firstResponses.push(durationOf(advisory, firstResponseAt));
       drafts.push(durationOf(advisory, draftAt));
@@ -384,7 +412,7 @@ if (typeof require === 'function') {
         outcome: tally(outcomes, { corpus: outcomes.length, unread: 0 }),
         reason: tally(reasons, { corpus: reasons.length, unread: unreadReasons }),
         open: tally(opens, { corpus: opens.length, unread: 0 }),
-        severity: tally(severities, over),
+        severity: tally(severities, { corpus: severities.length, unread: unreadSeverities }),
         month: tally(months, over),
       },
       timings: {

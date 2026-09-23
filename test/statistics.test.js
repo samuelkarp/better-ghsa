@@ -156,31 +156,46 @@ function listHtml(page) {
  *   reportedAt?: string,
  *   timeline?: readonly { at: string, text: string }[],
  *   closureReason?: string,
+ *   confirmedScoring?: string,
  * }} fields
- * @returns {unknown}
+ * @returns {unknown} The record, with a snapshot holding a closure reason and a
+ *   scoring confirmation when either is supplied. A confirmed scoring is the
+ *   severity selection with an empty vector field.
  */
 function stored(fields) {
+  const severity = fields.severity ?? 'high';
+  /** @type {Record<string, unknown> | null} */
+  let snapshot = null;
+  if (fields.closureReason !== undefined || fields.confirmedScoring !== undefined) {
+    snapshot = { betterGhsa: '1.0', seq: 1, by: 'samuelkarp', at: '2026-04-06T00:00:00Z' };
+    if (fields.closureReason !== undefined) snapshot.closure = { reason: fields.closureReason };
+    if (fields.confirmedScoring !== undefined) {
+      snapshot.confirmed = {
+        scoring: { by: 'samuelkarp', at: '2026-04-06T00:00:00Z', fp: fields.confirmedScoring },
+      };
+    }
+  }
   return {
     ref: { ...fields.ref, ghsaId: fields.ghsaId },
     ghsaId: fields.ghsaId,
     state: fields.state,
-    severity: fields.severity ?? 'high',
+    severity,
     severityLabel: null,
     severityClass: null,
     reportedAt: fields.reportedAt ?? '2026-03-02T00:00:00Z',
     reporter: 'prakleumas',
     title: `Title ${fields.ghsaId}`,
     description: null,
-    severityField: null,
-    severityFieldPresent: false,
-    cvssV3: null,
-    cvssV3Present: false,
+    severityField: fields.confirmedScoring === undefined ? null : severity,
+    severityFieldPresent: fields.confirmedScoring !== undefined,
+    cvssV3: fields.confirmedScoring === undefined ? null : '',
+    cvssV3Present: fields.confirmedScoring !== undefined,
     cveId: null,
     cveSelection: null,
     descriptionOriginal: null,
     descriptionRevision: null,
     comments:
-      fields.closureReason === undefined
+      snapshot === null
         ? []
         : [
             {
@@ -192,15 +207,7 @@ function stored(fields) {
               at: '2026-04-06T00:00:00Z',
               trusted: true,
               text: '',
-              stateComment: schema.readSnapshot(
-                JSON.stringify({
-                  betterGhsa: '1.0',
-                  seq: 1,
-                  by: 'samuelkarp',
-                  at: '2026-04-06T00:00:00Z',
-                  closure: { reason: fields.closureReason },
-                })
-              ),
+              stateComment: schema.readSnapshot(JSON.stringify(snapshot)),
             },
           ],
     timeline: (fields.timeline ?? []).map((event, index) => ({
@@ -236,6 +243,7 @@ function ghsa(suffix) {
  *     reportedAt?: string,
  *     timeline?: readonly { at: string, text: string }[],
  *     closureReason?: string,
+ *     confirmedScoring?: string,
  *   }[],
  *   crawl?: readonly ('open' | 'done')[],
  *   showing?: string,
@@ -425,11 +433,6 @@ test('the statistics are over the whole corpus, open and done', async () => {
     ['Open', '3 of 3']
   );
   assert.deepStrictEqual(
-    countLines(doc, 'severity'),
-    ['High 4 80%', 'Low 1 20%'],
-    'the severity comes off the list row where no read backs it'
-  );
-  assert.deepStrictEqual(
     countLines(doc, 'month'),
     ['2026-03 3 60%', '2026-04 2 40%'],
     'and so does the month'
@@ -502,11 +505,56 @@ test('closure reasons count a close with no reason and list the unread apart', a
     '2 of 3',
     'the closed advisory nobody read is outside the percentages and inside the total'
   );
+});
 
-  assert.deepStrictEqual(countLines(doc, 'severity'), ['High 4 100%', 'None 1 —']);
+test('severities run by level over publications and confirmed drafts', async () => {
+  const confirmed = ghsa('naaa');
+  const unread = ghsa('nccc');
+  /** @type {Named[]} */
+  const published = [
+    ...['nd01', 'nd02', 'nd03'].map((id) => ({ ghsaId: ghsa(id), severity: 'Low' })),
+    ...['nd04', 'nd05'].map((id) => ({ ghsaId: ghsa(id), severity: 'Moderate' })),
+    { ghsaId: ghsa('nd06'), severity: 'Critical' },
+    // A level this reader does not rank, most frequent of all.
+    ...['nd07', 'nd08', 'nd09', 'nd10'].map((id) => ({ ghsaId: ghsa(id), severity: 'Extreme' })),
+    { ghsaId: ghsa('nd11'), severity: null },
+  ];
+  const { doc } = await repository({
+    owner: 'stats-severity',
+    states: {
+      draft: [
+        { ghsaId: confirmed, severity: 'High' },
+        { ghsaId: unread, severity: 'Critical' },
+      ],
+      published,
+    },
+    reads: [
+      {
+        ghsaId: confirmed,
+        state: 'Draft',
+        severity: 'high',
+        confirmedScoring: await schema.scoringFingerprint('high', ''),
+      },
+    ],
+    crawl: ['open', 'done'],
+  });
+
+  statsToggle(doc).click();
+  await statistics.load(doc);
+
+  assert.deepStrictEqual(countLines(doc, 'severity'), [
+    'Critical 1 9%',
+    'High 1 9%',
+    'Moderate 2 18%',
+    'Low 3 27%',
+    'Extreme 4 36%',
+    'None 1 —',
+    'Unread 1 —',
+  ]);
   assert.strictEqual(
     textOf(doc, `#${statistics.ROOT_ID} [data-bghsa-count="severity"] .bghsa-stats-meta`),
-    '4 of 5'
+    '11 of 13',
+    'the unset and unread severities are inside the total and outside the percentages'
   );
 });
 

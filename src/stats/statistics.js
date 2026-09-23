@@ -5,6 +5,7 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
 // The manifest orders content scripts; under Node the dependencies are named here.
 if (typeof require === 'function') {
   require('../common/dom.js');
+  require('../common/order.js');
   require('../common/chips.js');
   require('../common/cache.js');
   require('../common/crawl.js');
@@ -33,6 +34,8 @@ if (typeof require === 'function') {
  * @property {{ owner: string, repo: string } | null} ref The repository for both groups, or
  *   null before a successful read.
  * @property {Half[]} halves
+ * @property {import('../done/stats.js').Summary | null} summary Statistics over both groups,
+ *   or null before a successful read.
  */
 
 (() => {
@@ -69,7 +72,8 @@ if (typeof require === 'function') {
   ];
 
   /**
-   * Sort months chronologically and other tallies by frequency.
+   * Sort months chronologically, severities by level, and other tallies by
+   * frequency.
    * For closure reasons, missing values count as outcomes in the denominator.
    * Other tallies compute shares among supplied values. A group with
    * `unreadCounts` has unread members outside its tally, shown in their own
@@ -79,7 +83,7 @@ if (typeof require === 'function') {
    * @typedef {{
    *   key: string,
    *   name: string,
-   *   by: 'count' | 'value',
+   *   by: 'count' | 'value' | 'level',
    *   missingCounts?: boolean,
    *   unreadCounts?: boolean,
    *   missingOpens?: boolean,
@@ -98,7 +102,7 @@ if (typeof require === 'function') {
       missingOpens: true,
     },
     { key: 'open', name: 'Open', by: 'count' },
-    { key: 'severity', name: 'Severity', by: 'count' },
+    { key: 'severity', name: 'Severity', by: 'level', unreadCounts: true },
     { key: 'month', name: 'Month', by: 'value' },
   ];
 
@@ -144,7 +148,7 @@ if (typeof require === 'function') {
     const found = held.get(doc);
     if (found !== undefined) return found;
     /** @type {Held} */
-    const fresh = { ref: null, halves: [] };
+    const fresh = { ref: null, halves: [], summary: null };
     held.set(doc, fresh);
     return fresh;
   }
@@ -163,7 +167,7 @@ if (typeof require === 'function') {
     const here = refOf(doc);
     if (here !== null && table.refKey(here) === table.refKey(state.ref)) return state;
     /** @type {Held} */
-    const fresh = { ref: null, halves: [] };
+    const fresh = { ref: null, halves: [], summary: null };
     held.set(doc, fresh);
     return fresh;
   }
@@ -229,7 +233,7 @@ if (typeof require === 'function') {
     const crawl = globalThis.bghsa.crawl;
     const parsed = globalThis.bghsa.table.pageOf(doc);
     if (parsed === null || parsed.owner === null || parsed.repo === null) {
-      return { ref: null, halves: [] };
+      return { ref: null, halves: [], summary: null };
     }
     const ref = { owner: parsed.owner, repo: parsed.repo };
     const at = globalThis.bghsa.cache.now();
@@ -259,7 +263,7 @@ if (typeof require === 'function') {
         walked: half.states.some((state) => crawl.walkOf(list, state).started),
       });
     }
-    return { ref, halves };
+    return { ref, halves, summary: await globalThis.bghsa.stats.summarize(whole(halves)) };
   }
 
   /**
@@ -380,10 +384,13 @@ if (typeof require === 'function') {
     box.append(buildHeader(doc, group.name, `${over} of ${tally.corpus + unread}`));
 
     const list = element(doc, 'ul', 'bghsa-stats-rows');
+    const rank = globalThis.bghsa.order.severityRank;
     const entries = Object.entries(tally.counts).sort((left, right) =>
       group.by === 'value'
         ? left[0].localeCompare(right[0])
-        : right[1] - left[1] || left[0].localeCompare(right[0])
+        : (group.by === 'level' ? rank(right[0]) - rank(left[0]) : 0) ||
+          right[1] - left[1] ||
+          left[0].localeCompare(right[0])
     );
     for (const [value, count] of entries) {
       list.append(
@@ -456,11 +463,10 @@ if (typeof require === 'function') {
    * metrics (REQUIREMENTS.md section 10).
    *
    * @param {Document} doc
-   * @param {readonly Half[]} halves
+   * @param {import('../done/stats.js').Summary} summary
    * @returns {Element[]}
    */
-  function buildStats(doc, halves) {
-    const summary = globalThis.bghsa.stats.summarize(whole(halves));
+  function buildStats(doc, summary) {
     /** @type {Element[]} */
     const parts = [];
 
@@ -519,7 +525,7 @@ if (typeof require === 'function') {
     header.append(exportControl);
     box.append(header);
 
-    if (state.ref === null || corpus.members.length === 0) {
+    if (state.ref === null || state.summary === null || corpus.members.length === 0) {
       box.append(element(doc, 'div', 'Box-body bghsa-stats-empty', EMPTY_TEXT));
       root.append(box);
       return root;
@@ -527,7 +533,7 @@ if (typeof require === 'function') {
 
     box.append(buildOver(doc, state.halves));
     root.append(box);
-    for (const part of buildStats(doc, state.halves)) root.append(part);
+    for (const part of buildStats(doc, state.summary)) root.append(part);
     return root;
   }
 

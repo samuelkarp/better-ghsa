@@ -396,6 +396,15 @@ triage and draft advisories from outcome and closure-reason statistics.
 Open-state statistics count open advisories as triage or draft, with ratios
 over open advisories.
 
+Severity statistics cover published advisories and drafts whose scoring a
+maintainer has confirmed at its current value, the confirmation behind the
+filled severity chip of section 9. Exclude triage and closed advisories,
+unconfirmed drafts, and drafts whose scoring has changed since its
+confirmation. Order severities by level: critical, high, moderate, low, any
+other level, then unset. Judging a draft's confirmation requires reading its
+detail page. Exclude unread drafts from severity ratios and show their count
+beside the severities.
+
 The list page establishes publication and closure. A closure reason requires
 reading the detail page. Exclude unread closed advisories from closure-reason
 ratios until their reason can be determined, and show their count beside the
