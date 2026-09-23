@@ -18,10 +18,6 @@ const allowlist = require('../src/common/allowlist.js');
 
 const { fakeStorage } = require('../test-support/storage.js');
 
-// The list of repositories the extension acts on is stored rather than compiled
-// in, and is empty on a fresh install. The fixtures here are that repository's,
-// so the list is put in place and read before the first test, which is what the
-// extension itself does before it takes a page.
 test.before(async () => {
   allowlist.setStorage({
     get: async () => ({ [allowlist.STORAGE_KEY]: ['git-utensils/spoon-knife'] }),
@@ -30,39 +26,22 @@ test.before(async () => {
   await allowlist.load();
 });
 
-/** The moment every render in this file reads the page at. */
 const AT = Date.parse('2026-08-26T12:00:00Z');
 
-/** The moment the cached advisory reads in this file were taken at. */
 const OBSERVED = Date.parse('2026-08-26T10:00:00Z');
 
-/**
- * The clock every render and every queue here reads. A refresh moves it, so it
- * is a variable rather than a constant, and a test that moves it puts it back.
- */
 let clockAt = AT;
 
 cache.setClock(() => clockAt);
 
-// The queue and the crawl turn a fetched page into a document the way a content
-// script does. Nothing in this file reaches the network: every response is a
-// string a test wrote.
 globalThis.DOMParser = /** @type {typeof globalThis.DOMParser} */ (
   /** @type {unknown} */ (DOMParser)
 );
 
 const MINUTE = 60 * 1000;
 
-/** The repository both list fixtures come from. */
 const REF = { owner: 'git-utensils', repo: 'Spoon-Knife' };
 
-/**
- * The page these tests run on. Every pass asks the gate whether the extension
- * runs here, and the gate reads the path. The documents below carry invented
- * repositories so that each one gets a refresh queue of its own, and what GitHub
- * has put in the frame is not what the path says: a soft navigation replaces the
- * frame's contents and the surface reads the repository off them.
- */
 globalThis.location = /** @type {Location} */ (
   /** @type {unknown} */ ({ pathname: `/${REF.owner}/${REF.repo}/security/advisories` })
 );
@@ -76,9 +55,6 @@ function fixture(name) {
 }
 
 /**
- * The list fixture inside the frame GitHub replaces on a soft navigation, which
- * is what the observer watches and what a re-render has to survive.
- *
  * @param {string} name
  * @returns {Document}
  */
@@ -93,9 +69,6 @@ function listPage(name) {
 }
 
 /**
- * One advisory as the cache holds it: a parsed detail page, put through JSON the
- * way `browser.storage.local` puts it.
- *
  * @param {string} name
  * @returns {unknown}
  */
@@ -107,7 +80,6 @@ function storedAdvisory(name) {
   return JSON.parse(JSON.stringify(record));
 }
 
-/** The one parse of each large fixture in this file. */
 const TRIAGE_RECORD = storedAdvisory('triage-thread.html');
 const DRAFT_RECORD = storedAdvisory('draft.html');
 
@@ -151,9 +123,7 @@ function textOf(scope, selector) {
 }
 
 /**
- * How one rendered chip is colored: every class on it other than `Label`, in
- * the order the chip carries them. A chip with nothing but `Label` answers
- * empty, which no chip the table draws does.
+ * Return chip classes other than the shared Label class.
  *
  * @param {Element} label
  * @returns {string}
@@ -166,10 +136,7 @@ function chipColor(label) {
 }
 
 /**
- * Every chip under one row's title, as one line. Each names in brackets exactly
- * which classes color it, so one string covers what the chips read and how each
- * one is painted, and a chip painted the wrong color fails rather than passing
- * on being painted at all.
+ * Format each chip as text followed by its classes in brackets.
  *
  * @param {Element} row
  * @returns {string}
@@ -185,9 +152,7 @@ function chipLine(row) {
 
 /**
  * @param {Element} row
- * @returns {string[]} what each cell beside the main column holds, in the order
- *   the row draws them. The main column is the first child, so the cells are
- *   what follows it.
+ * @returns {string[]} The columns after the title, in display order.
  */
 function cellsOf(row) {
   return Array.from(row.children)
@@ -256,14 +221,12 @@ test("a triage row carries what GitHub's row carried, from the list markup alone
   const state = textOf(row, '.bghsa-list-state');
   assert.ok(state === 'Triage', `state: ${state}`);
 
-  // GitHub paints this row's own severity chip `Label--orange`, and the table
-  // reuses that class rather than deriving one from the word `high`. Nobody has
-  // confirmed the scoring, so it is dimmed.
+  // The fixture supplies Label--orange. The scoring is unconfirmed,
+  // which adds bghsa-dim.
   const chips = chipLine(row);
   assert.ok(chips === 'High[Label--orange bghsa-dim]', `chips with nothing read: ${chips}`);
 
-  // The list markup says when GitHub's row was seen, not when the advisory
-  // behind it was read, and no advisory read backs this row.
+  // Seeing a list row does not count as reading the advisory.
   const observed = textOf(row, '.bghsa-list-observed');
   assert.ok(observed === 'Not read', `observed: ${observed}`);
 
@@ -295,9 +258,8 @@ test('a cached advisory read fills the triage row', async () => {
   assert.ok(title === 'samuelkarp', `owner avatar title: ${title}`);
   const width = avatar.getAttribute('width');
   assert.ok(width === '20', `owner avatar width: ${width}`);
-  // An owner login arrives with no account id beside it, so the icon is asked
-  // for by login. GitHub redirects that to the id-keyed avatar the captures
-  // carry, at twice the drawn size.
+  // Snapshots store owner logins. GitHub redirects login-based avatar URLs
+  // to account-ID URLs.
   const src = avatar.getAttribute('src');
   assert.ok(
     src === 'https://github.com/samuelkarp.png?size=40',
@@ -309,12 +271,8 @@ test('a cached advisory read fills the triage row', async () => {
 });
 
 /**
- * The same record with a scoring confirmation added to the snapshot one comment
- * holds. The snapshot is stored as the JSON text of the comment, so the
- * confirmation goes in there, where a maintainer's own write would have put it.
- *
  * @param {unknown} record
- * @param {string} commentId Which comment's snapshot gains it.
+ * @param {string} commentId The comment ID to update.
  * @param {Record<string, string>} scoring
  * @returns {unknown}
  */
@@ -336,9 +294,7 @@ test('a severity a maintainer confirmed reads confirmed on a cached row', async 
   const stored = /** @type {import('../src/common/parse-detail.js').ParsedDetail} */ (
     TRIAGE_RECORD
   );
-  // A scoring confirmation binds to the severity selection and the vector
-  // together, and it is the trusted comment's snapshot that carries it: the
-  // Member's, id 282847.
+  // Scoring confirmation covers both severity and vector in trusted comment 282847.
   const record = withScoringConfirmed(TRIAGE_RECORD, '282847', {
     by: 'samuelkarp',
     at: '2026-08-25T18:04:11Z',
@@ -348,13 +304,6 @@ test('a severity a maintainer confirmed reads confirmed on a cached row', async 
   const doc = listPage('list-page-triage.html');
   await render(doc, { [keyFor('GHSA-jmvx-2wfw-xfgj')]: entryOf(record, 'triage') });
 
-  // The row is built from the stored copy of the advisory, so the confirmation
-  // is read against the two values that copy carries.
-  //
-  // The confirmation rides on the severity chip and on no other, so it is that
-  // chip this reads: the one the row marks as the severity's. It carries the
-  // level alone, painted in the advisory's own severity color, and the chips
-  // beside it are left to the cached read above.
   const row = /** @type {Element} */ (tableRows(doc)[0]);
   const severity = Array.from(
     one(row, '.bghsa-list-chips').querySelectorAll(
@@ -376,11 +325,9 @@ test('a score whose vector moved since it was confirmed reads unconfirmed on a c
   );
 
   /**
-   * What the cached row's severity chip reads and how it is painted, for the
-   * Member's confirmation taken against one vector. The chip is found by the
-   * mark the row puts on it and by nothing else.
+   * Render the severity chip with a confirmation for the supplied vector.
    *
-   * @param {string | null} vector What the confirmation was taken against.
+   * @param {string | null} vector The confirmed vector.
    * @returns {Promise<string>}
    */
   const severityChipFor = async (vector) => {
@@ -408,22 +355,10 @@ test('a score whose vector moved since it was confirmed reads unconfirmed on a c
     return /** @type {string} */ (found[0]);
   };
 
-  // The advisory the fixture holds scores its impact on confidentiality. Taken
-  // against that vector the confirmation binds to the score the stored read
-  // carries; taken against a vector that scores the impact on integrity it
-  // binds to one the stored read no longer carries. The severity selection is
-  // the same in both, so the vector is the whole of the difference.
+  // Change only the vector to invalidate the scoring confirmation.
   const bound = await severityChipFor(stored.cvssV3);
   const moved = await severityChipFor('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:N');
 
-  // A score that moved after it was confirmed leaves the severity chip where a
-  // score nobody has confirmed leaves it: the level named as unconfirmed, and
-  // dimmed. Naming who confirmed the earlier score is the detail panel's job.
-  //
-  // The chip the confirmation still binds to is read beside it, because the
-  // row draws the same unconfirmed chip for a confirmation that never reached
-  // it at all. Where the two agree, the moved vector is not what this is
-  // reading.
   assert.ok(
     moved === 'High, unconfirmed[Label--orange bghsa-dim]' && bound !== moved,
     `the severity chip bound to the stored score: ${bound};` +
@@ -435,8 +370,6 @@ test('the cells beside a row are the owners, the state, and the observation', as
   const doc = listPage('list-page-triage.html');
   await render(doc, { [keyFor('GHSA-jmvx-2wfw-xfgj')]: entryOf(TRIAGE_RECORD, 'triage') });
 
-  // The completed list ends on the same two cells, so the state and the
-  // observation stand in one place across both views.
   const row = /** @type {Element} */ (tableRows(doc)[0]);
   assert.deepStrictEqual(cellsOf(row), ['owners', 'state', 'observed']);
 });
@@ -445,9 +378,7 @@ test('an owner login is encoded the same way in the link and the avatar', () => 
   const doc = /** @type {Document} */ (
     /** @type {unknown} */ (parseHTML('<!doctype html><html><body></body></html>').document)
   );
-  // The login comes from a state comment, which is text anyone who can comment
-  // on the advisory can write. It reaches the page twice from one string, so
-  // both places encode it the same way.
+  // Logins from state comments require escaping in both avatar and profile URLs.
   const box = table.buildOwners(doc, ['a b/c?d#e']);
   const link = one(box, 'a');
   const href = link.getAttribute('href');
@@ -459,7 +390,6 @@ test('an owner login is encoded the same way in the link and the avatar', () => 
   );
 });
 
-/** One open pull request on the private fork, as a cached read holds it. */
 const OPEN_PATCH = {
   cloneUrl: null,
   repository: 'git-utensils/Spoon-Knife-ghsa-fork',
@@ -481,7 +411,7 @@ const OPEN_PATCH = {
 
 /**
  * @param {unknown} record A cached advisory read.
- * @param {unknown} fork What its private fork holds.
+ * @param {unknown} fork The replacement fork.
  * @returns {unknown} that read with its fork replaced, leaving the original as
  *   it was.
  */
@@ -508,9 +438,7 @@ function chipsIn(doc) {
 }
 
 test('the stylesheet carries a rule for every color the chips invent', () => {
-  // Primer paints the classes GitHub's own chips carry. These are the
-  // extension's own, so a chip carrying one and no rule defining it would draw
-  // as though it carried no color at all.
+  // Extension tone classes require stylesheet rules.
   for (const name of [
     'bghsa-tone-attention',
     'bghsa-tone-danger',
@@ -524,12 +452,6 @@ test('the stylesheet carries a rule for every color the chips invent', () => {
 });
 
 test('the patch chips stand on a draft and the state chip stays dimmed', async () => {
-  // Five renders, each differing from another in one thing: the state, what the
-  // fork holds, and whether anything was read at all. The draft and the triage
-  // advisory are rendered over the same open pull request, so a chip that read
-  // the fork and ignored the state would show up here, and the draft is
-  // rendered both with a patch and without, so one that read the state and
-  // ignored the fork would too.
   const unread = listPage('list-page-draft.html');
   await render(unread);
   assert.ok(chipsIn(unread) === '', `a draft nothing has been read on: ${chipsIn(unread)}`);
@@ -566,9 +488,7 @@ test('the patch chips stand on a draft and the state chip stays dimmed', async (
     `the state chip on a draft under patch: ${stateChipColor(patched)}`
   );
 
-  // The same open pull request the draft above was painted for, on an advisory
-  // in triage. No patch is owed until the advisory is accepted, so neither the
-  // patch nor its absence puts a chip on the row.
+  // Patch chips apply to draft advisories.
   const triage = listPage('list-page-triage.html');
   await render(triage, {
     [keyFor('GHSA-jmvx-2wfw-xfgj')]: entryOf(withFork(TRIAGE_RECORD, OPEN_PATCH), 'triage'),
@@ -659,8 +579,6 @@ test('a surface beside the table gets a place on the bar and every view change',
   try {
     const doc = listPage('list-page-triage.html');
     await render(doc);
-    // Placed once the table is in the document, so a surface drawing into the
-    // bar finds it.
     assert.ok(
       one(doc, '.probe-control').closest(`#${table.ROOT_ID} .bghsa-list-bar`) !== null,
       'the control sits on the bar'
@@ -684,8 +602,6 @@ test('a surface beside the table gets a place on the bar and every view change',
       "the GitHub toggle still offers GitHub's view"
     );
 
-    // Every view is reachable from every other: the surface gives way to
-    // GitHub's view, and GitHub's view gives the table back.
     toggleIn(doc).click();
     assert.strictEqual(table.viewMode(doc), table.VIEW_NATIVE, 'the surface gave way');
     assert.ok(!nativeBox.classList.contains(table.HIDDEN_CLASS), "GitHub's view is back");
@@ -719,7 +635,6 @@ test('a render after GitHub replaced the subtree puts the table back', async () 
   const doc = listPage('list-page-triage.html');
   await render(doc);
 
-  // A soft navigation replaces the frame contents, and the table goes with them.
   const frame = one(doc, '#repo-content-turbo-frame');
   const fresh = /** @type {Document} */ (
     /** @type {unknown} */ (parseHTML(`<div>${fixture('list-page-triage.html')}</div>`).document)
@@ -766,17 +681,12 @@ test('parse-list cannot read the table the extension inserts', async () => {
   assert.ok(after.tabs.length === before.tabs.length, `tabs re-read: ${after.tabs.length}`);
   assert.ok(after.next === null, 'the table adds no next page');
 
-  // The parser keys on these three inside `div#advisories`. The table carries
-  // none of them, which is what keeps a re-read from taking its rows for
-  // GitHub's own.
+  // Extension rows must omit the selectors used to identify GitHub list rows.
   const matched = root.querySelectorAll(table.PARSED_SELECTORS.join(', ')).length;
   assert.ok(matched === 0, `nodes in the table the parser would read: ${matched}`);
 });
 
 test('the CVE a row carries is the one the advisory read names', async () => {
-  // The list row is where a maintainer sees that an advisory has a CVE, or has
-  // asked for one. The chip is built from the row's field, so a field the read
-  // does not fill leaves the table silent on every advisory that has one.
   /** @type {Array<[string, Record<string, unknown>, string | null]>} */
   const wanted = [
     ['GHSA-aaaa-aaaa-aaaa', { cveId: 'CVE-2026-12345' }, 'CVE-2026-12345'],
@@ -901,8 +811,6 @@ test('a chip stands for a condition that holds and is absent when it does not', 
   const none = chipsOf();
   assert.ok(none === '', `a row with nothing to say: ${none}`);
 
-  // A stored value is read off the advisory's own page, so a row nothing has
-  // been read on carries no waiting chip whatever it holds.
   const unread = chipsOf({ triage: 'evaluating' });
   assert.ok(unread === '', `a row nothing has been read on: ${unread}`);
 
@@ -924,8 +832,6 @@ test('a chip stands for a condition that holds and is absent when it does not', 
     `what a maintainer owes is loud: ${evaluating}`
   );
 
-  // The two values a maintainer owes the next move on read apart, which is what
-  // a row saying `Blocked on us` for both of them cannot do.
   const asked = chipsOf({ read: true, triage: 'awaiting maintainer input' });
   assert.ok(
     asked === 'Awaiting maintainer input[danger]',
@@ -938,8 +844,7 @@ test('a chip stands for a condition that holds and is absent when it does not', 
     `what the reporter owes is quieter: ${reporter}`
   );
 
-  // What the reporter did since the value was set is not in the value, so both
-  // chips stand, the derivation first.
+  // New reporter activity adds a derived chip before the stored triage value.
   const both = chipsOf({ read: true, newActivity: true, triage: 'evaluating' });
   assert.ok(
     both === 'New activity[attention] | Evaluating[danger]',
@@ -957,25 +862,18 @@ test('the severity chip marks the unconfirmed case and no other', () => {
     `severity nobody confirmed: ${unconfirmed}`
   );
 
-  // The confirmed case is the ordinary one, so the chip is the level alone,
-  // filled with the color the level carries.
   const confirmed = chipsOf({ read: true, severityLabel: 'Low', severityConfirmed: true });
   assert.ok(
     confirmed === 'Blocked on us[danger] | Low[fill]',
     `severity a maintainer confirmed: ${confirmed}`
   );
 
-  // With no severity set there is no chip, and the confirmation gets none of
-  // its own: the panel is where a confirmation is read.
   const noSeverity = chipsOf({ read: true, severityConfirmed: true });
   assert.ok(noSeverity === 'Blocked on us[danger]', `no severity set: ${noSeverity}`);
 });
 
 test('the severity chip takes the class GitHub painted, not one off the level', () => {
-  // The level is deliberately at odds with the class, which is a pairing no
-  // level-to-color table would produce: GitHub paints critical one way and this
-  // row carries the class it paints high with. What comes out is the class the
-  // row carried, so the color is read off GitHub's chip and never derived.
+  // Pair Critical with Label--orange to check that the supplied class is preserved.
   const carried = chipsOf({
     read: true,
     severityLabel: 'Critical',
@@ -993,8 +891,6 @@ test('the severity chip takes the class GitHub painted, not one off the level', 
     `the same class, held back while nobody has confirmed it: ${dimmed}`
   );
 
-  // A severity chip GitHub carried no modifier on leaves nothing to reuse, and
-  // the extension paints nothing of its own in its place.
   const bare = chipsOf({ read: true, severityLabel: 'Critical', severityConfirmed: true });
   assert.ok(
     bare === 'Blocked on us[danger] | Critical[fill]',
@@ -1003,8 +899,6 @@ test('the severity chip takes the class GitHub painted, not one off the level', 
 });
 
 test('a confirmed severity is drawn filled and an unconfirmed one is not', () => {
-  // One level and one color over two rows, so what differs between the chips
-  // drawn can only be the confirmation.
   const { doc } = tableOver([
     sortRow('GHSA-aaaa-aaaa-aaaa', {
       read: true,
@@ -1040,8 +934,6 @@ test('the CVE, patch, backport, and embargo chips read what the advisory holds',
 
   const draft = { read: true, state: 'Draft' };
 
-  // A patch nobody has written and one under review are both where the work
-  // stands, and part in how loud they are.
   const none = chipsOf({ ...draft, patch: 'No patch yet' });
   assert.ok(
     none === 'Blocked on us[danger] | No patch yet[danger]',
@@ -1054,12 +946,10 @@ test('the CVE, patch, backport, and embargo chips read what the advisory holds',
     `a patch under review: ${inReview}`
   );
 
-  // A pull request this reader could not judge leaves the fork holding one, so
-  // the row says neither that a patch is under review nor that none exists.
+  // An unrecognized pull request state makes patch status unknown.
   const unjudged = chipsOf({ ...draft, patch: 'Unknown' });
   assert.ok(unjudged === 'Blocked on us[danger] | Unknown', `a patch state nobody read: ${unjudged}`);
 
-  // The same three forks on an advisory in triage, which is owed no patch.
   for (const held of [
     { patch: 'No patch yet' },
     { patch: 'Patch in review' },
@@ -1096,9 +986,7 @@ test('the CVE, patch, backport, and embargo chips read what the advisory holds',
     `an embargo with no date: ${undated}`
   );
 
-  // A row carries no labels, so the chip names the embargo and says where it
-  // stands. The date parts the overdue chip from the one in force, because a
-  // tone never carries a fact the chip's words leave out.
+  // Embargo chips must express overdue status in text as well as color.
   const overdue = chipsOf({ read: true, embargo: true, embargoLift: '2026-08-01', embargoOverdue: true });
   assert.ok(
     overdue === 'Blocked on us[danger] | Embargo overdue since 2026-08-01[danger]',
@@ -1121,12 +1009,8 @@ function branchesOf(branches) {
   };
 }
 
-// The fork holds four branches: one whose pull request has merged, two holding
-// an open pull request, and one whose pull request was closed. Counting merged
-// branches gives one and counting open branches gives two, so a fixture that
-// answers 2 answers only under the open rule. REQUIREMENTS.md section 6 has the
-// merged branch be unobservable in the first place, and the count measures how
-// many backports have been prepared.
+// GitHub lists only open fork pull requests. Backport progress counts
+// prepared targets (REQUIREMENTS.md section 6).
 test('backport progress counts the targets holding an open pull request', () => {
   const patch = branchesOf([
     { branch: 'release/1.0', open: false },
@@ -1159,10 +1043,6 @@ test('a page that is not an advisory list gets no table', async () => {
 });
 
 /**
- * One page of the advisory list for a repository this file invents, in the
- * shape `parse-list` reads. The repository differs per test so that no two
- * tests share a refresh queue.
- *
  * @param {{ owner: string, repo: string, state: string, ids: readonly string[], next?: string }} page
  * @returns {string}
  */
@@ -1196,10 +1076,6 @@ function listHtml(page) {
 }
 
 /**
- * The smallest document `parse-detail` reads as an advisory: the header meta
- * carrying the state, the severity, and the identifier. A row filled in from
- * one of these carries what a read supplies and nothing the fixtures add.
- *
  * @param {string} ghsaId
  * @param {string} state
  * @param {string} [severity]
@@ -1234,8 +1110,6 @@ function storedDetail(ghsaId, state, severity) {
 }
 
 /**
- * A fetch that answers from a table of pages and records what was asked for.
- *
  * @param {Record<string, string>} pages
  */
 function fakeFetch(pages) {
@@ -1252,8 +1126,7 @@ function fakeFetch(pages) {
 }
 
 /**
- * The wait a refresh here spends between requests: it moves the clock and
- * returns, so a pass costs no real time and the intervals are still exact.
+ * Advance the fake clock by the requested duration.
  *
  * @param {number} ms
  * @returns {Promise<void>}
@@ -1282,10 +1155,8 @@ test('a row no advisory read backs says so, whenever its markup was seen', async
   const base = `/${owner}/${repo}/security/advisories`;
   const seenAt = Date.parse('2026-08-24T09:00:00Z');
 
-  // The page being looked at is the draft tab, and GitHub rendered its row
-  // now. The triage advisory below is on the table from the crawl alone: a
-  // walk saw it two days ago, and every walk since has written the record
-  // again without seeing it again.
+  // The draft row is on the current page. The triage row was last seen
+  // two days ago, even though later crawls rewrote its list record.
   const drawn = 'GHSA-bbbb-bbbb-bbbb';
   const doc = pageOf(listHtml({ owner, repo, state: 'draft', ids: [drawn] }));
   const storage = fakeStorage();
@@ -1323,17 +1194,13 @@ test('a row no advisory read backs says so, whenever its markup was seen', async
   const observed = new Map(
     rows.map((row) => [row.getAttribute('data-bghsa-ghsa'), textOf(row, '.bghsa-list-observed')])
   );
-  // Neither row has an advisory read behind it. The cell stands for when the
-  // advisory was read, and when its list markup was seen is not that: one was
-  // walked two days ago and the other was rendered by GitHub now.
   assert.ok(observed.get(ghsaId) === 'Not read', `the crawled row: ${observed.get(ghsaId)}`);
   assert.ok(observed.get(drawn) === 'Not read', `the row on the page: ${observed.get(drawn)}`);
 });
 
 test('a read supplies every value on the row it stamps', async () => {
-  // GitHub rendered the list row now and it says one thing; the advisory read
-  // the cache holds was taken two hours ago and says another. The row carries
-  // one observation time, so it carries what that observation said.
+  // The current list row and cached advisory disagree.
+  // The displayed values must match the advisory observation time.
   const source = {
     row: {
       ghsaId: 'GHSA-aaaa-aaaa-aaaa',
@@ -1370,12 +1237,7 @@ test('a read supplies every value on the row it stamps', async () => {
   assert.ok(row.state === 'Draft', `state: ${row.state}`);
   assert.ok(row.severity === 'critical', `severity: ${row.severity}`);
   assert.ok(row.severityLabel === 'Critical', `severity label: ${row.severityLabel}`);
-  // The color travels with the level. The two pages paint the chip differently,
-  // and the row takes the color off the page whose level it took.
   assert.ok(row.severityClass === 'Label--orange', `severity class: ${row.severityClass}`);
-  // The read's page carries no title, so the list row is what fills that in:
-  // the read supplies what it holds and nothing is invented for what it does
-  // not.
   assert.ok(row.title === 'What the list row says', `title: ${row.title}`);
 });
 
@@ -1396,8 +1258,6 @@ test('a read that names no severity leaves the list row painting the chip', asyn
     },
     seenAt: AT,
   };
-  // `draft.html` is a real advisory with no severity set on it, so the read
-  // holds neither a level nor a color and the list row supplies both.
   const row = await table.viewRow(source, entryOf(DRAFT_RECORD, 'draft'), AT);
   assert.ok(row.severityLabel === 'Low', `severity label: ${row.severityLabel}`);
   assert.ok(row.severityClass === 'Label--secondary', `severity class: ${row.severityClass}`);
@@ -1424,8 +1284,6 @@ test('a read lands in the row where it stands', async () => {
   });
 
   assert.ok(applied, 'no row was replaced');
-  // The table around the row is untouched: a pass reads one advisory a second,
-  // and a reader looking at the table keeps what they were looking at.
   assert.ok(doc.getElementById(table.ROOT_ID) === root, 'the whole table was rebuilt');
   const rows = tableRows(doc);
   assert.ok(rows.length === 1, `rows after the read: ${rows.length}`);
@@ -1455,8 +1313,7 @@ test('a read for an advisory the table is not showing replaces nothing', async (
 
 /**
  * @param {Document} doc
- * @returns {string | null} what the header says the refresh is doing, and null
- *   where it says nothing.
+ * @returns {string | null} The refresh status text, or null.
  */
 function progressText(doc) {
   const root = doc.getElementById(table.ROOT_ID);
@@ -1481,9 +1338,7 @@ test('the header says what the refresh is doing and stops when it is done', asyn
     [`${base}/${second}`]: detailHtml(second, 'Draft'),
   });
 
-  // What the header said as each request went out. The sample is taken there
-  // and not on the wait, because the wait between two requests carries a draw
-  // that can round to nothing and then no wait is spent at all.
+  // Sample when requests start. Jitter can round to zero and skip the wait callback.
   /** @type {(string | null)[]} */
   const said = [];
   /** @type {import('../src/common/write.js').WriteFetch} */
@@ -1503,8 +1358,6 @@ test('the header says what the refresh is doing and stops when it is done', asyn
   });
   assert.ok(summary !== null && summary.read.fetched === 3, 'the three advisories were not read');
 
-  // The first request is a list page, which is the walk. The three after it
-  // are the advisories the walk named, counting down as each one lands.
   assert.deepStrictEqual(said, [
     table.WALKING_TEXT,
     'Loading (3 left)...',
@@ -1513,7 +1366,6 @@ test('the header says what the refresh is doing and stops when it is done', asyn
   ]);
   assert.strictEqual(progressText(doc), null, 'the header still said a refresh was running');
 
-  // The count the header carried all along is still beside it.
   const count = textOf(doc, `#${table.ROOT_ID} .bghsa-list-count`);
   assert.strictEqual(count, '3 advisories', `the header count: ${count}`);
 });
@@ -1527,9 +1379,6 @@ test('a refresh that could not read everything stops saying it is running', asyn
   const doc = pageOf(listHtml({ owner, repo, state: 'triage', ids: [read] }));
   const storage = fakeStorage();
   cache.setStorage(storage);
-  // The second advisory's page is not in the table, so the fetch answers 404
-  // for it. Nothing reports it, so the count the header carries never reaches
-  // nothing on its own.
   const fetch = fakeFetch({
     [`${base}?state=draft`]: listHtml({ owner, repo, state: 'draft', ids: [unread] }),
     [`${base}/${read}`]: detailHtml(read, 'Triage'),
@@ -1554,7 +1403,6 @@ test('the chip the header carries is dimmed and says nothing with nothing left',
   const doc = pageOf('<div id="advisories"></div>');
   const walking = table.progressChip(doc, { phase: 'walking', left: 0 });
   assert.ok(walking !== null, 'the walk said nothing');
-  // Color marks a condition to act on, and a refresh that is running is not one.
   assert.strictEqual(
     walking.className,
     'Label Label--secondary bghsa-list-progress',
@@ -1596,9 +1444,6 @@ test('a refresh crawls both open states and fills every row in', async () => {
       href: `https://github.com${base}?state=triage`,
     });
 
-    // The page being looked at is the first page of triage, so the walk asks
-    // for the other open state and for the two advisories, and for nothing it
-    // already has.
     assert.deepStrictEqual(fetch.urls, [
       `${base}?state=draft`,
       `${base}/${triage}`,
@@ -1616,8 +1461,6 @@ test('a refresh crawls both open states and fills every row in', async () => {
       ' High, unconfirmed[Label--secondary bghsa-dim]',
       `the triage row after the refresh: ${chips.get(triage)}`
     );
-    // A draft is a maintainer's own writing, so nobody is waiting on a review
-    // of it and it is the maintainers who are holding it.
     assert.ok(
       chips.get(draft) ===
         'Blocked on us[Label--secondary bghsa-tone-danger] |' +
@@ -1671,12 +1514,9 @@ test('an advisory observed four minutes ago is not read again', async () => {
 });
 
 /**
- * Waits for the surface's own machinery to get somewhere. A test that drives the
- * page rather than calling into it waits the way the page does: the observer
- * delivers its records, the loop takes its delay, and the refresh runs on its
- * own.
+ * Wait for the observer, render loop, or refresh to reach the expected state.
  *
- * @param {string} what What the surface was waited on to do, for the failure.
+ * @param {string} what The expected action, for the failure message.
  * @param {() => boolean} done
  * @returns {Promise<void>}
  */
@@ -1688,10 +1528,7 @@ async function until(what, done) {
   throw new Error(`the surface never ${what}`);
 }
 
-/**
- * @returns {Promise<void>} long enough for a request the surface should not
- *   send to have gone out if it were going to.
- */
+/** @returns {Promise<void>} Waits through 20 event-loop turns of at least 5 ms. */
 async function quiet() {
   for (let round = 0; round < 20; round += 1) {
     await new Promise((resolve) => setTimeout(resolve, 5));
@@ -1721,8 +1558,6 @@ test('a soft navigation to another repository crawls that repository', async () 
   const urls = [];
   /** @type {() => void} */
   let release = () => {};
-  // The advisory read on the repository the page opened on does not answer
-  // until this test lets it, so the navigation happens with a pass in flight.
   const holding = new Promise((resolve) => {
     release = () => resolve(undefined);
   });
@@ -1743,8 +1578,6 @@ test('a soft navigation to another repository crawls that repository', async () 
   /** @type {MutationObserver | null} */
   let observer = null;
   try {
-    // The page as the content script finds it: one render loop, and an observer
-    // watching for GitHub replacing the frame.
     const pass = table.passFor(doc, { storage, fetch: send, wait: advance });
     observer = table.observe(doc, pass);
     assert.ok(observer !== null, 'the document offered nothing to watch');
@@ -1756,9 +1589,6 @@ test('a soft navigation to another repository crawls that repository', async () 
       `${alphaBase}/${alphaId}`,
     ]);
 
-    // GitHub replaces the frame and keeps the document, and what is in it is
-    // another repository's advisory list. The pass on the repository the page
-    // left is still in flight.
     one(doc, '#repo-content-turbo-frame').innerHTML = betaList;
 
     await until('crawled the repository it navigated to', () => urls.length === 6);
@@ -1796,10 +1626,7 @@ test('a list page reached again refreshes once the threshold has passed', async 
   const ghsaId = 'GHSA-aaaa-aaaa-aaaa';
   const second = `${base}?state=triage&page=2`;
   const list = listHtml({ ...ref, state: 'triage', ids: [ghsaId], next: second });
-  // Page two answers nothing, so the triage walk never reaches its last page
-  // and every crawl that runs asks for it again. That is what makes a second
-  // refresh visible: with every walk done and every advisory read, one would
-  // spend nothing and there would be nothing to count.
+  // Page two returns an error. An incomplete crawl makes a repeated refresh observable.
   const walked = [`${base}?state=triage`, second, `${base}?state=draft`, `${base}/${ghsaId}`];
 
   const doc = pageOf(list);
@@ -1821,9 +1648,6 @@ test('a list page reached again refreshes once the threshold has passed', async 
     await until('crawled the repository it opened on', () => fetch.urls.length === 4);
     assert.deepStrictEqual(fetch.urls, walked);
 
-    // The maintainer opens an advisory and comes back, twice. Neither is a
-    // document load: the frame is replaced, and the table goes and comes back
-    // with it.
     const frame = one(doc, '#repo-content-turbo-frame');
     for (const round of [1, 2]) {
       frame.innerHTML = '<div id="show_dialog"></div>';
@@ -1842,8 +1666,6 @@ test('a list page reached again refreshes once the threshold has passed', async 
       );
     }
 
-    // Six minutes on, the walks and the read are due again, and coming back to
-    // the list is what starts them.
     clockAt += 6 * MINUTE;
     frame.innerHTML = '<div id="show_dialog"></div>';
     await until('took the table away again', () => doc.getElementById(table.ROOT_ID) === null);
@@ -1886,9 +1708,6 @@ test('a pass stops when the page it is reading for goes to another repository', 
   const urls = [];
   /** @type {() => void} */
   let release = () => {};
-  // The first advisory read on the repository the page opened on does not
-  // answer until this test lets it, so the navigation happens with a request in
-  // flight and a second advisory still queued behind it.
   const holding = new Promise((resolve) => {
     release = () => resolve(undefined);
   });
@@ -1914,8 +1733,6 @@ test('a pass stops when the page it is reading for goes to another repository', 
     await pass();
     await until('asked for the first advisory', () => urls.length === 3);
 
-    // GitHub replaces the frame and keeps the document, and what is in it is
-    // another repository's advisory list.
     one(doc, '#repo-content-turbo-frame').innerHTML = betaList;
     await until('crawled the repository it navigated to', () => urls.length === 6);
 
@@ -1931,8 +1748,6 @@ test('a pass stops when the page it is reading for goes to another repository', 
       [`${betaBase}?state=triage`, `${betaBase}?state=draft`, `${betaBase}/${betaId}`],
       'the repository the page went to was not read through'
     );
-    // The advisory the stopped pass had left is waiting where the next page
-    // load reads it, and the one it read is not.
     const progress = await cache.getProgress(alpha, { storage, at: clockAt });
     const held = fetchQueue.progressFrom(progress);
     assert.deepStrictEqual(held === null ? null : held.pending, [second]);
@@ -1951,10 +1766,7 @@ test('a page left and come straight back to takes its pass back', async () => {
   const second = 'GHSA-bbbb-bbbb-bbbb';
   const page2 = `${base}?state=triage&page=2`;
   const list = listHtml({ ...ref, state: 'triage', ids: [first, second], next: page2 });
-  // Page two answers nothing, so the triage walk never reaches its last page and
-  // the walk that comes back to this repository asks for that page again. What
-  // the pass left behind is a walk part way through as well as an advisory
-  // unread.
+  // The interrupted refresh leaves both a pending crawl page and an unread advisory.
   const walked = [`${base}?state=triage`, page2, `${base}?state=draft`];
 
   /** @type {Record<string, string>} */
@@ -1993,15 +1805,9 @@ test('a page left and come straight back to takes its pass back', async () => {
     await pass();
     await until('asked for the first advisory', () => urls.length === 4);
 
-    // The maintainer opens something that is not an advisory list. The frame is
-    // replaced and the table goes with it, and the pass is reading for a page
-    // nobody is on.
     const frame = one(doc, '#repo-content-turbo-frame');
     frame.innerHTML = '<div id="show_dialog"></div>';
     assert.ok(doc.getElementById(table.ROOT_ID) === null, 'the table went with the frame');
-    // Long enough for the surface to take the page in: the observer delivers
-    // its records and the loop takes its delay, and the stop lands on a pass
-    // whose request is still in flight.
     await quiet();
     release();
     await quiet();
@@ -2011,9 +1817,6 @@ test('a page left and come straight back to takes its pass back', async () => {
       'the pass went on reading a repository the page had left'
     );
 
-    // Straight back to the list. The pass is taken back where it stopped: the
-    // walk carries on from the page it was holding, the advisory already read
-    // is in the cache and costs nothing, and the one never reached is read.
     frame.innerHTML = list;
     await until('read the advisory the pass had left', () => urls.length === 6);
     await quiet();
@@ -2042,8 +1845,7 @@ test('the surface puts the table on the document it is given', async () => {
   const storage = fakeStorage();
 
   /**
-   * @returns {import('../src/common/crawl.js').StateWalk} a walk that reached
-   *   its last page a moment ago, so nothing about it is due.
+   * @returns {import('../src/common/crawl.js').StateWalk} A freshly completed crawl.
    */
   const finished = () => ({
     next: null,
@@ -2068,9 +1870,6 @@ test('the surface puts the table on the document it is given', async () => {
   );
   cache.setStorage(storage);
 
-  // `start` reads the document off the global and the queue it makes reads the
-  // global fetch, because nothing on a page injects either. Everything here is
-  // fresh, so a surface that behaves sends nothing at all.
   /** @type {string[]} */
   const sent = [];
   const held = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
@@ -2112,8 +1911,7 @@ test('one repository has one refresh queue', () => {
   const first = table.queueFor({ owner: 'crawl-one', repo: 'repo' });
   const again = table.queueFor({ owner: 'crawl-one', repo: 'repo' });
   assert.ok(first === again, 'a second queue was made for one repository');
-  // GitHub treats an owner and a repository name case-insensitively, and two
-  // queues would each hold the rate limit privately.
+  // Repository names are case-insensitive. Both spellings must share one rate limit.
   const spelled = table.queueFor({ owner: 'Crawl-One', repo: 'Repo' });
   assert.ok(spelled === first, 'another spelling of one repository made a second queue');
   const other = table.queueFor({ owner: 'crawl-two', repo: 'repo' });
@@ -2123,8 +1921,7 @@ test('one repository has one refresh queue', () => {
 /**
  * @param {string} ghsaId
  * @param {Partial<import('../src/list/table.js').TableRow>} [changes]
- * @returns {import('../src/list/table.js').TableRow} a row carrying the list
- *   markup's defaults, with the values one case turns on.
+ * @returns {import('../src/list/table.js').TableRow} A row with default list values and the supplied overrides.
  */
 function sortRow(ghsaId, changes = {}) {
   return { ...table.unreadRow(listRow(ghsaId, '2026-08-01T00:00:00Z'), AT), ...changes };
@@ -2144,12 +1941,8 @@ function viewOrder(rows, sort, filters = {}) {
 }
 
 /**
- * One sort key, and three rows it ranks C first, A second, B third.
- *
- * Every case is handed to the sort as A, B, C, and every case wants C, A, B. So
- * neither the order the rows arrive in nor the order of their identifiers can
- * stand in for the key under test: a comparator that ignored the key would
- * answer A B C through the identifier tie-break and fail.
+ * Each case expects C, A, B from input A, B, C.
+ * The selected sort key must override input and identifier order.
  *
  * @type {readonly { sort: string, what: string, rows: import('../src/list/table.js').TableRow[] }[]}
  */
@@ -2202,8 +1995,6 @@ test('a filter and a sort the list no longer carries are gone', () => {
   ]);
   assert.deepStrictEqual(sorts, [table.DEFAULT_SORT, 'severity', 'waiting']);
 
-  // The facet a cut filter read is gone, so nothing offers its values and
-  // nothing can be held to one of them.
   assert.strictEqual(table.facetFor('cve'), null, 'the CVE facet is still here');
   const row = sortRow('A', { read: true, cve: 'CVE-2026-0001' });
   assert.strictEqual(
@@ -2212,8 +2003,6 @@ test('a filter and a sort the list no longer carries are gone', () => {
     'a filter over the cut CVE facet still holds the table'
   );
 
-  // The comparator a cut sort ran is gone, so the key falls back to the
-  // default order in place of ordering by title.
   const titled = [sortRow('A', { title: 'Zoe' }), sortRow('B', { title: 'Ada' })];
   assert.strictEqual(table.sortFor('title'), null, 'the title comparator is still here');
   assert.strictEqual(viewOrder(titled, 'title'), 'A B', 'a cut sort key still orders the table');
@@ -2259,8 +2048,6 @@ function facet(key) {
 }
 
 test('a filter offers the values the rows hold, in the order they belong in', () => {
-  // Alphabetically these read Critical, High, Low, Moderate, so an option list
-  // in rank order is one the alphabet cannot produce.
   const rows = [
     sortRow('A', { read: true, severity: 'low', severityLabel: 'Low' }),
     sortRow('B', { read: true, severity: 'critical', severityLabel: 'Critical' }),
@@ -2279,11 +2066,9 @@ test('a filter offers the values the rows hold, in the order they belong in', ()
     `a read row holding no severity: ${withNone.join(' ')}`
   );
 
-  // A row nobody has read holds nothing, and that is not a value to offer.
   const unread = table.filterOptions([...rows, sortRow('E')], facet('severity'), '');
   assert.ok(unread.join(' ') === 'Critical High Moderate Low', `an unread row: ${unread.join(' ')}`);
 
-  // A login this reader has no rank for falls back to the alphabet.
   const logins = [
     sortRow('A', { read: true, owners: ['zoe'] }),
     sortRow('B', { read: true, owners: ['ada'] }),
@@ -2299,16 +2084,8 @@ test('a value a filter is holding to stays on offer after the last row carrying 
 });
 
 /**
- * Rows covering every branch of every comparator the sort control offers: the
- * severity and the waiting time the two facet sorts read, and the state, group
- * and tie-break keys the default order reads on top of them. The identifier
- * descends as the grid is built, so the order the rows arrive in and the order
- * of their identifiers contradict each other.
- *
- * The lists have lengths 3, 4, 3 and 4, so the values repeat every twelve rows
- * and a grid of twenty-four holds each combination the walk reaches twice under
- * two identifiers. That is what makes a tie the identifier has to settle part
- * of the grid.
+ * Repeat each combination of sort values under two different identifiers
+ * to exercise identifier tie-breaking. IDs descend as rows are generated.
  *
  * @returns {import('../src/list/table.js').TableRow[]}
  */
@@ -2420,10 +2197,7 @@ test('a sort does not depend on the order the rows arrived in', () => {
 });
 
 test('a row whose identifier went unread sorts last under every sort', () => {
-  // The identifier is the last tie-break on both paths: the default order runs
-  // `order.compare`, and every other sort ends in this file's own tie-break.
-  // The two read a null identifier the same way, so the row nobody can open is
-  // at the bottom either way.
+  // Both default and selected sorts must place missing identifiers last.
   const unread = sortRow('GHSA-aaaa-aaaa-aaaa', {
     ghsaId: null,
     waitingSince: '2026-08-01T00:00:00Z',
@@ -2447,7 +2221,7 @@ test('sorting and filtering leave the rows the table holds alone', () => {
 
 /**
  * @param {import('../src/list/table.js').TableRow} row
- * @returns {string} what each facet reads for one row, as one line.
+ * @returns {string} The facet values as one line.
  */
 function facetLine(row) {
   return table.FACETS.map((each) => `${each.key}=${each.valuesOf(row).join('+')}`).join(' ');
@@ -2467,8 +2241,6 @@ test('every filter reads the fixture the cache holds', async () => {
     `the facets of the cached triage read: ${facetLine(read)}`
   );
 
-  // The same advisory before anything has been read holds what GitHub's row
-  // said and nothing a read supplies, so a filter over those facets keeps it.
   const unread = table.unreadRow(source, AT);
   assert.ok(
     facetLine(unread) ===
@@ -2487,7 +2259,7 @@ test('every filter reads the fixture the cache holds', async () => {
 
 /**
  * @param {Partial<import('../src/list/table.js').TableRow>} changes
- * @returns {string} what the Patch filter reads off that row.
+ * @returns {string} The row's Patch filter value.
  */
 function patchValueOf(changes) {
   const facet = table.FACETS.find((each) => each.key === 'patch');
@@ -2495,15 +2267,10 @@ function patchValueOf(changes) {
   return facet.valuesOf(rowWith(changes)).join('+');
 }
 
-// The Patch filter and the patch chip describe the same rows. The chip stands
-// on a draft and on no other, so a triage advisory holding an open pull request
-// must not filter under a value its row never shows.
 test('the patch filter reads a draft row and no other', () => {
   assert.strictEqual(patchValueOf({ read: true, state: 'Draft', patch: 'Patch in review' }), 'In review');
   assert.strictEqual(patchValueOf({ read: true, state: 'Draft', patch: 'No patch yet' }), 'No patch');
 
-  // A draft whose pull request named a state this reader does not know shows
-  // `Unknown`, which is the absence of an answer and not one of the two values.
   assert.strictEqual(patchValueOf({ read: true, state: 'Draft', patch: 'Unknown' }), '');
 
   for (const state of ['Triage', 'Published', 'Closed', null]) {
@@ -2515,7 +2282,6 @@ test('the patch filter reads a draft row and no other', () => {
     assert.strictEqual(patchValueOf({ read: true, state, patch: 'No patch yet' }), '');
   }
 
-  // A row nothing has been read on holds no patch state at all.
   assert.strictEqual(patchValueOf({ state: 'Draft', patch: null }), '');
 });
 
@@ -2528,10 +2294,8 @@ function itemNodes(control) {
 }
 
 /**
- * Presses an item the way a maintainer does.
- *
  * @param {Element} control
- * @param {string} value What the item holds the control to.
+ * @param {string} value The selected value.
  * @returns {void}
  */
 function press(control, value) {
@@ -2558,7 +2322,7 @@ function filterIn(doc, facet) {
 
 /**
  * @param {Element} control
- * @returns {string} what its menu offers, as one line.
+ * @returns {string} The menu item labels as one line.
  */
 function itemsOf(control) {
   return itemNodes(control)
@@ -2568,9 +2332,7 @@ function itemsOf(control) {
 
 /**
  * @param {Element} control
- * @returns {string} the value of the one item its menu marks checked. Where it
- *   marks none or marks several, that is what comes back, because a menu
- *   carrying two checks is as wrong as one carrying none.
+ * @returns {string} The checked value, or the number checked if it differs from one.
  */
 function checkedIn(control) {
   const held = itemNodes(control).filter((item) => item.getAttribute('aria-checked') === 'true');
@@ -2590,9 +2352,6 @@ function shownIds(doc) {
 }
 
 /**
- * A table drawn over rows a test made up, placed on a real list page so it has
- * the anchor the page offers.
- *
  * @param {readonly import('../src/list/table.js').TableRow[]} rows
  * @returns {{ doc: Document, root: Element }}
  */
@@ -2636,8 +2395,6 @@ test('the controls offer every value the table holds', async () => {
     `the filters offered: ${filters}`
   );
 
-  // Every filter comes up holding the table to nothing, reading the facet it
-  // acts on, and offering what the rows of the table hold.
   assert.ok(
     itemsOf(filterIn(doc, 'owner')) === `${table.ANY_LABEL} | samuelkarp`,
     `the owner filter offers: ${itemsOf(filterIn(doc, 'owner'))}`
@@ -2652,9 +2409,6 @@ test('the controls offer every value the table holds', async () => {
 });
 
 /**
- * A table over two advisories one owner apiece, which is what the filter menus
- * below offer the values of.
- *
  * @returns {{ doc: Document, root: Element }}
  */
 function ownedTable() {
@@ -2667,7 +2421,7 @@ function ownedTable() {
 /**
  * @param {Document} doc
  * @param {string} facet
- * @returns {string} what the summary of one filter reads.
+ * @returns {string} The filter summary text.
  */
 function summaryOf(doc, facet) {
   return (
@@ -2679,14 +2433,11 @@ test('a filter menu says to a screen reader what it is and whether it is open', 
   const { doc } = ownedTable();
   const control = filterIn(doc, 'owner');
 
-  // The open state is the native details element's, which a screen reader
-  // reads off the element itself. Nothing declares it a second time, because a
-  // declared state is one that can go stale while the menu is open.
+  // The native details element exposes its open state to assistive technology.
   assert.ok(control.tagName.toLowerCase() === 'details', `the control is a ${control.tagName}`);
   const box = one(doc, `#${table.ROOT_ID} .bghsa-list-controls`);
   assert.ok(box.querySelector('[aria-expanded]') === null, 'a control carries aria-expanded');
 
-  // The face of the menu, which is what a reader lands on before it is open.
   const summary = one(doc, `#${table.ROOT_ID} [${table.FACET_ATTRIBUTE}="owner"] > summary`);
   assert.ok(summary.getAttribute('role') === 'button', 'the summary does not say it is a button');
   assert.ok(
@@ -2694,8 +2445,6 @@ test('a filter menu says to a screen reader what it is and whether it is open', 
     'the summary does not say it opens a menu'
   );
 
-  // What opens, named so that a reader arriving in it knows which filter it
-  // belongs to, since the summary is no longer what is being read.
   const body = one(doc, `#${table.ROOT_ID} [${table.FACET_ATTRIBUTE}="owner"] details-menu`);
   assert.ok(body.getAttribute('role') === 'menu', 'the menu does not say it is one');
   assert.ok(
@@ -2703,8 +2452,6 @@ test('a filter menu says to a screen reader what it is and whether it is open', 
     `the menu is labeled: ${body.getAttribute('aria-label')}`
   );
 
-  // One of these is held at a time, which is what parts a radio item from a
-  // checkbox item to a reader moving through the menu.
   for (const item of itemNodes(control)) {
     assert.ok(item.getAttribute('role') === 'menuitemradio', 'an item is not a menu item');
     assert.ok(item.hasAttribute('aria-checked'), 'an item does not say whether it is held');
@@ -2721,10 +2468,7 @@ test('a menu marks the item the view is holding to, and marks no other', () => {
     checkedIn(filterIn(doc, 'owner')) === 'ada',
     `the owner filter marks: ${checkedIn(filterIn(doc, 'owner'))}`
   );
-  // The summary says what the filter is holding to without the menu being
-  // opened, which is what the face of a select used to carry.
   assert.ok(summaryOf(doc, 'owner') === 'Owner: ada', `the summary reads: ${summaryOf(doc, 'owner')}`);
-  // The sort is a menu of its own, and pressing an owner leaves it alone.
   const sort = one(doc, `#${table.ROOT_ID} .bghsa-list-sort`);
   assert.ok(checkedIn(sort) === table.DEFAULT_SORT, `the sort marks: ${checkedIn(sort)}`);
 
@@ -2850,8 +2594,6 @@ test('the reset goes back to the default order and drops every filter', () => {
   ).click();
 
   assert.ok(shownIds(doc) === 'GHSA-aaaa-aaaa-aaaa GHSA-bbbb-bbbb-bbbb', `back to the default: ${shownIds(doc)}`);
-  // The controls read the view that is showing, so the way back is not hidden
-  // behind controls still naming the view that was.
   const sort = one(doc, `#${table.ROOT_ID} .bghsa-list-sort`);
   assert.ok(
     checkedIn(sort) === table.DEFAULT_SORT,
@@ -2874,13 +2616,9 @@ test('a read landing leaves the sort and the filter a maintainer picked alone', 
     }),
     sortRow(ghsaId, { waitingSince: '2026-01-01T00:00:00Z' }),
   ]);
-  // The default order leads with the advisory blocked on us; the waiting sort
-  // leads with the one that has waited longest, so the two disagree.
   assert.ok(shownIds(doc) === `GHSA-aaaa-aaaa-aaaa ${ghsaId}`, `the default order: ${shownIds(doc)}`);
   press(one(doc, `#${table.ROOT_ID} .bghsa-list-sort`), 'waiting');
   press(filterIn(doc, 'owner'), 'ada');
-  // A row nobody has read is not hidden by a filter over a value a read
-  // supplies, so both are showing.
   assert.ok(
     shownIds(doc) === `${ghsaId} GHSA-aaaa-aaaa-aaaa`,
     `by waiting under the owner filter: ${shownIds(doc)}`
@@ -2896,9 +2634,7 @@ test('a read landing leaves the sort and the filter a maintainer picked alone', 
   });
   assert.ok(applied, 'no row was replaced');
 
-  // The read turns the row into one the owner filter does not match and one the
-  // default order would put in another group. It keeps its place and it keeps
-  // showing: the view a maintainer is reading is not rearranged under them.
+  // Updating a row preserves its visibility and position until the next render.
   assert.ok(shownIds(doc) === `${ghsaId} GHSA-aaaa-aaaa-aaaa`, `after the read: ${shownIds(doc)}`);
   const row = /** @type {Element} */ (tableRows(doc)[0]);
   assert.ok(
@@ -2906,13 +2642,11 @@ test('a read landing leaves the sort and the filter a maintainer picked alone', 
       ' High, unconfirmed[Label--secondary bghsa-dim]',
     `the row took the read in: ${chipLine(row)}`
   );
-  // The read turned up a severity no row carried, and the control offers it.
   assert.ok(
     itemsOf(filterIn(doc, 'severity')) === 'Any | High | None',
     `the severity filter after the read: ${itemsOf(filterIn(doc, 'severity'))}`
   );
 
-  // The render that follows the pass is what settles it, under the same view.
   table.refreshBody(doc);
   assert.ok(shownIds(doc) === 'GHSA-aaaa-aaaa-aaaa', `once the table settles: ${shownIds(doc)}`);
 });
@@ -2935,8 +2669,6 @@ test('a read for a row a filter is holding out of view still reaches the table',
     state: 'triage',
   });
   assert.ok(!applied, 'a row a filter is holding out of view was drawn');
-  // The table took the read in even so, which the filter shows once it is
-  // holding to what the read turned up.
   press(filterIn(doc, 'severity'), 'High');
   press(filterIn(doc, 'owner'), '');
   assert.ok(shownIds(doc) === ghsaId, `the row the read filled in: ${shownIds(doc)}`);
@@ -2953,8 +2685,6 @@ test('a re-render keeps the view a maintainer picked', async () => {
     [keyFor(high)]: entryOf(storedDetail(high, 'Triage', 'High'), 'triage'),
   };
   await render(doc, held);
-  // The default order leads with the draft, and the severity sort leads with
-  // the high, so the two disagree and a picked sort is visible.
   assert.ok(shownIds(doc) === `${low} ${high}`, `the default order: ${shownIds(doc)}`);
 
   press(one(doc, `#${table.ROOT_ID} .bghsa-list-sort`), 'severity');
@@ -2962,8 +2692,6 @@ test('a re-render keeps the view a maintainer picked', async () => {
   press(filterIn(doc, 'severity'), 'Low');
   assert.ok(shownIds(doc) === low, `held to the low severity: ${shownIds(doc)}`);
 
-  // GitHub replacing the subtree, and the pass that follows a read, both draw
-  // the table again. The view a maintainer picked survives that.
   await render(doc, held);
   const sort = one(doc, `#${table.ROOT_ID} .bghsa-list-sort`);
   assert.ok(checkedIn(sort) === 'severity', 'the sort was lost when the table was drawn again');

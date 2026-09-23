@@ -1,14 +1,8 @@
-// What web-ext leaves out of the package it builds, and out of what it lints.
+// Exclude development files from packaging and linting. The package contains
+// manifest.json, src/, and the required Apache license copy.
 //
-// The extension is manifest.json and src/. LICENSE ships with it because the
-// Apache License asks that a copy travel with the work. Everything else in this
-// repository is development material: the tests and their fixtures, the capture
-// and icon tools, the type declarations, the documentation, and the working
-// notes under scratch/.
-//
-// web-ext does not read .gitignore, so scratch/ is named here as well. It holds
-// captures of real advisories and backups of this repository's history, and a
-// package carrying it would publish both.
+// web-ext does not read .gitignore. Explicitly exclude scratch/ because it
+// contains private advisory captures and repository history backups.
 
 module.exports = {
   ignoreFiles: [

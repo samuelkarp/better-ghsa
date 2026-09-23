@@ -13,15 +13,13 @@ if (typeof require === 'function') {
  * @typedef {object} AdvisoryLocation
  * @property {string} owner
  * @property {string} repo
- * @property {string | null} ghsaId The advisory, or null on the list page.
+ * @property {string | null} ghsaId The advisory identifier, or null on the list page.
  */
 
 (() => {
   /**
-   * The advisory a github.com path points at.
-   *
    * @param {string} pathname
-   * @returns {AdvisoryLocation | null} null when the path is not an advisory page
+   * @returns {AdvisoryLocation | null} The advisory location, or null outside the advisory area.
    */
   function locate(pathname) {
     const parts = pathname.split('/').filter((part) => part !== '');
@@ -32,20 +30,10 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Whether the extension runs on the page at a path.
+   * Require an allowlisted advisory path before starting or rendering surfaces
+   * (REQUIREMENTS.md section 8). Recheck after navigation within one document.
    *
-   * REQUIREMENTS.md section 8: on a repository the allowlist does not carry the
-   * extension does nothing at all, so this is the one question every surface
-   * asks. Answering no keeps a surface from starting and stops a started one
-   * from taking a page GitHub has since turned into another repository's, which
-   * is what keeps a repository the allowlist does not carry out of storage
-   * rather than only out of reach of a write.
-   *
-   * A path is needed to answer, so an environment with no location is not a
-   * page the extension belongs on. That is every environment outside a browser.
-   *
-   * @param {unknown} [pathname] The path to judge, and absent to read the one
-   *   the page is showing.
+   * @param {unknown} [pathname] The path to check; defaults to the current location.
    * @returns {boolean}
    */
   function enabled(pathname = globalThis.location?.pathname) {
@@ -55,7 +43,6 @@ if (typeof require === 'function') {
     return globalThis.bghsa.allowlist.isAllowed(`${here.owner}/${here.repo}`);
   }
 
-  /** Log the advisory this page is, and whether writes to it are permitted. */
   function report() {
     const here = locate(globalThis.location.pathname);
     if (here === null) return;
@@ -68,16 +55,9 @@ if (typeof require === 'function') {
   }
 
   /**
-   * What GitHub gives when it has replaced the content frame without a document
-   * load. The framework's own events are fired inside the frame and reach the
-   * document; `popstate` and `pageshow` are fired at the window and cover a
-   * history move and a return from the back-forward cache.
-   *
-   * Several names are watched because the fact that matters is the frame having
-   * arrived and each of these announces it. Missing every name on a navigation
-   * costs a page whose surface never starts; hearing several costs one more call
-   * to {@link apply}, which returns without touching a document it has already
-   * started.
+   * Listen for GitHub frame replacements across its navigation event families.
+   * Repeated events are safe because apply starts surfaces once per document.
+   * Window events separately cover history and back-forward-cache navigation.
    *
    * @type {readonly string[]}
    */
@@ -95,18 +75,15 @@ if (typeof require === 'function') {
   const WINDOW_EVENTS = ['popstate', 'pageshow'];
 
   /**
-   * The documents whose surfaces have been started. A document is started once:
-   * a surface holds its own observer from then on, and a second start would
-   * connect a second one.
+   * Start surfaces once per document to avoid duplicate observers.
    *
    * @type {WeakSet<Document>}
    */
   const started = new WeakSet();
 
   /**
-   * @returns {{ start?: () => unknown, stop?: (doc: Document) => unknown }[]} the
-   *   surfaces this extension puts on an advisory page, in the order they take
-   *   it. A surface puts itself down in the reverse of that order.
+   * @returns {{ start?: () => unknown, stop?: (doc: Document) => unknown }[]} Surfaces in
+   *   start order. Stop them in reverse order.
    */
   function surfaces() {
     const bghsa = globalThis.bghsa;
@@ -114,20 +91,11 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Starts the surfaces on a document the URL says is an advisory page on a
-   * repository the allowlist carries, and leaves every other page untouched: no
-   * surface drawn, no observer connected, no storage read and no request sent.
-   * The content script matches every github.com page, so this is what keeps the
-   * extension off the pages it has nothing to say about, and off the
-   * repositories it has no business reading.
-   *
-   * Both surfaces start together, because the advisory list and an advisory are
-   * the two halves of one area and each surface's own pass decides which half it
-   * is looking at. A move between the halves is then carried by observers that
-   * are already connected, so it costs nothing when no navigation event arrives.
+   * Start both surfaces on allowlisted advisory pages. Their observers handle
+   * transitions between list and detail pages even without navigation events.
    *
    * @param {Document} [doc] The document to start on.
-   * @returns {boolean} whether this call started the surfaces.
+   * @returns {boolean} Whether this call started the surfaces.
    */
   function apply(doc = globalThis.document) {
     if (!enabled()) return false;
@@ -138,21 +106,17 @@ if (typeof require === 'function') {
       try {
         surface.start?.();
       } catch {
-        // A surface that cannot take the page is not a reason to keep the next
-        // one off it.
+        // Continue starting other surfaces if one fails.
       }
     }
     return true;
   }
 
   /**
-   * Takes the surfaces off a document they are running on: what they drew comes
-   * out, what they are watching is let go, and the reads they have in flight are
-   * put down. This is what a repository leaving the allowlist does to a page
-   * that is already showing it, and it leaves GitHub's own page as it found it.
+   * Stop surfaces when a repository leaves the allowlist.
    *
    * @param {Document} [doc] The document to stop on.
-   * @returns {boolean} whether this call stopped the surfaces.
+   * @returns {boolean} Whether this call stopped the surfaces.
    */
   function stop(doc = globalThis.document) {
     if (!started.has(doc)) return false;
@@ -161,35 +125,21 @@ if (typeof require === 'function') {
       try {
         surface.stop?.(doc);
       } catch {
-        // A surface that cannot put the page down is not a reason to leave the
-        // next one running on it.
+        // Continue stopping other surfaces if one fails.
       }
     }
     return true;
   }
 
   /**
-   * Puts the document where the allowlist says it belongs, starting the surfaces
-   * on a page they belong to and stopping them on one they no longer do.
-   *
-   * A path that names no advisory page is left alone unless `everywhere` says
-   * otherwise. The surfaces are not on such a page to begin with, and a document
-   * that keeps them across a move to one is a document they come back on without
-   * waiting for another navigation event. An allowlist edit passes `everywhere`,
-   * because a repository nobody listed has to stop being read wherever the
-   * reading is happening.
-   *
-   * Every advisory page carries a control that opens the extension's settings,
-   * listed repository or not, which is how a maintainer reaches the list from
-   * the page they expected the extension to work on. REQUIREMENTS.md section 12.
-   * It is shown after the surfaces have been asked to start, so a page that has
-   * already drawn one puts the control above it. On a repository the allowlist
-   * does not carry the control is the whole of what happens, because the
-   * surfaces are what read, fetch and store and none of them starts.
+   * Apply the allowlist to advisory pages. Preserve observers on other pages
+   * for return navigation unless `everywhere` requests a full stop after an
+   * allowlist change. Show settings on every advisory page, including repositories
+   * outside the allowlist (REQUIREMENTS.md section 12).
    *
    * @param {Document} [doc]
    * @param {boolean} [everywhere]
-   * @returns {boolean} whether this call started or stopped the surfaces.
+   * @returns {boolean} Whether this call started or stopped the surfaces.
    */
   function reconsider(doc = globalThis.document, everywhere = false) {
     globalThis.bghsa.prLayout.apply(doc, globalThis.location?.pathname ?? '');
@@ -205,9 +155,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Listens for the frame becoming a page a surface belongs to. A document that
-   * loaded as something else has no surface running and so nothing watching it,
-   * which is why this listens rather than leaving the surfaces to notice.
+   * Watch navigation even before any surface starts, including documents that
+   * initially load outside the advisory area.
    *
    * @param {Document} [doc] The document to listen on.
    * @returns {void}
@@ -222,14 +171,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Takes the page the extension loaded onto, and every page GitHub turns it
-   * into afterwards.
-   *
-   * Nothing starts before the allowlist has been read. The list lives in
-   * `browser.storage.local` and the gate is synchronous, so until the read lands
-   * every repository reads as off the list and no surface takes the page. The
-   * document is reconsidered when it lands, which is what starts the surfaces on
-   * a page that was already showing when this ran.
+   * Load the allowlist before starting surfaces, then reconsider the document
+   * after navigation and allowlist changes.
    *
    * @returns {void}
    */

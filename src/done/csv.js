@@ -9,12 +9,8 @@ if (typeof require === 'function') {
 }
 
 /**
- * What one advisory contributes to the export.
- *
- * Every field is either read off the advisory or read off the list row that
- * named it, so a member no advisory read backs still exports a line.
- * `detail_fetched` says which it was, and the timings on an unread member are blank rather than
- * zero.
+ * Export one row per corpus member, falling back to list data for unread
+ * advisories. `detail_fetched` identifies those rows; their timings are blank.
  *
  * @typedef {Record<string, string | number | null>} CsvRow
  */
@@ -27,18 +23,11 @@ if (typeof require === 'function') {
  */
 
 (() => {
-  /** What the export is served as. */
+
   const MIME = 'text/csv;charset=utf-8';
 
   /**
-   * The columns, in the order they are written.
-   *
-   * The four durations are the four timings the statistics show, under the
-   * names the page reads them by, and each is measured from the report.
-   *
-   * A duration is written in milliseconds, which is what the statistics measure
-   * in. It is the value itself and not a rounding of it, so a spreadsheet
-   * dividing it gets whatever unit the reader wants.
+   * Durations use unrounded milliseconds measured from the report time.
    *
    * @type {readonly string[]}
    */
@@ -59,18 +48,11 @@ if (typeof require === 'function') {
   ];
 
   /**
-   * The characters a spreadsheet reads as the start of a formula.
-   *
-   * A title and a closure reason are text this extension did not write: a
-   * reporter names their own advisory, and a closure reason is whatever a
-   * maintainer's extension stored. A field opening with one of these is a
-   * formula the moment the file is opened, so the field is quoted and a text
-   * marker is put in front of it. Nothing in this export legitimately opens
-   * with one, so no value is lost to the marker.
+   * Prefix potentially executable spreadsheet formulas with a text marker.
+   * Titles and closure reasons can contain user-supplied text.
    */
   const FORMULA_LEAD = /^[=+\-@\t\r]/;
 
-  /** What a field opening as a formula is prefixed with. */
   const FORMULA_GUARD = "'";
 
   /** RFC 4180 ends a record with a carriage return and a line feed. */
@@ -78,7 +60,7 @@ if (typeof require === 'function') {
 
   /**
    * @param {string | number | null} value
-   * @returns {string} that value as one CSV field.
+   * @returns {string} The escaped CSV field.
    */
   function field(value) {
     if (value === null) return '';
@@ -98,15 +80,13 @@ if (typeof require === 'function') {
 
   /**
    * @param {number | null} at
-   * @returns {string | null} that instant as an ISO stamp, and null for none.
+   * @returns {string | null} The ISO timestamp, or null for a missing value.
    */
   function stampOf(at) {
     return at === null ? null : new Date(at).toISOString();
   }
 
   /**
-   * One advisory as the export holds it.
-   *
    * @param {import('./corpus.js').CorpusMember} member
    * @returns {CsvRow}
    */
@@ -132,8 +112,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The corpus as a CSV, built here in the page from what the crawl and the
-   * reads already hold. Nothing is sent anywhere and nothing is fetched.
+   * Build CSV from the collected corpus in the page.
    *
    * @param {import('./corpus.js').Corpus} held
    * @returns {string}
@@ -150,9 +129,7 @@ if (typeof require === 'function') {
   /**
    * @param {{ owner: string, repo: string }} ref
    * @param {number} at
-   * @returns {string} what the file is offered under. The repository and the day
-   *   are in the name, because a maintainer exporting two repositories on two
-   *   days wants four files and not one asked about four times.
+   * @returns {string} A filename containing the repository and UTC date.
    */
   function filenameFor(ref, at) {
     const day = new Date(at).toISOString().slice(0, 10);
@@ -161,32 +138,23 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Hands the file to the browser: a blob made in the page, a URL for it, and an
-   * anchor clicked to take it. The anchor is put in the document, pressed, and
-   * taken out again, because a click on an element outside the document does not
-   * start a download.
-   *
-   * The URL is released on the next turn. Releasing it in the same turn as the
-   * press has been known to reach the browser before the download does.
+   * Start a download through an attached anchor. Revoke the blob URL on the
+   * next turn to give the browser time to begin the download.
    *
    * @param {Document} doc
    * @param {string} name
    * @param {string} text
    * @param {DownloadOptions} [options]
-   * @returns {string | null} the blob URL the press went to, and null where the
-   *   page offers no way to make one.
+   * @returns {string | null} The download URL, or null if Blob or a document host is unavailable.
    */
   function download(doc, name, text, options = {}) {
-    // Called through the object that carries them, so neither goes out
-    // detached from it.
+    // Call URL methods with their receiver.
     const urls = globalThis.URL;
     const make = options.createObjectURL ?? ((blob) => urls.createObjectURL(blob));
     const drop = options.revokeObjectURL ?? ((url) => urls.revokeObjectURL(url));
     const BlobType = options.Blob ?? globalThis.Blob;
     if (typeof BlobType !== 'function') return null;
-    // A blob URL holds the file in memory until it is released, and nothing
-    // releases one the page never handed over, so it is made once the press
-    // has somewhere to happen.
+    // Check for a download host before allocating a blob URL.
     const host = doc.body ?? doc.documentElement;
     if (host === null) return null;
     const url = make(new BlobType([text], { type: MIME }));

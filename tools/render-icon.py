@@ -3,10 +3,9 @@
 
     python3 tools/render-icon.py src/icons
 
-The icon is a dark rounded square carrying a shield, a band across the shield's
-head, and a check mark on its face. Geometry is written in unit coordinates
-(0..1 across the canvas) and sampled with supersampling for antialiasing. The
-standard library is the whole dependency: zlib and struct build the PNG.
+The icon contains a shield, a top band, and a check mark on a dark rounded
+square. Coordinates range from 0 to 1 across the canvas. Supersampling provides
+antialiasing. PNG encoding uses the standard library's zlib and struct modules.
 """
 
 import math
@@ -14,17 +13,17 @@ import struct
 import sys
 import zlib
 
-# Palette. A self-contained badge so the icon reads on a light or dark theme.
+# The dark background maintains contrast on light and dark themes.
 BG = (0x14, 0x1B, 0x27)  # slate, the badge
 SHIELD = (0xE8, 0xED, 0xF4)  # near-white, the shield face
-MARK = (0x14, 0x1B, 0x27)  # the check, knocked out of the shield
+MARK = (0x14, 0x1B, 0x27)  # check mark
 ACCENT = (0xF0, 0x8C, 0x28)  # amber, the band across the shield head
 
 SS = 6  # supersample factor per axis
 
 
 def rounded_rect(x, y, r):
-    """Inside the full-canvas rounded square of corner radius r."""
+    """Return whether (x, y) is inside the unit square with corner radius r."""
     cx = min(max(x, r), 1 - r)
     cy = min(max(y, r), 1 - r)
     return math.hypot(x - cx, y - cy) <= r
@@ -38,10 +37,9 @@ CHIEF = 0.302  # the band across the head ends here
 
 
 def shield_outline(steps=64):
-    """The shield as a closed polygon in unit coordinates.
+    """Return the shield polygon in unit coordinates.
 
-    A flat head with rounded shoulders, straight sides down to the waist, then
-    a taper to a point at the base.
+    The shield has a flat top, rounded corners, and sides that taper to a point.
     """
     pts = []
 
@@ -61,13 +59,10 @@ def shield_outline(steps=64):
                 )
             )
 
-    # Head: left shoulder, across, right shoulder.
     arc(LEFT + SHOULDER, TOP + SHOULDER, SHOULDER, math.pi, 1.5 * math.pi)
     arc(RIGHT - SHOULDER, TOP + SHOULDER, SHOULDER, 1.5 * math.pi, 2 * math.pi)
-    # Right side straight down, then taper to the base point.
     pts.append((RIGHT, WAIST))
     bez((RIGHT, WAIST), (RIGHT, BOTTOM - 0.200), (0.5, BOTTOM))
-    # Left side back up, mirrored.
     bez((0.5, BOTTOM), (LEFT, BOTTOM - 0.200), (LEFT, WAIST))
     pts.append((LEFT, TOP + SHOULDER))
     return pts
@@ -99,7 +94,7 @@ def seg_dist(px, py, ax, ay, bx, by):
     return math.hypot(px - (ax + t * vx), py - (ay + t * vy))
 
 
-# The check: two segments, round joins, drawn on the shield face.
+# Two segments with round joins form the check mark.
 CHECK = [((0.375, 0.560), (0.464, 0.652)), ((0.464, 0.652), (0.641, 0.440))]
 CHECK_W = 0.051  # half-width of the stroke
 
@@ -109,12 +104,12 @@ def in_check(x, y):
 
 
 def in_chief(x, y):
-    """The band across the head. The caller clips it to the shield."""
+    """Return whether y is within the top band. The caller clips to the shield."""
     return y <= CHIEF
 
 
 def sample(x, y):
-    """Colour at a unit-coordinate point, or None for transparent."""
+    """Return the colour at unit coordinates (x, y), or None for transparency."""
     if not rounded_rect(x, y, 0.215):
         return None
     if in_poly(x, y, SHIELD_POLY):
@@ -148,7 +143,7 @@ def render(size):
                 px.extend((0, 0, 0, 0))
             else:
                 cov = a // n
-                # Unpremultiplied colour: average over the covered samples only.
+                # Average covered samples to produce unpremultiplied colour.
                 covered = a // 255
                 px.extend((r // covered, g // covered, b // covered, cov))
     return bytes(px)

@@ -8,11 +8,8 @@ const cache = require('../src/common/cache.js');
 const parseList = require('../src/common/parse-list.js');
 const crawls = require('../src/common/crawl.js');
 
-// A stand-in for `browser.storage.local`. Two crawls sharing one of these are
-// two page loads sharing one browser profile.
 const { fakeStorage } = require('../test-support/storage.js');
 
-/** The repository every crawl here walks. */
 const REF = { owner: 'git-utensils', repo: 'Spoon-Knife' };
 
 const MINUTE = 60 * 1000;
@@ -27,10 +24,6 @@ function ghsa(suffix) {
 }
 
 /**
- * One page of the advisory list, in the shape `parse-list` reads: the container,
- * the segmented control carrying the four tabs, the rows, and the link to the
- * next page.
- *
  * @param {{ state: string, ids: readonly string[], next?: string | null }} page
  * @returns {string}
  */
@@ -79,9 +72,7 @@ function parse(html) {
 }
 
 /**
- * A queue stand-in that answers pages from a table of them and records what was
- * asked for. It spends no slot, so a test of what a walk asks for costs no
- * clock.
+ * Return supplied pages immediately and record requests.
  *
  * @param {Record<string, string>} pages
  */
@@ -103,9 +94,7 @@ function fakeQueue(pages) {
 }
 
 /**
- * A queue stand-in that answers the pages it holds and reports every other read
- * stopped, which is the maintainer navigating away while the walk was mid-state.
- * Nothing was asked of GitHub, so the answer says nothing about the page.
+ * Return supplied pages and report other requests as stopped.
  *
  * @param {Record<string, string>} pages
  */
@@ -139,7 +128,6 @@ function options(extra) {
   };
 }
 
-/** The first page of each open state. */
 const TRIAGE_URL = `/${REF.owner}/${REF.repo}/security/advisories?state=triage`;
 const DRAFT_URL = `/${REF.owner}/${REF.repo}/security/advisories?state=draft`;
 
@@ -171,9 +159,6 @@ test('both open states are crawled whichever tab the page was opened on', async 
     [DRAFT_URL]: listHtml({ state: 'draft', ids: [ghsa('bbbb')] }),
   });
 
-  // The page the maintainer is looking at is the Draft tab. The four tabs are
-  // mutually exclusive, so the open set is the union of the two, and the table
-  // holds both whichever one is showing.
   const result = await crawls.crawl(options({ queue, storage, now: () => 0 }));
 
   assert.deepStrictEqual(queue.urls.sort(), [DRAFT_URL, TRIAGE_URL].sort());
@@ -204,8 +189,6 @@ test('the page being looked at costs no request', async () => {
     })
   );
 
-  // The first page of triage is the document the browser already has, so the
-  // walk starts at the page after it.
   assert.deepStrictEqual(queue.urls.sort(), [`${TRIAGE_URL}&page=2`, DRAFT_URL].sort());
   assert.deepStrictEqual(
     result.ids.sort(),
@@ -231,8 +214,6 @@ test('a page other than the first does not start the walk', async () => {
     })
   );
 
-  // The document is the third page, so the pages before it have not been seen
-  // and the walk starts where it always does.
   assert.deepStrictEqual(queue.urls, [TRIAGE_URL]);
 });
 
@@ -244,14 +225,10 @@ test('landing on page one keeps a walk that is part way through', async () => {
   const two = listHtml({ state: 'triage', ids: [ghsa('bbbb')], next: third });
   const three = listHtml({ state: 'triage', ids: [ghsa('cccc')] });
 
-  // The first page load reads pages one and two and then goes away, so the
-  // walk is holding the third page as the one still to read.
   const before = fakeQueue({ [TRIAGE_URL]: one, [second]: two });
   await crawls.crawl(options({ queue: before, storage, now: () => 0, states: ['triage'] }));
   assert.deepStrictEqual(before.urls, [TRIAGE_URL, second, third]);
 
-  // Coming back to the list lands on page one, which the walk read already.
-  // Its rows are free and are taken in, and the walk carries on where it was.
   const after = fakeQueue({ [TRIAGE_URL]: one, [second]: two, [third]: three });
   const resumed = await crawls.crawl(
     options({
@@ -289,9 +266,6 @@ test('a crawl a navigation interrupted resumes and repeats no page', async () =>
     [`${TRIAGE_URL}&page=3`]: listHtml({ state: 'triage', ids: [ghsa('cccc')] }),
   };
 
-  // The first page load reads page one and then goes away: the third page is
-  // absent from what this queue can answer, which is what a navigation looks
-  // like to the walk.
   const first = fakeQueue({ [TRIAGE_URL]: /** @type {string} */ (pages[TRIAGE_URL]) });
   const interrupted = await crawls.crawl(
     options({ queue: first, storage, now: () => 0, states: ['triage'] })
@@ -304,9 +278,7 @@ test('a crawl a navigation interrupted resumes and repeats no page', async () =>
     options({ queue: second, storage, now: () => MINUTE, states: ['triage'] })
   );
 
-  // It asks for the page it had reached, and for no page before it.
   assert.deepStrictEqual(second.urls, [`${TRIAGE_URL}&page=2`, `${TRIAGE_URL}&page=3`]);
-  // The advisory the first pass saw is still held, so nothing was lost either.
   assert.deepStrictEqual(resumed.ids.sort(), [ghsa('aaaa'), ghsa('bbbb'), ghsa('cccc')].sort());
   assert.ok(resumed.complete, 'the resumed walk did not finish');
 });
@@ -341,8 +313,6 @@ test('an advisory that left a state is dropped when that state is walked again',
   );
   assert.deepStrictEqual(before.ids.sort(), [ghsa('aaaa'), ghsa('bbbb')].sort());
 
-  // The second advisory was published, so the next walk of triage does not see
-  // it. It leaves the table with the state it left.
   const second = fakeQueue({
     [TRIAGE_URL]: listHtml({ state: 'triage', ids: [ghsa('aaaa')] }),
   });
@@ -365,9 +335,6 @@ test('a walk stopped part way keeps the advisories it has not seen again', async
     options({ queue: fakeQueue(pages), storage, now: () => 0, states: ['triage'] })
   );
 
-  // The walk stopped before its last page, so what it did not reach this time
-  // is not gone: a second pass that stops the same way still holds the first
-  // page's advisory.
   const again = await crawls.crawl(
     options({ queue: fakeQueue(pages), storage, now: () => MINUTE, states: ['triage'] })
   );
@@ -379,8 +346,6 @@ test('a walk that cannot get past a page gives up and starts over', async () => 
   const second = `${TRIAGE_URL}&page=2`;
   const wedged = listHtml({ state: 'triage', ids: [ghsa('aaaa'), ghsa('bbbb')], next: second });
 
-  // Page two answers nothing, every time it is asked. Each page load retries
-  // the page the walk is holding and gets no further.
   /** @type {string[][]} */
   const attempts = [];
   for (const at of [0, MINUTE, 2 * MINUTE]) {
@@ -393,16 +358,10 @@ test('a walk that cannot get past a page gives up and starts over', async () => 
   }
   assert.deepStrictEqual(attempts, [[TRIAGE_URL, second], [second], [second]]);
 
-  // It has spent its attempts on that page, so the page load after asks for
-  // nothing at all.
   const quiet = fakeQueue({ [TRIAGE_URL]: wedged });
   await crawls.crawl(options({ queue: quiet, storage, now: () => 3 * MINUTE, states: ['triage'] }));
   assert.deepStrictEqual(quiet.urls, [], 'a walk that gave up spent a request straight away');
 
-  // Past the staleness threshold the walk starts over from the first page,
-  // which is what clears a stored page GitHub will not answer for. The state
-  // holds one advisory now, and the walk reaching its last page is what drops
-  // the one that left.
   const shrunk = listHtml({ state: 'triage', ids: [ghsa('aaaa')] });
   const again = fakeQueue({ [TRIAGE_URL]: shrunk });
   const done = await crawls.crawl(
@@ -419,15 +378,11 @@ test('a walk a stop interrupts keeps the page it had reached', async () => {
   const second = `${TRIAGE_URL}&page=2`;
   const first = listHtml({ state: 'triage', ids: [ghsa('aaaa'), ghsa('bbbb')], next: second });
 
-  // Page one lands and the walk takes hold of page two, and then the stop
-  // arrives: a maintainer who navigated away while the walk was mid-state.
   const opened = stoppedQueue({ [TRIAGE_URL]: first });
   await crawls.crawl(options({ queue: opened, storage, now: () => 0, states: ['triage'] }));
   assert.deepStrictEqual(opened.urls, [TRIAGE_URL, second]);
 
-  // Twice more, each a page load that asks for the page the walk is holding and
-  // is stopped before the request goes out. A stop is not a page GitHub will
-  // not serve, so no attempt is spent on it however often it happens.
+  // Stopping before a request is sent does not count as a failed attempt.
   /** @type {string[][]} */
   const attempts = [];
   for (const at of [MINUTE, 2 * MINUTE]) {
@@ -443,8 +398,6 @@ test('a walk a stop interrupts keeps the page it had reached', async () => {
   }
   assert.deepStrictEqual(attempts, [[second], [second]]);
 
-  // Three stops later the walk is where it was, so the page load that gets to
-  // finish asks for page two and for no page before it.
   const resumed = stoppedQueue({ [second]: listHtml({ state: 'triage', ids: [ghsa('bbbb')] }) });
   const done = await crawls.crawl(
     options({ queue: resumed, storage, now: () => 3 * MINUTE, states: ['triage'] })
@@ -481,8 +434,7 @@ test('a next link that leaves this repository is not followed', async () => {
 
 test('a walk gives up rather than following a cycle', async () => {
   const storage = fakeStorage();
-  // Every page names itself as the next one, which is what a walk that followed
-  // a page it had already read would follow forever at a request a second.
+  // Each page links to itself.
   const queue = fakeQueue({
     [TRIAGE_URL]: listHtml({ state: 'triage', ids: [ghsa('aaaa')], next: TRIAGE_URL }),
   });
@@ -496,8 +448,7 @@ test('a walk gives up rather than following a cycle', async () => {
 });
 
 /**
- * A state of `count` pages, each linking to the next and the last linking
- * nowhere.
+ * Build `count` linked pages. The last page ends the list.
  *
  * @param {number} count
  * @returns {Record<string, string>}
@@ -518,8 +469,6 @@ function pagedTriage(count) {
 
 test('a walk reads every page of a state, however many there are', async () => {
   const storage = fakeStorage();
-  // Past any bound this crawl has ever carried, so a walk that stopped at one
-  // would leave the last pages unread and say the state was done.
   const pages = pagedTriage(60);
   const queue = fakeQueue(pages);
   const result = await crawls.crawl(
@@ -538,8 +487,6 @@ test('a walk reads every page of a state, however many there are', async () => {
 test('a walk that stops with a page still to read is not recorded complete', async () => {
   const storage = fakeStorage();
   const pages = pagedTriage(60);
-  // The queue answers the first fifty-two pages and reports the rest stopped,
-  // which is the maintainer navigating away mid-state.
   const held = Object.fromEntries(
     Object.entries(pages).filter(([url]) => {
       const page = Number(url.split('page=')[1] ?? '1');

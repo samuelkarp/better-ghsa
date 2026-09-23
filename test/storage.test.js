@@ -10,9 +10,6 @@ const branches = require('../src/common/branches.js');
 const cache = require('../src/common/cache.js');
 
 /**
- * A stand-in for `browser.storage.local` carrying the methods named and no
- * others, so a name can be made to answer for one caller and not another.
- *
  * @param {readonly string[]} methods
  * @returns {Record<string, unknown>}
  */
@@ -24,9 +21,7 @@ function localWith(methods) {
 }
 
 /**
- * Runs `body` with the two globals a browser gives the extension API set to
- * what the case needs, and puts them back afterwards. Nothing here is a
- * browser, so both are absent to start with and are deleted again.
+ * Install browser and chrome globals for the callback and delete them afterward.
  *
  * @param {{ browser?: unknown, chrome?: unknown }} globals
  * @param {() => void} body
@@ -45,9 +40,6 @@ function withGlobals(globals, body) {
 }
 
 /**
- * What each of the four callers reads when nothing is injected in place of the
- * browser's own store.
- *
  * @returns {Record<string, unknown>}
  */
 function storesRead() {
@@ -71,10 +63,6 @@ test('outside a browser there is no store, and every caller says so', () => {
 });
 
 test('a name whose store cannot answer is passed over for one that can', () => {
-  // Firefox gives both names and a shim can stand under either. A `browser`
-  // whose `storage.local` carries no `get` is not a store this extension can
-  // read, and `chrome` beside it is. Settling on the first name found turned
-  // the gate off while the caches went on filling.
   const working = localWith(['get', 'set', 'remove']);
   withGlobals(
     { browser: { storage: { local: localWith(['set']) } }, chrome: { storage: { local: working } } },
@@ -91,8 +79,6 @@ test('a name whose store cannot answer is passed over for one that can', () => {
 });
 
 test('the cache is the caller that evicts, and asks for a store that can', () => {
-  // `remove` is what an eviction runs, so a store carrying only `get` and `set`
-  // answers for the three callers that read and write and not for the cache.
   const partial = localWith(['get', 'set']);
   const whole = localWith(['get', 'set', 'remove']);
   withGlobals({ browser: { storage: { local: partial } }, chrome: { storage: { local: whole } } }, () => {
@@ -108,8 +94,6 @@ test('the cache is the caller that evicts, and asks for a store that can', () =>
 });
 
 test('the list is watched on the API the list is read from', () => {
-  // The listener and the read have to be on one store, or a change written to
-  // the store this extension reads never reaches the gate.
   /** @type {string[]} */
   const subscribed = [];
   const shim = {

@@ -23,10 +23,6 @@ const allowlist = require('../src/common/allowlist.js');
 
 const { fakeStorage } = require('../test-support/storage.js');
 
-// The list of repositories the extension acts on is stored rather than compiled
-// in, and is empty on a fresh install. The fixtures here are that repository's,
-// so the list is put in place and read before the first test, which is what the
-// extension itself does before it takes a page.
 test.before(async () => {
   allowlist.setStorage({
     get: async () => ({ [allowlist.STORAGE_KEY]: ['git-utensils/spoon-knife'] }),
@@ -35,23 +31,15 @@ test.before(async () => {
   await allowlist.load();
 });
 
-// The queue and the crawl turn a fetched page into a document the way a content
-// script does. Nothing in this file reaches the network: every response is a
-// string a test wrote.
 globalThis.DOMParser = /** @type {typeof globalThis.DOMParser} */ (
   /** @type {unknown} */ (DOMParser)
 );
 
-/** The repository the list fixture belongs to, and the one on the allowlist. */
 const REF = { owner: 'git-utensils', repo: 'Spoon-Knife' };
 
-/** The advisory the triage fixture holds. */
 const TRIAGE_ID = 'GHSA-jmvx-2wfw-xfgj';
 
 test('the storage stand-in holds a copy of what it was seeded with', async () => {
-  // `browser.storage.local` stores a structured clone. A fake holding the
-  // caller's own object would let the code under test read back a change it
-  // never wrote, and would carry a write out of the test that made it.
   const held = { advisory: { read: 1 } };
   const store = fakeStorage(held);
   await store.set({ advisory: { read: 2 } });
@@ -61,33 +49,24 @@ test('the storage stand-in holds a copy of what it was seeded with', async () =>
 
 const MINUTE = 60 * 1000;
 
-/** A clock the queue moves rather than waiting on, so a crawl costs no time. */
 let clockAt = Date.parse('2026-08-27T12:00:00Z');
 cache.setClock(() => clockAt);
 cache.setStorage(fakeStorage());
 
-/** What the queue answers with, by path. A test fills this in before it runs. */
 /** @type {Record<string, string>} */
 const pages = {};
 
-/** Every path the queue asked for, in order. @type {string[]} */
+/** @type {string[]} */
 const asked = [];
 
 /**
- * What to run while a path is being answered, by path. A test that has to act
- * while a collection is in flight puts the act here, and it runs once: the
- * entry is taken out before it is called, so a retry of the same path does not
- * run it again.
+ * Run each path's callback once, when its request is received.
  *
  * @type {Record<string, () => Promise<void>>}
  */
 const during = {};
 
 /**
- * What a queue this file makes reads and waits with. Every answer is a string a
- * test wrote, so no queue made with these reaches the network, whichever
- * repository it is for.
- *
  * @type {import('../src/list/table.js').RefreshOptions}
  */
 const QUEUE_OPTIONS = {
@@ -109,10 +88,6 @@ const QUEUE_OPTIONS = {
   },
 };
 
-/**
- * The one queue this repository's requests go through, made here so the view's
- * own collection finds it rather than making one that would reach the network.
- */
 table.queueFor(REF, QUEUE_OPTIONS);
 
 /**
@@ -132,8 +107,6 @@ function document(html) {
 }
 
 /**
- * The list fixture inside the frame GitHub replaces on a soft navigation.
- *
  * @param {string} name
  * @returns {Document}
  */
@@ -146,9 +119,7 @@ function listPage(name) {
 }
 
 /**
- * Lets the work a control started off a change event finish. Staging a reason
- * reads the advisory's stored state, and reading it hashes the values the
- * confirmations bind to, so the store catches up some turns after the pick.
+ * Staging a closure reason includes asynchronous fingerprint calculations.
  *
  * @returns {Promise<void>}
  */
@@ -183,7 +154,7 @@ function textOf(scope, selector) {
 /**
  * @param {ParentNode} scope
  * @param {string} selector
- * @returns {string[]} what every match reads, whitespace collapsed.
+ * @returns {string[]} The matched texts with whitespace collapsed.
  */
 function textsOf(scope, selector) {
   return Array.from(scope.querySelectorAll(selector)).map((node) =>
@@ -192,9 +163,7 @@ function textsOf(scope, selector) {
 }
 
 /**
- * Picks an option the way a maintainer does. The selection is the `selected`
- * attribute here, which is what this document model reads a select's value
- * from.
+ * linkedom reads a select's value from the selected attribute.
  *
  * @param {Element} select
  * @param {string} value
@@ -212,8 +181,7 @@ function choose(select, value) {
 
 /**
  * @param {Element} row
- * @returns {string} every chip under one row's title, as one line. The chips
- *   sit against each other, so the text alone runs them together.
+ * @returns {string} The chip texts under the title, separated by spaces.
  */
 function chipLine(row) {
   return textsOf(row, '.bghsa-done-chips span.Label').join(' ');
@@ -221,8 +189,7 @@ function chipLine(row) {
 
 /**
  * @param {Element} row
- * @returns {string} the state chip, which stands in a cell of its own beside
- *   the title, and an empty string on a row carrying none.
+ * @returns {string} The state chip text, or an empty string.
  */
 function stateLine(row) {
   return textsOf(row, '.bghsa-done-state span.Label').join(' ');
@@ -261,10 +228,8 @@ function stateColors(row) {
 
 /**
  * @param {Element} row
- * @param {string} prefix What the surface drawing the row names its own parts.
- * @returns {string[]} what each cell beside the main column holds, in the order
- *   the row draws them. The main column is the first child, so the cells are
- *   what follows it.
+ * @param {string} prefix The surface class prefix.
+ * @returns {string[]} The columns after the title, in display order.
  */
 function cellsOf(row, prefix) {
   return Array.from(row.children)
@@ -281,8 +246,7 @@ function cellsOf(row, prefix) {
 /**
  * @param {Document} doc
  * @param {string} ghsaId
- * @returns {Element} that advisory's row on the done view. The table carries a
- *   row under the same attribute, so the view is named in the query.
+ * @returns {Element} The advisory row in the completed list.
  */
 function doneRow(doc, ghsaId) {
   return one(doc, `#${view.ROOT_ID} [data-bghsa-ghsa="${ghsaId}"]`);
@@ -327,8 +291,6 @@ function ghsa(suffix) {
 }
 
 /**
- * One page of the advisory list, in the shape `parse-list` reads.
- *
  * @param {{ state: string, ids: readonly string[], counts?: Record<string, number> }} page
  * @returns {string}
  */
@@ -356,8 +318,7 @@ function listHtml(page) {
         '</div>'
     )
     .join('');
-  // GitHub's pagination is a sibling of the Box, which is where the real page
-  // puts it.
+  // GitHub places pagination beside the Box.
   return (
     `<div id="advisories"><segmented-control><ul>${tabs}</ul></segmented-control>` +
     `<div class="Box">${rows}</div>` +
@@ -369,8 +330,6 @@ function listHtml(page) {
 }
 
 /**
- * One advisory detail page, in the shape `parse-detail` reads.
- *
  * @param {{ ghsaId: string, state: string, reportedAt: string }} advisory
  * @returns {string}
  */
@@ -393,7 +352,6 @@ function detailUrl(ghsaId) {
   return `/${REF.owner}/${REF.repo}/security/advisories/${ghsaId}`;
 }
 
-/** An advisory in the shape the parser produces, carrying only what is read. */
 /**
  * @param {Partial<import('../src/common/parse-detail.js').ParsedDetail>} fields
  * @returns {import('../src/common/parse-detail.js').ParsedDetail}
@@ -428,8 +386,7 @@ function advisory(fields) {
 }
 
 /**
- * One timeline event in the shape the parser produces. Only a person acts on an
- * advisory, so the text opens with a login and the phrase follows it.
+ * Timeline text starts with the actor login, followed by the event phrase.
  *
  * @param {{ at: string, text: string }} fields
  * @returns {import('../src/common/parse-detail.js').TimelineEvent}
@@ -495,11 +452,7 @@ function corpusOf(members, over = {}) {
 }
 
 /**
- * The corpus as production builds it: `membersOf` over the crawl's rows and
- * the cache's entries. Nothing here hands a member an advisory object. A
- * member's advisory is what `record.advisoryFrom` reads back out of storage,
- * which is the only advisory the done view ever holds, so a control this
- * exercises is the control a maintainer gets.
+ * Build the corpus from crawled rows and cached records through membersOf.
  *
  * @param {readonly { ghsaId: string, state: string, record?: unknown }[]} entries
  * @returns {Promise<import('../src/done/corpus.js').Corpus>}
@@ -528,8 +481,6 @@ async function cachedCorpus(entries) {
 }
 
 /**
- * A rendered list page carrying the extension's table and this view.
- *
  * @param {import('../src/done/corpus.js').Corpus | null} [corpus]
  * @returns {Promise<Document>}
  */
@@ -596,8 +547,6 @@ test('the done view is reached from a toggle beside the one for GitHub', async (
     'and the toggle offers the way back'
   );
 
-  // The list pages and every advisory they name, all through the one queue the
-  // list surface holds for this repository.
   assert.deepStrictEqual(asked.slice(before), [
     `${base}?state=published`,
     `${base}?state=closed`,
@@ -628,7 +577,6 @@ test('the done view is reached from a toggle beside the one for GitHub', async (
     'the header counts what the view holds'
   );
 
-  // Nothing the view inserts reads back as one of GitHub's own rows.
   const inserted = one(doc, `#${view.ROOT_ID}`).querySelectorAll(
     table.PARSED_SELECTORS.join(', ')
   ).length;
@@ -646,8 +594,7 @@ test("the four views converge, and GitHub's own view comes back whole", async ()
   const listBox = one(doc, `#${table.ROOT_ID} .bghsa-list-box`);
 
   /**
-   * @returns {string} which of the four is in view, named once. Two of them
-   *   showing at once, or none, is what this catches.
+   * @returns {string} The visible views, joined by "+".
    */
   const showing = () => {
     const shown = [];
@@ -662,9 +609,7 @@ test("the four views converge, and GitHub's own view comes back whole", async ()
 
   /**
    * @param {HTMLElement} node
-   * @returns {void} presses a control the way a maintainer reaches it. A
-   *   control held out of view accepts a synthetic click, so a press of one is
-   *   this test's own defect and is reported as one.
+   * @returns {void} Clicks a visible control; fails if the control is hidden.
    */
   const press = (node) => {
     assert.ok(
@@ -685,8 +630,6 @@ test("the four views converge, and GitHub's own view comes back whole", async ()
   press(githubToggle(doc));
   assert.strictEqual(showing(), 'native', "the done view gives way to GitHub's");
 
-  // GitHub's own view carries one control of the extension's, the way back, so
-  // neither of the other two views can be opened from here.
   assert.ok(
     doneToggle(doc).classList.contains(table.HIDDEN_CLASS),
     "the done toggle is out of reach while GitHub's view is showing"
@@ -713,8 +656,6 @@ test("the four views converge, and GitHub's own view comes back whole", async ()
   press(doneToggle(doc));
   assert.strictEqual(showing(), 'table', 'and so does pressing the done toggle again');
 
-  // Hiding is not destroying: what came back is GitHub's own view, whole. It is
-  // reached from each of the extension's three views in turn.
   for (const open of [() => {}, () => press(doneToggle(doc)), () => press(statsToggle(doc))]) {
     open();
     press(githubToggle(doc));
@@ -755,15 +696,13 @@ test('the state chip is colored by the ending and the severity by GitHub', async
   const neither = ghsa('cccd');
   const doc = await page(
     await corpusOf([
-      // The class GitHub painted this advisory's own severity chip with. It is
-      // not the class for `low`, so what comes out can only be what was carried.
+      // Use a class inconsistent with the severity to check that the supplied class is preserved.
       member({
         ghsaId: painted,
         state: 'published',
         severity: 'low',
         severityClass: 'Label--orange',
       }),
-      // A read supplies the level, so it supplies the color with it.
       member({
         ghsaId: read,
         state: 'published',
@@ -778,11 +717,9 @@ test('the state chip is colored by the ending and the severity by GitHub', async
           severityClass: 'Label--warning',
         }),
       }),
-      // Nothing to reuse, so GitHub's neutral modifier stands in.
       member({ ghsaId: bare, state: 'published', severity: 'low' }),
-      // The crawl found this one under `?state=closed` and its own page says
-      // Triage. The page is what the row reads, and the two endings are the
-      // only states a color is named for.
+      // The advisory was crawled as closed and read as triage.
+      // The row follows the advisory read.
       member({
         ghsaId: neither,
         state: 'closed',
@@ -838,15 +775,12 @@ test('the state chip is colored by the ending and the severity by GitHub', async
     'and its severity takes no fill'
   );
 
-  // A chip carrying a color no rule defines draws as though it carried none.
   for (const name of ['bghsa-tone-done', 'bghsa-tone-success', 'bghsa-fill']) {
     assert.ok(view.STYLE_TEXT.includes(`.${name} {`), `no rule defines .${name}`);
   }
 });
 
 test("a completed row carries the line GitHub's own row carried", async () => {
-  // The open list draws this line from the same builder, so the two lists
-  // cannot come to say a report was opened on different days.
   const closed = ghsa('ceec');
   const doc = await page(
     await corpusOf([member({ ghsaId: closed, state: 'closed', openedAt: '2026-03-14T00:00:00Z' })])
@@ -859,9 +793,6 @@ test("a completed row carries the line GitHub's own row carried", async () => {
 });
 
 test('a completed row names the day the advisory ended after that line', async () => {
-  // Closing and publishing are two endings and the line names the one the
-  // advisory came to. The third row is read and its timeline holds neither, so
-  // the clause is left out the way every other unread part of the line is.
   const closed = ghsa('cfca');
   const published = ghsa('cfcb');
   const neither = ghsa('cfcc');
@@ -914,16 +845,8 @@ test('a completed row names the day the advisory ended after that line', async (
 });
 
 test('the ending a completed row takes is the one its state names', async () => {
-  // An advisory closed, reopened, and published carries both endings on its
-  // timeline, and its state is what says which of the two ended it. The line
-  // names the publication, and the row sorts by the publication: above an
-  // advisory closed after that close and before that publication.
-  //
-  // The third was crawled while it was closed and reopened after that, so its
-  // state names neither ending while its timeline still holds the close. The
-  // state is what the row goes by, so the row takes no ending: the line carries
-  // no ending clause, and the row stands below both rows that have one, though
-  // its close falls between their two endings.
+  // The current state selects the ending used for display and sorting.
+  // For triage advisories, prior close events are excluded from the current ending.
   const closed = ghsa('eaaa');
   const reopened = ghsa('ebbb');
   const revived = ghsa('eccc');
@@ -983,14 +906,8 @@ test('the ending a completed row takes is the one its state names', async () => 
 });
 
 test('a completed row takes the last of the endings its state names', async () => {
-  // An advisory closed, reopened, and closed again holds two closes, and the
-  // one that ended it is the second. The row reads that close and sorts by it,
-  // where the timings measure to the first. The rule is one rule, so a
-  // timeline carrying two publications reads the last of those the same way.
-  //
-  // The three between them run the two orderings against each other. By the
-  // last of each ending they come out reopened, republished, once; by the
-  // first they come out once, reopened, republished.
+  // Rows use the latest close or publication. Timing metrics use the first.
+  // These events produce different row orders for the two choices.
   const reopened = ghsa('gaaa');
   const republished = ghsa('gbbb');
   const once = ghsa('gccc');
@@ -1053,11 +970,7 @@ test('a completed row takes the last of the endings its state names', async () =
 });
 
 test('advisories that ended on one day are ordered by the time of day', async () => {
-  // The row shows the day, and the order is by the instant beneath it. The
-  // corpus hands its members over by identifier and the identifiers here run
-  // the other way, so the evening close standing first is this view's
-  // ordering. Two closes at one instant tie, and a tie keeps that identifier
-  // order.
+  // Rows sort by the full timestamp. Equal timestamps retain identifier order.
   const morning = ghsa('faaa');
   const evening = ghsa('fbbb');
   const alsoEvening = ghsa('fccc');
@@ -1100,10 +1013,6 @@ test('advisories that ended on one day are ordered by the time of day', async ()
 });
 
 test('the completed list is ordered by the instant each advisory ended', async () => {
-  // The members arrive in the identifier order the corpus holds them in, and
-  // that order is the reverse of the endings, so what comes out can only be
-  // the ordering this view puts on them. The two endings are mixed, because a
-  // publication is an ending as much as a close is.
   const first = ghsa('daaa');
   const second = ghsa('dbbb');
   const third = ghsa('dccc');
@@ -1129,8 +1038,6 @@ test('the completed list is ordered by the instant each advisory ended', async (
       endedOn(first, 'Closed', '2026-01-05T09:00:00Z', 'closed this as not planned'),
       endedOn(second, 'Published', '2026-04-09T09:00:00Z', 'published this advisory'),
       endedOn(third, 'Closed', '2026-08-02T09:00:00Z', 'closed this as not planned'),
-      // Read, and its timeline records no ending, so it has no instant to sort
-      // by any more than a member nothing has read has.
       member({ ghsaId: noEvent, state: 'closed', advisory: advisory({ ghsaId: noEvent, state: 'Closed' }) }),
       member({ ghsaId: unread, state: 'closed' }),
     ])
@@ -1144,9 +1051,6 @@ test('the completed list is ordered by the instant each advisory ended', async (
 });
 
 test('both lists put the state and the observation in their last two cells', async () => {
-  // The two rows are drawn by one builder: a maintainer moving between the
-  // open list and the completed one finds the state and the observation in the
-  // same place on both.
   const closed = ghsa('cbcb');
   const doc = await page(await corpusOf([member({ ghsaId: closed, state: 'closed' })]));
 
@@ -1163,8 +1067,6 @@ test('both lists put the state and the observation in their last two cells', asy
 });
 
 test('the severity chip stands on a published row and not on a closed one', async () => {
-  // One severity, one color, and two states over it, so a row that drew the
-  // chip from the level alone would draw both.
   const published = ghsa('ccce');
   const closed = ghsa('cccf');
   const doc = await page(
@@ -1189,8 +1091,6 @@ test('the severity chip stands on a published row and not on a closed one', asyn
 });
 
 test('the reason control stands on a closed row and not on a published one', async () => {
-  // Both rows are backed by a read, so the control's presence can only follow
-  // from the state the row is in.
   const closed = ghsa('cdcd');
   const published = ghsa('dcdc');
   const doc = await page(
@@ -1231,9 +1131,7 @@ test('the reason control stands on a closed row and not on a published one', asy
 /**
  * @param {Document} doc
  * @param {string} facet
- * @returns {Element} the control holding the completed list to one value of
- *   that facet. The bar carries the open list's filters beside these, and both
- *   surfaces have a `state` facet, so the query names whose controls these are.
+ * @returns {Element} The completed list's filter control for the facet.
  */
 function filterIn(doc, facet) {
   return one(doc, `#${table.ROOT_ID} .bghsa-done-controls [${table.FACET_ATTRIBUTE}="${facet}"]`);
@@ -1249,7 +1147,7 @@ function itemNodes(control) {
 
 /**
  * @param {Element} control
- * @returns {string} what its menu offers, as one line.
+ * @returns {string} The menu item labels as one line.
  */
 function itemsOf(control) {
   return itemNodes(control)
@@ -1258,11 +1156,9 @@ function itemsOf(control) {
 }
 
 /**
- * Presses an item the way a maintainer does.
- *
  * @param {Document} doc
  * @param {string} facet
- * @param {string} value What the item holds the control to.
+ * @param {string} value The selected value.
  * @returns {void}
  */
 function pick(doc, facet, value) {
@@ -1286,8 +1182,6 @@ function shownIds(doc) {
 }
 
 /**
- * One advisory read carrying a maintainer's stored closure reason.
- *
  * @param {string} ghsaId
  * @param {string} state
  * @param {string | null} reason
@@ -1318,9 +1212,7 @@ function ended(ghsaId, state, reason) {
 }
 
 test('the severity filter is over the published rows', async () => {
-  // REQUIREMENTS.md section 10: publication settles the rating and a closed
-  // advisory carries no severity, so a level on a closed row means nothing and
-  // that row falls out of every value of this filter.
+  // The severity filter applies to published advisories (REQUIREMENTS.md section 10).
   const high = ghsa('saaa');
   const low = ghsa('sbbb');
   const closed = ghsa('sccc');
@@ -1364,7 +1256,6 @@ test('the filters keep the rows they name and the count follows them', async () 
       member({ ghsaId: second, state: 'published', advisory: ended(second, 'Published', null) }),
       member({ ghsaId: named, state: 'closed', advisory: ended(named, 'Closed', 'duplicate') }),
       member({ ghsaId: bare, state: 'closed', advisory: ended(bare, 'Closed', null) }),
-      // The crawl found this one and nothing has read it.
       member({ ghsaId: unread, state: 'closed' }),
     ])
   );
@@ -1399,9 +1290,8 @@ test('the filters keep the rows they name and the count follows them', async () 
   assert.strictEqual(shownIds(doc), [first, second, named, bare, unread].sort().join(' '));
   assert.strictEqual(textOf(doc, count), '5 advisories');
 
-  // A published row holds no reason and matches no value of one, so the reason
-  // filter is over the closed advisories alone. A row nothing has read passes
-  // every filter, because no value has been looked up that could exclude it.
+  // The closure reason filter applies to closed advisories.
+  // Unread rows pass every filter until a read supplies their values.
   pick(doc, 'reason', 'Duplicate');
   assert.strictEqual(shownIds(doc), [named, unread].sort().join(' '));
 
@@ -1412,8 +1302,6 @@ test('the filters keep the rows they name and the count follows them', async () 
     'the closed advisories a reason has still to be set on'
   );
 
-  // A press picks a value and shuts the menu it was made in, which is the box
-  // being drawn again from what the filters are now holding the list to.
   filterIn(doc, 'state').setAttribute('open', '');
   pick(doc, 'state', 'Closed');
   assert.ok(!filterIn(doc, 'state').hasAttribute('open'), 'the menu a value was picked in stayed open');
@@ -1424,7 +1312,6 @@ test('the filters keep the rows they name and the count follows them', async () 
   );
   pick(doc, 'state', '');
 
-  // The reset is the way back, and it is offered from the unfiltered list.
   const reset = one(doc, `#${table.ROOT_ID} .bghsa-done-reset`);
   assert.strictEqual(reset.hasAttribute('disabled'), false, 'the reset is shut while a filter holds');
   /** @type {HTMLElement} */ (/** @type {unknown} */ (reset)).click();
@@ -1449,7 +1336,6 @@ test('a list the filters keep no row of says so', async () => {
     ])
   );
 
-  // Each filter keeps the row the other drops.
   pick(doc, 'state', 'Published');
   pick(doc, 'reason', 'Duplicate');
   assert.strictEqual(shownIds(doc), '', 'the filters kept a row neither names');
@@ -1478,8 +1364,6 @@ test("the completed filters sit on the bar with the open list's", async () => {
   const shows = (selector) =>
     !one(doc, `#${table.ROOT_ID} ${selector}`).classList.contains(table.HIDDEN_CLASS);
 
-  // One set is in view at a time, and it is the one that filters what is on
-  // screen.
   assert.deepStrictEqual(
     [shows('.bghsa-list-controls'), shows('.bghsa-done-controls')],
     [true, false],
@@ -1502,9 +1386,7 @@ test("the completed filters sit on the bar with the open list's", async () => {
   table.setViewMode(doc, table.VIEW_TABLE);
   table.applyVisibility(doc);
 
-  // Both surfaces have a State filter, and now both sets of controls stand in
-  // one root. A read landing in the table brings the table's own filters up to
-  // date and leaves the completed view's alone.
+  // Both lists share a controls root. Updating one list must preserve the other's filters.
   const offered = itemsOf(filterIn(doc, 'state'));
   const read = parseDetail.parseDetail(document(fixture('triage-thread.html')));
   assert.ok(read !== null, 'the fixture reads as an advisory');
@@ -1527,7 +1409,6 @@ test('a read landing leaves the filter under the maintainer alone', async () => 
     ])
   );
 
-  // The browser opens the menu on the press of its summary.
   const before = filterIn(doc, 'reason');
   const item = one(before, `[${table.VALUE_ATTRIBUTE}]`);
   before.setAttribute('open', '');
@@ -1543,8 +1424,7 @@ test('a read landing leaves the filter under the maintainer alone', async () => 
   assert.ok(after.hasAttribute('open'), 'the draw shut a menu that was open');
   assert.strictEqual(itemsOf(after), `Any | ${table.NO_VALUE}`);
 
-  // A read that turns up a value the menu does not offer is what changes it,
-  // and it changes the items and not the control they are in.
+  // Update menu items while preserving the open control.
   const held = /** @type {import('../src/done/corpus.js').Corpus} */ (view.stateOf(doc).corpus);
   const landed = /** @type {import('../src/done/corpus.js').CorpusMember} */ (
     view.memberOf(held, arriving)
@@ -1595,9 +1475,7 @@ test('the header says a list will stay short when nothing is filling it', async 
   const members = [member({ ghsaId: ghsa('eeff'), state: 'closed', severity: 'high' })];
   const header = `#${view.ROOT_ID} .bghsa-done-header span.Label`;
 
-  // A corpus the walk assembled goes on saying it is being filled, and this
-  // page has no collection running. What is missing is not on its way, and the
-  // corpus saying otherwise does not make it so.
+  // An incomplete corpus can report running after its collection has stopped.
   const doc = await page(corpusOf(members, { complete: false, running: true }));
   assert.deepStrictEqual(textsOf(doc, header), ['Failed to load all advisories']);
 
@@ -1605,7 +1483,6 @@ test('the header says a list will stay short when nothing is filling it', async 
   view.draw(doc);
   assert.deepStrictEqual(textsOf(doc, header), ['Failed to load all advisories']);
 
-  // A walk that reached the last page of both states says nothing.
   view.setState(doc, { corpus: corpusOf(members, { complete: true, running: false }) });
   view.draw(doc);
   assert.deepStrictEqual(textsOf(doc, header), []);
@@ -1643,11 +1520,8 @@ test('the header counts what a running crawl has still to read', async () => {
   for (const id of ids) during[detailUrl(id)] = record;
   await view.collect(doc, QUEUE_OPTIONS);
 
-  // What the header said while each of those five requests was out. The walk
-  // has no count to give, because it is what finds out how many there are. From
-  // the first read landing the chip counts what the queue has still to read, so
-  // a crawl that is working can be told from one that has stopped. The words
-  // are the ones the open list's own header carries.
+  // The queue count becomes available after the crawl.
+  // The header then reports pending advisory reads.
   assert.deepStrictEqual(said, [
     table.WALKING_TEXT,
     table.WALKING_TEXT,
@@ -1689,8 +1563,6 @@ test('the header keeps up while the queue serves the open list', async () => {
     said.push(textsOf(doc, `#${view.ROOT_ID} .bghsa-done-header span.Label`).join('+'));
   };
   during[detailUrl(done[0] ?? '')] = async () => {
-    // The open list's refresh queues its reads through the one queue this
-    // repository has, while this collection is running.
     await queue.add([...open]);
     await record();
   };
@@ -1698,10 +1570,7 @@ test('the header keeps up while the queue serves the open list', async () => {
 
   await view.collect(doc, QUEUE_OPTIONS);
 
-  // What the header said while each of those five reads was out: this view's
-  // two advisories, then the open list's three. The number is what the one
-  // queue has still to read, so every read moves it, whichever surface asked
-  // for it, and what is on screen is what is true.
+  // Both surfaces share the queue count, including reads requested by the open list.
   assert.deepStrictEqual(said, [
     table.WALKING_TEXT,
     'Loading (4 left)...',
@@ -1717,11 +1586,8 @@ test('the header keeps up while the queue serves the open list', async () => {
 });
 
 test('the header stops saying it is loading when the collection is put down', async () => {
-  // GitHub re-renders the frame while a collection is running. A render pass
-  // lands on the page mid-swap, reads no advisory list, and the list surface
-  // tells every surface the page names no repository, which puts the
-  // collection down. The header has to stop saying a collection is running,
-  // because none is and nothing will move it again.
+  // A render during a frame replacement can stop collection.
+  // The header must reflect that stop when the list returns.
   const ids = [ghsa('haaa'), ghsa('hbbb'), ghsa('hccc')];
   const base = `/${REF.owner}/${REF.repo}/security/advisories`;
   pages[`${base}?state=published`] = listHtml({
@@ -1744,11 +1610,9 @@ test('the header stops saying it is loading when the collection is put down', as
   doneToggle(doc).click();
 
   during[detailUrl(ids[1] ?? '')] = async () => {
-    // The frame is empty for a moment, and a pass runs while it is.
     one(doc, '#repo-content-turbo-frame').innerHTML = '';
     await table.render(doc);
     table.ensureRefresh(doc, QUEUE_OPTIONS);
-    // GitHub finishes the swap and the next pass finds the page again.
     one(doc, '#repo-content-turbo-frame').innerHTML = held;
     await table.render(doc);
   };
@@ -1762,19 +1626,14 @@ test('the header stops saying it is loading when the collection is put down', as
   );
   assert.strictEqual(view.stateOf(doc).reading, false, 'the view holds a collection that is gone');
 
-  // The collection was put down with a read still queued. It is taken back
-  // here, so what this test left behind is not spent by the next one.
   const { queue } = table.queueFor(REF, QUEUE_OPTIONS);
   await queue.load();
   await queue.run();
 });
 
 test('the header stands from the ask and counts down while the walk waits', async () => {
-  // One queue serves the repository and serves it in order. The open list's
-  // refresh is running when the view is opened, so this collection's walk waits
-  // behind every read the queue already holds, and those reads land while this
-  // view has no corpus and no rows of its own. What the maintainer has to see
-  // through that wait is a number that moves.
+  // The completed-list crawl waits behind queued open-list reads.
+  // Its header must show progress while those reads finish.
   const open = [ghsa('kaaa'), ghsa('kbbb'), ghsa('kccc'), ghsa('kddd')];
   const done = [ghsa('laaa')];
   const base = `/${REF.owner}/${REF.repo}/security/advisories`;
@@ -1804,7 +1663,6 @@ test('the header stands from the ask and counts down while the walk waits', asyn
   during[detailUrl(done[0] ?? '')] = async () => record('its own read');
   during[`${base}?state=published`] = async () => record('its own walk');
 
-  // The open list's refresh is already running when the view is opened.
   const refreshing = queue.run();
   doneToggle(doc).click();
   record('the ask');
@@ -1812,10 +1670,7 @@ test('the header stands from the ask and counts down while the walk waits', asyn
   await refreshing;
   record('the end');
 
-  // The chip stands from the ask, and every read the queue takes off its list
-  // lowers the count, whether or not this view has a row for it. The walk goes
-  // out once the queue is drained, and from there the collection's own reads
-  // fill the rows.
+  // The header tracks the shared queue before this view has any rows.
   assert.deepStrictEqual(said, [
     'the ask: Loading (4 left)... rows=0 corpus=null',
     'open read 1: Loading (4 left)... rows=0 corpus=null',
@@ -1829,9 +1684,7 @@ test('the header stands from the ask and counts down while the walk waits', asyn
 });
 
 test('the count carries the read the queue has in flight', async () => {
-  // The view is opened while a read is out. Three advisories were queued, one
-  // of them is the request in flight and two are waiting, so what the queue has
-  // left to read is three, and the chip drawn at that moment says three.
+  // The queue count includes the in-flight request and both waiting advisories.
   const open = [ghsa('faaa'), ghsa('fbbb'), ghsa('fccc')];
   const held = ghsa('gaaa');
   const base = `/${REF.owner}/${REF.repo}/security/advisories`;
@@ -1874,8 +1727,6 @@ test('the list reads as loading until the first page of the walk lands', async (
   view.draw(doc);
   assert.strictEqual(textOf(doc, `#${view.ROOT_ID} .bghsa-done-empty`), 'Loading...');
 
-  // A collection that landed and found nothing is a repository with no done
-  // advisory, which is not a repository still loading.
   view.setState(doc, { corpus: corpusOf([]), reading: false });
   view.draw(doc);
   assert.strictEqual(textOf(doc, `#${view.ROOT_ID} .bghsa-done-empty`), 'Not found');
@@ -1883,9 +1734,6 @@ test('the list reads as loading until the first page of the walk lands', async (
 });
 
 /**
- * One comment on an advisory thread, in the shape the merge reads. A raw
- * payload makes it a state comment; no payload makes it an ordinary comment.
- *
  * @param {{ id: string, author: string, raw?: string }} fields
  * @returns {import('../src/common/parse-detail.js').ParsedComment}
  */
@@ -1904,10 +1752,6 @@ function comment(fields) {
 }
 
 test('the reason an advisory carries is the reason its row shows', async () => {
-  // The completed view exists to record and show a closure reason. Every other
-  // test here reaches the reason through a control a maintainer moved, or
-  // through a fixture that carries none, so the wiring from the advisory's own
-  // stored state to the row it is drawn on is what this asserts.
   const closed = ghsa('gghh');
   const held = advisory({
     ref: { ...REF, ghsaId: closed },
@@ -1944,8 +1788,6 @@ test('the reason an advisory carries is the reason its row shows', async () => {
 });
 
 test('a row says what its advisory duplicates, and links it where it can', async () => {
-  // The reason alone does not say which advisory this one repeats, so the row
-  // carries the pointer the panel carries and reaches it the same way.
   const linked = ghsa('dupa');
   const loose = ghsa('dupb');
   const pulled = ghsa('dupc');
@@ -2006,7 +1848,6 @@ test('a row says what its advisory duplicates, and links it where it can', async
     'a value nobody can interpret stands as the text it is'
   );
 
-  // A pull request of another repository, which is how one arrives in practice.
   const pull = one(doneRow(doc, pulled), '.bghsa-done-duplicate');
   assert.strictEqual(pull.textContent?.trim(), 'of containerd/containerd#13327');
   assert.strictEqual(
@@ -2016,9 +1857,7 @@ test('a row says what its advisory duplicates, and links it where it can', async
 });
 
 test('the duplicate pointer stands under the reason control', async () => {
-  // Beside the control the pointer adds its own width to the closure cell, and
-  // that cell holds every row's control in one column. Under it, the column
-  // stands where the rows with no pointer keep it.
+  // Place the duplicate pointer below the control to preserve closure-column alignment.
   const closed = ghsa('dupd');
   const doc = await page(
     await corpusOf([
@@ -2067,8 +1906,7 @@ test('the duplicate pointer stands under the reason control', async () => {
     null,
     'the pointer stands on a line of its own'
   );
-  // A value with no break in it wraps inside a line the control is wider than,
-  // so the widest thing in the cell is the control.
+  // Unbroken duplicate text must wrap within the control width.
   assert.ok(
     view.STYLE_TEXT.includes('.bghsa-done-duplicate-line {') &&
       view.STYLE_TEXT.includes('max-width: 12rem') &&
@@ -2101,10 +1939,7 @@ test('the option for an advisory carrying no reason reads blank', async () => {
 });
 
 test('an advisory this view reads teaches the owner and backport pickers', async () => {
-  // The panel offers the logins it has seen carrying a member badge and the
-  // release branches it has seen on the repository. Both are read off an
-  // advisory, and the advisories here are ones the crawl read rather than ones
-  // a maintainer opened, so what this view reads is worth the same.
+  // Crawled advisories supply observed members and release branches for the editor.
   members.clear();
   branches.clear();
   const read = parseDetail.parseDetail(document(fixture('triage-thread.html')));
@@ -2156,7 +1991,6 @@ test('a closure reason picked here and put back leaves nothing staged', async ()
   assert.ok(!save.hasAttribute('disabled'), 'Save stayed shut after the select moved');
   assert.strictEqual(save.getAttribute('aria-disabled'), null);
 
-  // Back to the reason the advisory carries, which this fixture does not have.
   choose(control, '');
   await settled();
   assert.strictEqual(
@@ -2246,7 +2080,6 @@ test('a closure reason set here goes out through the stored write path', async (
     'staged under the key the detail panel uses, so one advisory has one entry'
   );
   assert.strictEqual(edit.editsFor(key).closureReason, 'not a vulnerability');
-  // The snapshot that write would carry, built by the writer's own builder.
   assert.deepStrictEqual(
     edit.changesOf(context.tracking, context.fingerprints, edit.editsFor(key), {
       by: 'samuelkarp',
@@ -2302,8 +2135,6 @@ test('a reason a maintainer sets reaches GitHub as a state comment', async () =>
     `the snapshot GitHub was sent: ${markdown}`
   );
 
-  // The corpus holds the advisory as the crawl read it, which is a page from
-  // before this write. The row shows the reason the write landed.
   const shown = Array.from(
     one(doneRow(doc, TRIAGE_ID), 'select.bghsa-done-reason').querySelectorAll('option')
   )
@@ -2358,7 +2189,6 @@ test('the closure controls are held still while a save is out', async () => {
     );
     assert.strictEqual(textOf(during, '.bghsa-done-note'), 'Saving...');
 
-    // A press the disabled control cannot make, made anyway.
     assert.strictEqual(
       await view.setReason(doc, TRIAGE_ID, 'not a vulnerability'),
       null,
@@ -2387,9 +2217,6 @@ test('the closure controls are held still while a save is out', async () => {
 });
 
 test('a press that changes no reason writes nothing and draws no note', async () => {
-  // Save is shut with the select where it started, so no press reaches this
-  // refusal. It is still what a save carrying nothing answers with, and it says
-  // nothing, so the row shows nothing.
   const page_html = fixture('triage-thread.html');
   const read = parseDetail.parseDetail(document(page_html));
   assert.ok(read !== null, 'the fixture reads as an advisory');
@@ -2469,9 +2296,6 @@ test('a second visit to the done view spends no request on the corpus', async ()
     });
   }
 
-  // An earlier test in this file walked these states through the same storage,
-  // and a walk inside its threshold is not walked again. This is the first
-  // visit a maintainer with an empty cache makes.
   await cache.clear();
 
   const first = await page();
@@ -2483,9 +2307,6 @@ test('a second visit to the done view spends no request on the corpus', async ()
     'the first visit reads both list pages and every advisory they name'
   );
 
-  // The maintainer comes back an hour later: another page load, another
-  // document, and the cache the first visit filled. On one five-minute
-  // threshold this is the whole corpus again, at a request a second.
   clockAt += 60 * MINUTE;
   const second = await page();
   const at = asked.length;
@@ -2505,8 +2326,6 @@ test("a corpus is not drawn under the repository the maintainer moved to", async
   );
   assert.strictEqual(table.refOf(doc)?.repo, REF.repo, 'which is the one the page names');
 
-  // GitHub replaces the turbo frame on a soft navigation and keeps the
-  // document. The page now names another repository.
   one(doc, '#repo-content-turbo-frame').innerHTML = listHtml({
     state: 'published',
     ids: [ghsa('oooo')],
@@ -2544,8 +2363,6 @@ test('a page or a read the crawl could not take shows a banner', async () => {
     state: 'Published',
     reportedAt: '2026-03-02T00:00:00Z',
   });
-  // The closed list page and two advisories are the pages GitHub does not
-  // answer.
   delete pages[closedUrl];
   delete pages[detailUrl(unreadable)];
   delete pages[detailUrl(alsoUnreadable)];
@@ -2602,9 +2419,6 @@ test('a second collection names the reads that failed in it', async () => {
     'the first collection named the read that failed'
   );
 
-  // GitHub answers the advisory this time, so the second collection has no
-  // failure of its own. The queue is the same one, and it holds what the pass
-  // before it could not read.
   pages[detailUrl(unreadable)] = detailHtml({
     ghsaId: unreadable,
     state: 'Published',
@@ -2641,10 +2455,6 @@ test('a collection that resumes names only what it could not read', async () => 
   await cache.clear();
 
   const doc = await page();
-  // The maintainer follows a link out of the list while the advisory GitHub
-  // will not answer is in flight. The pass stops there, with the other
-  // advisory still to read and the failure in the progress the next page load
-  // takes back.
   during[detailUrl(failing)] = async () => {
     await moveTo(doc, MOVED, [ghsa('zaaa')]);
     table.ensureRefresh(doc, QUEUE_OPTIONS);
@@ -2657,7 +2467,6 @@ test('a collection that resumes names only what it could not read', async () => 
     'the stopped pass kept no record of the read that failed'
   );
 
-  // The maintainer comes back, and GitHub answers the advisory it refused.
   pages[detailUrl(failing)] = detailHtml({
     ghsaId: failing,
     state: 'Published',
@@ -2683,12 +2492,10 @@ test('a collection that resumes names only what it could not read', async () => 
   );
 });
 
-/** The repository a soft navigation moves to in the tests below. */
 const MOVED = { owner: 'git-utensils', repo: 'Fork-Knife' };
 
 /**
- * Moves the page to another repository the way a soft navigation does: GitHub
- * replaces the turbo frame and keeps the document.
+ * Replace the frame for a soft navigation to another repository.
  *
  * @param {Document} doc
  * @param {{ owner: string, repo: string }} ref
@@ -2733,9 +2540,6 @@ test('a collection that ends does not report the one now running finished', asyn
   });
   await cache.clear();
 
-  // The list page of the repository moved to is held until this test lets it
-  // go, so the collection of that repository is still crawling when the
-  // collection of the one left behind ends.
   /** @type {() => void} */
   let release = () => {};
   const held = new Promise((resolve) => {
@@ -2797,9 +2601,6 @@ test('a collection spends no request on a repository the page has left', async (
 
   const doc = await page();
   const mine = `/${REF.owner}/${REF.repo}/`;
-  // The maintainer follows a link out of the list while the walk is reading its
-  // first page. The render that lands on the repository they moved to is what
-  // tells this surface the page it was collecting for has gone.
   during[listUrl(REF, 'published')] = async () => {
     await moveTo(doc, MOVED, [ghsa('xxxx')]);
     table.ensureRefresh(doc, QUEUE_OPTIONS);
@@ -2819,8 +2620,6 @@ test('a collection spends no request on a repository the page has left', async (
     'the view reports a collection running that it put down'
   );
 
-  // What the collection did not spend is what a maintainer coming back takes
-  // up, and the walk it put down cost none of those reads twice.
   const back = asked.length;
   const { queue } = table.queueFor(REF, QUEUE_OPTIONS);
   await queue.load();
@@ -2835,10 +2634,8 @@ test('a collection spends no request on a repository the page has left', async (
 test('a read that names no advisory offers no write from here', async () => {
   const read = parseDetail.parseDetail(document(fixture('triage-thread.html')));
   assert.ok(read !== null && read.ref !== null, 'the fixture reads as an advisory');
-  // The reference comes off one region of the advisory page. A page laid out
-  // without it still reads, still caches, and still reads back as an advisory,
-  // and what it does not carry is the repository and the identifier a write
-  // would go to.
+  // An advisory can be cached with a null reference.
+  // Writing requires the repository and advisory identifier.
   const held = await cachedCorpus([
     { ghsaId: TRIAGE_ID, state: 'closed', record: { ...read, ref: null } },
   ]);

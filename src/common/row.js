@@ -10,50 +10,36 @@ if (typeof require === 'function') {
 }
 
 /**
- * What the line under a row's title is built from. Both lists carry the same
- * line, and each holds these three off a row of its own shape.
+ * Metadata shared by the open and completed advisory lists.
  *
  * @typedef {object} RowMeta
  * @property {string | null} ghsaId
  * @property {string | null} openedAt
  * @property {string | null} reporter
- * @property {string | null} [ending] How the advisory ended, as the line names
- *   it. A list of advisories that have not ended holds none.
+ * @property {string | null} [ending] Describes how the advisory ended.
  * @property {string | number | null} [endedAt] When it ended.
  */
 
 /**
- * One row of one of the extension's lists, as the surface drawing it describes
- * it. Everything a surface knows and this file does not arrives built: the
- * chips as specs, the lines under them and the cells beside them as elements.
+ * Each list supplies its chips, additional lines, and cells.
  *
  * @typedef {object} RowSpec
- * @property {string} prefix What this surface names its own parts, as the stem
- *   its classes are built on: `bghsa-list` or `bghsa-done`.
- * @property {string | null} ghsaId The advisory the row stands for, which the
- *   surface finds the row again by, and null where nothing named it.
- * @property {string | null} href Where the title leads, and null where the row
- *   knows no address.
- * @property {string} title What the title reads.
- * @property {string} meta The line under it.
+ * @property {string} prefix The CSS class prefix: `bghsa-list` or `bghsa-done`.
+ * @property {string | null} ghsaId Identifies the advisory for row updates.
+ * @property {string | null} href The title link URL, if known.
+ * @property {string} title The title text.
+ * @property {string} meta The metadata line below the title.
  * @property {readonly import('./chips.js').ChipSpec[]} chips
- * @property {readonly Element[]} [lines] What stands under the chips, in the
- *   main column.
+ * @property {readonly Element[]} [lines] Appear below the chips in the main column.
  * @property {readonly Element[]} cells The cells beside the main column, in the
  *   order they are drawn.
  */
 
 (() => {
-  /** How every surface builds an element. */
   const element = globalThis.bghsa.dom.element;
 
   /**
-   * The line GitHub's own row carries under the title. The lists replace those
-   * rows, so they carry what those rows carried, and a list whose advisories
-   * have ended names the ending after it.
-   *
-   * Every part is left out where nothing read it, the ending clause with the
-   * rest: it stands only where both the word and the instant are known.
+   * Include the ending only when both its label and date are known.
    *
    * @param {RowMeta} row
    * @returns {string}
@@ -71,9 +57,6 @@ if (typeof require === 'function') {
   }
 
   /**
-   * One cell beside the main column: the padding that parts it from what stands
-   * to its left, and whatever the surface names it.
-   *
    * @param {Document} doc
    * @param {string} className
    * @param {string} [text]
@@ -86,11 +69,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * One row of a list: the title as a link, the line GitHub's row carried, the
-   * chips, whatever else the surface puts under them, and the cells beside.
-   *
-   * The row carries none of the classes `parse-list` keys on, so a re-read of
-   * the page cannot take it for one of GitHub's.
+   * Extension rows omit the classes `parse-list` uses to identify GitHub rows.
    *
    * @param {Document} doc
    * @param {RowSpec} spec

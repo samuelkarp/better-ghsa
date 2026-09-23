@@ -17,68 +17,47 @@ if (typeof require === 'function') {
 }
 
 /**
- * One half of the corpus: the advisories in a set of states, and how much of
- * that set the crawl has been over.
+ * Group the corpus into open and completed advisories with crawl progress.
  *
  * @typedef {object} Half
  * @property {string} key
- * @property {string} name What the reader is told this half is.
- * @property {readonly string[]} states The `?state=` values it is the union of.
+ * @property {string} name The displayed group name.
+ * @property {readonly string[]} states The query states included in the group.
  * @property {import('../done/corpus.js').Corpus} corpus
- * @property {boolean} walked Whether a walk of any of its states has started.
- *   A half nothing has walked is drawn from the page being looked at alone, so
- *   the numbers over it are over that page.
+ * @property {boolean} walked Whether a selected state crawl has started. Otherwise this
+ *   group contains only visible-page data.
  */
 
 /**
- * What the statistics view holds for one document.
- *
  * @typedef {object} Held
- * @property {{ owner: string, repo: string } | null} ref The repository the
- *   halves belong to, and null before anything is read.
+ * @property {{ owner: string, repo: string } | null} ref The repository for both groups, or
+ *   null before a successful read.
  * @property {Half[]} halves
  */
 
 (() => {
-  /** The id of the element the statistics view owns. */
+
   const ROOT_ID = 'bghsa-stats';
 
-  /** The id of the statistics view's stylesheet. */
   const STYLE_ID = 'bghsa-stats-style';
 
-  /** The view this surface is, as the list page holds the choice. */
   const MODE = 'statistics';
 
-  /** What the toggle reads while another view is showing. */
   const SHOW_STATS = 'Show statistics';
 
-  /**
-   * What it reads while this one is. Both extension views go back to the same
-   * place, and the done view is where the label is defined.
-   */
   const SHOW_OPEN = globalThis.bghsa.view.SHOW_OPEN;
 
-  /** What the control that writes the file reads. */
   const EXPORT_LABEL = 'Export CSV';
 
-  /** What stands where nothing has been read. */
   const EMPTY_TEXT = 'Nothing has been read on this repository';
 
-  /** What stands in a count nothing carried a value for. */
   const NOTHING_TEXT = 'Nothing counted';
 
-  /** What says a crawl is filling the corpus these numbers are over. */
   const READING_TEXT = 'Reading';
 
   /**
-   * The two halves of the corpus, in the order they are named, and the crawl
-   * that fills each.
-   *
-   * REQUIREMENTS.md section 10 has the statistics over the whole corpus,
-   * because they describe active work as much as finished work. The open half
-   * is what the list table crawls and the done half is what the done view
-   * crawls, so this view reads what those two left behind and asks GitHub for
-   * nothing.
+   * Statistics combine open and completed advisories already collected by the
+   * list and done views (REQUIREMENTS.md section 10).
    *
    * @type {readonly { key: string, name: string, states: readonly string[] }[]}
    */
@@ -88,15 +67,9 @@ if (typeof require === 'function') {
   ];
 
   /**
-   * The counts the view draws, in the order it draws them, how each is ordered
-   * inside itself, and what the members carrying no value are to it. A month
-   * reads in time order; everything else reads commonest first, which is what a
-   * ratio is looked at for.
-   *
-   * `missingCounts` says the members carrying no value are an answer of their
-   * own. An advisory closed with nobody giving a reason ended that way, so it
-   * is counted with the rest and holds a share of its own. On every other count
-   * a member carrying no value stands outside the shares.
+   * Sort months chronologically and other tallies by frequency.
+   * For closure reasons, missing values count as outcomes in the denominator.
+   * Other tallies compute shares among supplied values.
    *
    * @type {readonly {
    *   key: string,
@@ -113,8 +86,6 @@ if (typeof require === 'function') {
   ];
 
   /**
-   * What one timing's spread is drawn as, in the order it is drawn.
-   *
    * @type {readonly { key: 'min' | 'median' | 'mean' | 'max', name: string }[]}
    */
   const SPREAD = [
@@ -125,15 +96,8 @@ if (typeof require === 'function') {
   ];
 
   /**
-   * Every rule the statistics view adds to the page.
-   *
-   * Each count is a list of its own, and the lists pack down columns. A list of
-   * one row and a list of thirty share no row baseline, so the short one is
-   * followed by the next list and not by a column's worth of nothing.
-   *
-   * The columns are sized by width, so how many there are follows the window
-   * and a narrow one gets a single column running the width of the page. A box
-   * is never split down the middle by the column it ends at.
+   * Use width-based columns to pack variable-height lists while keeping each
+   * list together.
    */
   const STYLE_TEXT = [
     '.bghsa-stats-over { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }',
@@ -142,8 +106,7 @@ if (typeof require === 'function') {
     '.bghsa-stats-title { gap: 0 8px; }',
     '.bghsa-stats-line { display: flex; align-items: baseline; gap: 4px 12px; }',
     '.bghsa-stats-value { flex: 1 1 auto; }',
-    // `currentColor` is what a foreground falls back to: the page's own text
-    // color reads in either theme, where a fixed one would be wrong in one.
+    // Use the page text color as the fallback in both themes.
     '.bghsa-stats-count { color: var(--fgColor-muted, currentColor);' +
       ' white-space: nowrap; text-align: right; }',
     '.bghsa-stats-ratio { color: var(--fgColor-muted, currentColor); white-space: nowrap;' +
@@ -170,13 +133,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * What the view holds for this document, with halves collected on a
-   * repository the page no longer names dropped.
-   *
-   * GitHub replaces the turbo frame on a soft navigation and keeps the
-   * document, so one document covers one repository's advisory list and then
-   * another's. The numbers are a hundred-odd advisories of one repository and
-   * say nothing about the next one.
+   * Discard data from the previous repository after GitHub replaces the frame
+   * within the same document.
    *
    * @param {Document} doc
    * @returns {Held}
@@ -193,32 +151,26 @@ if (typeof require === 'function') {
     return fresh;
   }
 
-  /** Which repository the list surface says the page is on. */
   const refOf = globalThis.bghsa.table.refOf;
 
-  /** How every surface builds an element. */
   const element = globalThis.bghsa.dom.element;
 
   /**
    * @param {string} key
-   * @returns {string} a camel-cased key as a label. A timing this reader does
-   *   not compute is named from its key, so one arriving later is drawn without
-   *   anything here being told about it.
+   * @returns {string} A display label derived from a camel-cased key.
    */
   function nameOf(key) {
     const words = key.replace(/([A-Z])/g, ' $1').toLowerCase().trim();
     return globalThis.bghsa.chips.sentenceCase(words);
   }
 
-  /** How many milliseconds are in each unit a duration is read in. */
   const DAY_MS = 24 * 60 * 60 * 1000;
   const HOUR_MS = 60 * 60 * 1000;
   const MINUTE_MS = 60 * 1000;
 
   /**
    * @param {number | null} ms
-   * @returns {string} a duration in the two largest units it reaches, and a dash
-   *   where there is none. A timing with nothing behind it is not a zero.
+   * @returns {string} The duration in its two largest units, or a dash if unavailable.
    */
   function formatDuration(ms) {
     if (ms === null || !Number.isFinite(ms)) return '—';
@@ -242,25 +194,19 @@ if (typeof require === 'function') {
 
   /**
    * @param {number} count
-   * @returns {string} how many advisories every number below is over. It is the
-   *   whole of what was counted, so it is said as a plain number: `Over 144`
-   *   reads as a floor under a number that has none.
+   * @returns {string} The sample size.
    */
   function totalTextOf(count) {
     return `${count} total ${count === 1 ? 'advisory' : 'advisories'}`;
   }
 
   /**
-   * The two halves of one repository's corpus, as the crawl record and the
-   * advisory cache already hold them.
-   *
-   * Nothing is fetched. The rows of the page being looked at are taken in the
-   * way the list table takes them in, at no request cost, so a repository
-   * nothing has walked still counts what the maintainer can see.
+   * Combine cached crawls and detail reads with rows from the visible list page.
+   * An uncrawled repository can still contribute its visible rows.
    *
    * @param {Document} doc
-   * @returns {Promise<Held>} the halves, and a holding with no repository where
-   *   the page is not an advisory list.
+   * @returns {Promise<Held>} The corpus groups, with a null repository outside advisory
+   *   lists.
    */
   async function read(doc) {
     const crawl = globalThis.bghsa.crawl;
@@ -272,8 +218,7 @@ if (typeof require === 'function') {
     const at = globalThis.bghsa.cache.now();
     const entry = await globalThis.bghsa.cache.getList(ref, { at });
     const list = crawl.listFrom(entry === null ? null : entry.record);
-    // The page is seeded with no page number, so its rows are taken in and no
-    // walk is recorded as having started on the strength of it.
+    // Omit a page number to add visible rows without marking a crawl as started.
     crawl.seed(list, parsed, {
       ref,
       at,
@@ -301,8 +246,6 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The whole corpus, which is what every number here is over.
-   *
    * @param {readonly Half[]} halves
    * @returns {import('../done/corpus.js').Corpus}
    */
@@ -321,9 +264,7 @@ if (typeof require === 'function') {
 
   /**
    * @param {Record<string, number | null>} expected
-   * @returns {number | null} how many advisories GitHub's own state tabs
-   *   counted, and null where any tab went unread. It is the corpus size before
-   *   any crawl, so it is what says whether what is counted here is all of it.
+   * @returns {number | null} The sum of state-tab counts, or null if any count is unknown.
    */
   function expectedTotal(expected) {
     let total = 0;
@@ -336,8 +277,7 @@ if (typeof require === 'function') {
 
   /**
    * @param {Document} doc
-   * @returns {boolean} whether a crawl of either half is running. The numbers
-   *   are over a corpus that is still being filled while one is.
+   * @returns {boolean} Whether either corpus group is being collected.
    */
   function reading(doc) {
     if (globalThis.bghsa.table.progressOf(doc) !== null) return true;
@@ -345,20 +285,16 @@ if (typeof require === 'function') {
   }
 
   /**
-   * What every number below is over, said before any of them is read.
-   *
-   * A count over a half nobody has crawled is a count over the page the
-   * maintainer is looking at, and a count over a walk that stopped part way is
-   * over part of a state. Neither is a count over the repository, so each half
-   * says which it is.
+   * Show coverage for each corpus group before displaying statistics. An
+   * uncrawled group covers the visible page; an unfinished crawl covers only
+   * part of the repository.
    *
    * @param {Document} doc
    * @param {readonly Half[]} halves
    * @returns {Element}
    */
   function buildOver(doc, halves) {
-    // Every chip here is dimmed: color is kept for where the work stands, and
-    // what a count is over is not that.
+
     const chips = globalThis.bghsa.chips;
     const box = element(doc, 'div', 'Box-body bghsa-stats-over');
     const corpus = whole(halves);
@@ -384,8 +320,6 @@ if (typeof require === 'function') {
   }
 
   /**
-   * One line of one list: what it is of, how many, and what share that is.
-   *
    * @param {Document} doc
    * @param {string} value
    * @param {string} count
@@ -401,11 +335,6 @@ if (typeof require === 'function') {
   }
 
   /**
-   * One list's header: what the list is, and how much of the corpus it holds.
-   *
-   * The two sit at either end of one line, and the rule that spaces them keeps
-   * them apart where the name runs the width of the box.
-   *
    * @param {Document} doc
    * @param {string} name
    * @param {string} meta
@@ -419,8 +348,6 @@ if (typeof require === 'function') {
   }
 
   /**
-   * One count, as a list of its own sized to what it holds.
-   *
    * @param {Document} doc
    * @param {{ key: string, name: string, by: 'count' | 'value', missingCounts?: boolean }} group
    * @param {import('../done/stats.js').Tally} tally
@@ -429,9 +356,8 @@ if (typeof require === 'function') {
   function buildTally(doc, group, tally) {
     const box = element(doc, 'div', 'Box mb-3 bghsa-stats-list');
     box.setAttribute('data-bghsa-count', group.key);
-    // What every share below is over. Where the members carrying no value are
-    // an answer of their own they are in it, and where they are an absence the
-    // shares are over the members that carried a value, which is `tally.ratios`.
+    // Include missing values in the denominator only when the group counts
+    // them as outcomes.
     const over = group.missingCounts === true ? tally.counted + tally.missing : tally.counted;
     box.append(buildHeader(doc, group.name, `${over} of ${tally.corpus}`));
 
@@ -452,8 +378,7 @@ if (typeof require === 'function') {
       );
     }
     if (tally.missing > 0) {
-      // The members carrying no value are counted where the reader can see
-      // them, so a ratio over the rest is not read as a ratio over the corpus.
+      // Display missing values alongside the sample size.
       const line = buildLine(
         doc,
         'None',
@@ -471,8 +396,6 @@ if (typeof require === 'function') {
   }
 
   /**
-   * One timing, as a list of its own.
-   *
    * @param {Document} doc
    * @param {{ key: string, name: string, omission: string }} timing
    * @param {import('../done/stats.js').Timing} found
@@ -487,9 +410,7 @@ if (typeof require === 'function') {
       list.append(buildLine(doc, each.name, formatDuration(found[each.key]), ''));
     }
     if (found.omitted > 0) {
-      // Why the rest are not in the numbers above, where the reader is looking
-      // at them: the event this timing measures to never happened on them. It
-      // is the reason and the count, as a row of the list.
+      // Show the number of omitted durations and the event required to measure them.
       const line = buildLine(doc, timing.omission, String(found.omitted), '');
       line.classList.add('bghsa-stats-omitted');
       list.append(line);
@@ -499,9 +420,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The statistics of REQUIREMENTS.md section 10, over the whole corpus. A
-   * timing whose event this extension cannot observe is named and left
-   * uncomputed, because a reader owed a metric is owed the reason it is absent.
+   * Display statistics over both corpus groups and reasons for unavailable
+   * metrics (REQUIREMENTS.md section 10).
    *
    * @param {Document} doc
    * @param {readonly Half[]} halves
@@ -539,9 +459,6 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The statistics view: what the numbers are over, the export, and one list
-   * per count and per timing.
-   *
    * @param {Document} doc
    * @returns {Element}
    */
@@ -583,14 +500,11 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Writes the corpus out as a file the browser takes. It is built here in the
-   * page from what the view already holds: nothing is fetched and nothing is
-   * sent anywhere.
+   * Download a CSV generated locally from the collected corpus.
    *
    * @param {Document} doc
    * @param {import('../done/csv.js').DownloadOptions} [options]
-   * @returns {string | null} the blob URL the press went to, and null where
-   *   there is nothing to write or no way to hand it over.
+   * @returns {string | null} The download URL, or null if export is unavailable.
    */
   function exportCsv(doc, options) {
     const state = current(doc);
@@ -602,12 +516,11 @@ if (typeof require === 'function') {
     return csv.download(doc, csv.filenameFor(state.ref, at), csv.toCsv(corpus), options);
   }
 
-  /** How the list surface holds a node out of view. */
   const setHidden = globalThis.bghsa.table.setHidden;
 
   /**
    * @param {Document} doc
-   * @returns {void} adds the statistics view's stylesheet once.
+   * @returns {void}
    */
   function ensureStyle(doc) {
     if (doc.getElementById(STYLE_ID) !== null) return;
@@ -618,12 +531,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Draws the view into the list surface, under the bar the three toggles sit
-   * on.
-   *
    * @param {Document} doc
-   * @returns {Element | null} the view, and null where the list surface is not
-   *   on the page.
+   * @returns {Element | null} The view, or null if the list surface is absent.
    */
   function draw(doc) {
     const table = globalThis.bghsa.table;
@@ -639,15 +548,12 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Reads the corpus back out of what the two crawls left behind and draws it.
-   *
    * @param {Document} doc
    * @returns {Promise<Element | null>}
    */
   async function load(doc) {
     const found = await read(doc);
-    // A read landing after the maintainer has gone to another repository is a
-    // read of the one they left.
+    // Ignore results for a repository the document has left.
     const table = globalThis.bghsa.table;
     const here = refOf(doc);
     if (found.ref !== null && (here === null || table.refKey(here) !== table.refKey(found.ref))) {
@@ -658,9 +564,6 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The toggle this surface puts on the bar, beside the one that restores
-   * GitHub's view and the one that opens the done view.
-   *
    * @param {Document} doc
    * @returns {Element}
    */
@@ -674,8 +577,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Switches between this view and the table. The list surface holds which of
-   * the views the page is on, so a press here cannot leave two showing.
+   * The list surface owns view selection to keep only one view visible.
    *
    * @param {Document} doc
    * @returns {void}
@@ -688,16 +590,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Draws the view under whichever view the page is on.
-   *
-   * GitHub's own view carries GitHub's controls. This toggle opens a view of
-   * the extension's own, so it goes out of view with the table and comes back
-   * with it, leaving one control on the bar there: the one that brings the
-   * extension's views back.
-   *
-   * The numbers are read again whenever this view is the one showing, because
-   * the crawls that fill them are the other two surfaces' and land while it is
-   * open.
+   * Hide extension toggles in GitHub's native view. Refresh visible statistics
+   * from the other views' latest crawl data.
    *
    * @param {Document} doc
    * @param {string} mode
@@ -738,8 +632,6 @@ if (typeof require === 'function') {
 
   globalThis.bghsa.statistics = exported;
 
-  // The list surface holds the choice of view and the bar the toggles sit on,
-  // so this one takes its place there as soon as it loads.
   globalThis.bghsa.table.addSurface({ control: buildToggle, show });
 
   if (typeof module !== 'undefined') {

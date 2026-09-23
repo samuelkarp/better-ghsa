@@ -17,10 +17,6 @@ const cache = require('../src/common/cache.js');
 
 const allowlist = require('../src/common/allowlist.js');
 
-// The list of repositories the extension acts on is stored rather than compiled
-// in, and is empty on a fresh install. The fixtures here are that repository's,
-// so the list is put in place and read before the first test, which is what the
-// extension itself does before it takes a page.
 test.before(async () => {
   allowlist.setStorage({
     get: async () => ({ [allowlist.STORAGE_KEY]: ['git-utensils/spoon-knife'] }),
@@ -46,34 +42,24 @@ function document(markup) {
   return /** @type {Document} */ (/** @type {unknown} */ (parseHTML(markup).document));
 }
 
-/** The advisory the triage fixture holds, which is on the allowlist. */
 const REF = { owner: 'git-utensils', repo: 'Spoon-Knife', ghsaId: 'GHSA-jmvx-2wfw-xfgj' };
 
-/** The advisory the draft fixture holds. */
 const DRAFT_REF = { owner: 'git-utensils', repo: 'Spoon-Knife', ghsaId: 'GHSA-5hg2-rfq2-8fm5' };
 
-/** The highest ordering claim the triage fixture carries. */
 const OBSERVED = 7;
 
-/** The claim the state comment the signed-in maintainer wrote carries. */
 const OWN_SEQ = 3;
 
-/** The write time every test stamps, so the snapshot it expects is exact. */
 const AT = '2026-08-26T11:00:00Z';
 
-/** The comment the signed-in maintainer wrote the triage fixture's state in. */
 const OWN_ID = '282847';
 
-/** The comment the reporter wrote their own state comment in. */
 const OTHER_ID = '282848';
 
-/** The comment the draft fixture's own state comment sits in. */
 const DRAFT_COMMENT = 'advisory-comment-282849';
 
-/** The most recent member action the draft fixture carries. */
 const MEMBER_ACTION = '2026-08-25T22:20:26Z';
 
-/** What the fetch stand-in answers the page request with. */
 const PAGE_HTML = '<<the advisory page>>';
 
 /**
@@ -85,8 +71,7 @@ function escapeHtml(text) {
 }
 
 /**
- * The comment GitHub renders from a state comment body: the marker in a code
- * span, and the fence as a highlighted `pre` whose text reconstitutes the JSON.
+ * Render the marker as a code span and the JSON as a highlighted pre.
  *
  * @param {string} markdown
  * @returns {string}
@@ -117,14 +102,12 @@ function postedBody(params) {
  * @typedef {(params: URLSearchParams) => { status: number, html: string }} Answer
  */
 
-/** GitHub answering with the comment the request wrote. @type {Answer} */
+/** @type {Answer} */
 const echo = (params) => ({ status: 200, html: renderStateComment(postedBody(params)) });
 
 /**
- * GitHub answering with the comment the request wrote and putting it into the
- * page the next fetch reads, which is where an edited comment stands from then
- * on. Every fence in the comment moves, because GitHub renders the body once
- * per responsive shape.
+ * Update the document returned by subsequent reads.
+ * GitHub repeats the comment body for different responsive layouts.
  *
  * @param {Document} page
  * @param {string} elementId The comment the write edits.
@@ -143,8 +126,7 @@ function landing(page, elementId) {
 }
 
 /**
- * A stand-in for `fetch` that hands the page request one document and the
- * comment request to `answer`.
+ * Return `page` for advisory reads and use `answer` for comment writes.
  *
  * @param {Document} page
  * @param {Answer} [answer]
@@ -220,7 +202,7 @@ function triagePage() {
 
 /**
  * @param {Document} page
- * @param {string} login The account the page is to read as signed in.
+ * @param {string} login The signed-in account.
  * @returns {void}
  */
 function signIn(page, login) {
@@ -232,13 +214,11 @@ function signIn(page, login) {
 }
 
 /**
- * Turns the advisory's second state comment into a rival: an org member's,
- * written by `login`, claiming the sequence the signed-in maintainer's own
- * comment claims. The advisory then carries two snapshots at one number, which
- * is what the login settles.
+ * Replace the second state comment with a member snapshot at OWN_SEQ.
+ * The login determines which snapshot wins the tie.
  *
  * @param {Document} page
- * @param {string} login The account the rival comment reads as.
+ * @param {string} login The snapshot author.
  * @returns {void}
  */
 function rival(page, login) {
@@ -313,8 +293,7 @@ test('a field this reader does not know survives the write', async () => {
 
 test('the sequence the write claims is one above the highest on the advisory', async () => {
   const { outcome } = await run(triagePage(), {});
-  // The advisory's highest claim is the reporter's, whose snapshot this reader
-  // does not count toward state. The next write still outranks it.
+  // New writes must exceed even the sequence numbers in untrusted snapshots.
   assert.strictEqual(outcome.merged?.observedSeq, OBSERVED);
   assert.strictEqual(outcome.merged?.seq, 3);
   assert.ok(
@@ -357,8 +336,6 @@ test('the first write on an advisory creates the comment', async () => {
 
 test('a write never targets the comment another maintainer wrote', async () => {
   const page = triagePage();
-  // The same page, read from the reporter's session. The comment holding
-  // current state is not theirs, and the write does not touch it.
   signIn(page, 'prakleumas');
   const { outcome, calls } = await run(page, {});
   assert.ok(outcome.ok === true, `the write failed: ${outcome.message}`);
@@ -380,8 +357,6 @@ test('a viewer login spelled in another case edits the comment already there', a
   );
 
   const page = triagePage();
-  // One account, spelled the way another part of GitHub spells it. Its state
-  // comment is the one this write replaces, and a second one is not created.
   signIn(page, 'SamuelKarp');
   const { outcome, calls } = await run(page, {});
   assert.ok(outcome.ok === true, `the write failed: ${outcome.message}`);
@@ -404,8 +379,7 @@ test('a maintainer with two state comments is not written for', async () => {
 });
 
 test('two state comments of one maintainer are named before the holder', async () => {
-  // The maintainer can delete a comment. They cannot reload their way out of
-  // holding two, so that is what the refusal has to say.
+  // Duplicate state comments require deletion. Reloading cannot resolve them.
   const page = triagePage();
   const other = page.querySelector(`#advisory-comment-${OTHER_ID}`);
   if (other === null) throw new Error('the fixture carries one state comment');
@@ -427,15 +401,12 @@ test('a page that moved past the sequence the panel loaded refuses the write', a
     assert.strictEqual(outcome.reason, 'stale', `sequence ${loadedSeq}`);
     assert.strictEqual(calls.length, 1, 'a comment request went out');
     assert.strictEqual(outcome.snapshot, null);
-    // The panel reloads from what the page says now.
     assert.strictEqual(outcome.merged?.observedSeq, OBSERVED);
     assert.strictEqual(outcome.message, 'Error: concurrent edits');
   }
 });
 
 test('a snapshot other than the one the panel loaded refuses the write', async () => {
-  // The sequence number is where the panel left it, and the snapshot holding
-  // state at that number is not the one the panel read.
   const { outcome, calls } = await run(triagePage(), {
     loadedHolder: { commentId: null, by: 'yaroslavk' },
   });
@@ -457,12 +428,8 @@ test('a comment other than the one that held state refuses the write', async () 
 });
 
 test('a rival claiming one sequence takes the state, and the write it refuses', async () => {
-  // REQUIREMENTS.md section 3 settles two snapshots claiming one sequence by
-  // the author's login. This is the move the sequence number cannot show: the
-  // panel loaded holding state, a rival save landed at the same number, and the
-  // highest claim on the advisory is where the panel left it. The two halves
-  // put the rival's login on either side of the maintainer's, so a tie settled
-  // the other way fails one of them rather than agreeing with both.
+  // Logins break sequence ties (REQUIREMENTS.md section 3).
+  // Exercise rivals whose logins sort before and after the maintainer's.
   const taken = triagePage();
   rival(taken, 'yaroslavk');
   const refused = await run(taken, {
@@ -474,7 +441,6 @@ test('a rival claiming one sequence takes the state, and the write it refuses', 
   assert.strictEqual(refused.outcome.reason, 'superseded');
   assert.strictEqual(refused.calls.length, 1, 'a comment request went out');
   assert.strictEqual(refused.outcome.snapshot, null);
-  // The panel reloads holding the snapshot that took the state from it.
   assert.strictEqual(refused.outcome.merged?.source?.id, OTHER_ID);
   assert.strictEqual(refused.outcome.merged?.observedSeq, OWN_SEQ);
 
@@ -494,9 +460,7 @@ test('a rival claiming one sequence takes the state, and the write it refuses', 
 });
 
 test('the state a write of this panel left behind is not a rival', async () => {
-  // A remembered state names no comment in the document, so the login it went
-  // out under is what stands for it. Every save after the first reads it, and
-  // refusing there would refuse them all.
+  // The saved snapshot lacks a comment ID. Its author identifies the holder.
   const { outcome } = await run(triagePage(), {
     loadedHolder: { commentId: null, by: 'SamuelKarp' },
   });
@@ -524,6 +488,17 @@ test('a page naming no signed-in account is not written to', async () => {
   assert.strictEqual(calls.length, 1, 'a comment request went out');
 });
 
+test('an unreadable viewer with a comment form is not diagnosed as a missing form', async () => {
+  const page = triagePage();
+  const avatar = page.querySelector('div.timeline-new-comment span.timeline-comment-avatar');
+  assert.ok(avatar !== null);
+  avatar.remove();
+  const { outcome, calls } = await run(page, {});
+  assert.strictEqual(outcome.reason, 'unreadable');
+  assert.strictEqual(outcome.diagnostic, undefined);
+  assert.strictEqual(calls.length, 1, 'a comment request went out');
+});
+
 test('a snapshot this extension could not interpret takes one confirmation', async () => {
   const page = fixture('draft.html');
   const refusal = await run(page, { ref: DRAFT_REF, loadedSeq: 2 });
@@ -546,9 +521,6 @@ test('a snapshot this extension could not interpret takes one confirmation', asy
 });
 
 test('a snapshot this extension would not read back is not written', async () => {
-  // No control on the panel builds this, and the write checks anyway: an
-  // advisory carrying a snapshot its own writer refuses to read is one every
-  // reader excludes from state.
   const { outcome, calls } = await run(triagePage(), { changes: { owners: 'dmcgowan' } });
   assert.strictEqual(outcome.ok, false);
   assert.strictEqual(outcome.reason, 'invalid');
@@ -606,8 +578,6 @@ test('the first write on an advisory measures triage from the last member action
 
 test('a first write on an advisory no member has touched measures from the report', async () => {
   const page = fixture('draft.html');
-  // The member badge is what makes an action a member's, so a page carrying
-  // none is a page no member is visible on.
   for (const badge of page.querySelectorAll('div.timeline-comment-group span.Label')) {
     badge.remove();
   }
@@ -689,23 +659,18 @@ test('the state comment names the extension and links to it', () => {
   const link = '<a href="https://github.com/samuelkarp/better-ghsa">Better GHSA</a>';
   assert.strictEqual(schema.STATE_COMMENT_SUMMARY, `${link} tracking state`);
   assert.strictEqual(body.includes(`<summary>${link} tracking state</summary>`), true);
-  // The shape the summary's link is known to render in: each of the block's own
-  // tags on a line, with a blank line between it and what it wraps.
+  // This spacing preserves GitHub's rendering of the summary link.
   assert.strictEqual(body.startsWith('<details>\n\n<summary>'), true);
   assert.strictEqual(body.trimEnd().endsWith('\n\n</details>'), true);
-  // The marker still rides in a code span of its own, outside the fence.
   assert.strictEqual(body.includes(`\n\`${schema.STATE_COMMENT_MARKER}\`\n`), true);
 });
 
 
-/** The moment the clock reads while a write reads the advisory. */
 const READ_AT = Date.parse('2026-08-26T10:59:00Z');
 
 /**
  * @param {import('../src/detail/state.js').StateWriteResult} outcome
- * @returns {import('../src/common/parse-detail.js').ParsedDetail} the advisory
- *   the write says it left behind, put through the cache's own reader, which is
- *   what every surface reading a stored record sees.
+ * @returns {import('../src/common/parse-detail.js').ParsedDetail} The saved advisory after a JSON round trip through the cache reader.
  */
 function stored(outcome) {
   const held = record.advisoryFrom(
@@ -726,8 +691,6 @@ test('a write that landed hands back the advisory carrying what it wrote', async
     assert.strictEqual(after.state?.['triage'], 'evaluating', 'the write is not in the advisory');
     assert.strictEqual(after.seq, 8);
     assert.strictEqual(after.observedSeq, 8);
-    // The comment that held state is the one the edit replaced the body of, so
-    // the advisory carries one state comment of this maintainer's and not two.
     assert.strictEqual(after.source?.id, OWN_ID);
     assert.strictEqual(
       stored(outcome).comments.filter(
@@ -736,8 +699,6 @@ test('a write that landed hands back the advisory carrying what it wrote', async
       1,
       'the edit left the maintainer holding two state comments'
     );
-    // The unknown field rides along, so a reader of the entry carries it forward
-    // the way a reader of the page would.
     assert.deepStrictEqual(after.state?.['cutleryPolicy'], { sharpened: true });
   } finally {
     cache.setClock(null);
@@ -745,9 +706,8 @@ test('a write that landed hands back the advisory carrying what it wrote', async
 });
 
 /**
- * The triage advisory with every comment this maintainer wrote taken out, which
- * is the advisory a first write creates a comment on. The page still says which
- * account it is signed in as: that is read off the new-comment box.
+ * Remove the signed-in maintainer's comments.
+ * The new-comment composer still identifies the account.
  *
  * @returns {Document}
  */
@@ -763,8 +723,7 @@ function pageWithNoOwnComment() {
 
 test('a created comment reaches the advisory the write hands back', async () => {
   const page = pageWithNoOwnComment();
-  // Nothing on this page shows the account a badge. A member badge it carried
-  // on another advisory in this organization is what says its snapshots count.
+  // Membership observed on another advisory in the organization establishes trust.
   members.clear();
   members.remember({ owner: 'git-utensils' }, ['samuelkarp']);
   try {
@@ -774,9 +733,7 @@ test('a created comment reaches the advisory the write hands back', async () => 
     const after = merge.mergeSnapshots(stored(outcome).comments);
     assert.strictEqual(after.state?.['triage'], 'evaluating', 'the created comment holds no state');
     assert.strictEqual(after.seq, 8);
-    // GitHub minted the comment's identifier and the page this write read does
-    // not carry it, so the login it went out under is what stands for it. A
-    // save built on this entry is not refused as another maintainer's.
+    // The new comment ID is unavailable until a reread. Its author identifies the holder.
     const holder = state.holderOf(after);
     assert.strictEqual(holder.commentId, null);
     assert.strictEqual(holder.by, 'samuelkarp');
@@ -791,10 +748,7 @@ test('a created comment whose author shows no badge is not counted as state', as
   const { outcome } = await run(pageWithNoOwnComment(), { changes: { triage: 'evaluating' } });
   assert.ok(outcome.ok === true, `the write failed: ${outcome.message}`);
 
-  // Nothing this extension has read shows the account a member badge, and a
-  // snapshot from an author it cannot place does not hold state. The comment is
-  // in the advisory either way, and the badge on it settles the question when
-  // the advisory is read again.
+  // Retain the untrusted comment until a reread can establish its author's membership.
   const held = stored(outcome);
   const written = held.comments.find(
     (comment) => comment.author === 'samuelkarp' && comment.stateComment !== null
@@ -820,17 +774,11 @@ test('a write refused by the page hands that page back', async () => {
     assert.strictEqual(outcome.reason, 'stale');
     assert.strictEqual(calls.length, 1, 'a comment request went out');
     assert.strictEqual(outcome.snapshot, null);
-    // The fetch was spent reading the advisory, so the refusal hands back what
-    // it read: the panel reloads from it and the cache is stamped at the moment
-    // it was read.
     assert.strictEqual(outcome.readAt, READ_AT);
     const held = stored(outcome);
     const after = merge.mergeSnapshots(held.comments);
     assert.strictEqual(after.observedSeq, OBSERVED);
-    // Nothing was written, so the page carries the state it already held and
-    // not the change this save was refused for.
     assert.notStrictEqual(after.state?.['triage'], 'evaluating');
-    // The page handed back merges to the state the refusal reported.
     assert.strictEqual(after.seq, outcome.merged?.seq);
   } finally {
     cache.setClock(null);
@@ -838,8 +786,7 @@ test('a write refused by the page hands that page back', async () => {
 });
 
 test('a write GitHub turned away hands back no advisory', async () => {
-  // The request went out, so what the fetch read may already be behind what the
-  // advisory says, and there is no page to hand back.
+  // After a write request, the fetched page may already be outdated.
   const { outcome, calls } = await run(triagePage(), { changes: { triage: 'evaluating' } }, () => ({
     status: 500,
     html: '<html><body></body></html>',
@@ -851,12 +798,8 @@ test('a write GitHub turned away hands back no advisory', async () => {
 });
 
 test('a repository taken off the list while the page is out is refused', async () => {
-  // The behavioral half of the check below, which is a call count taken on a
-  // monkeypatched allowlist. Nothing is patched here: the maintainer takes the
-  // repository off the list from the settings page while the read is in
-  // flight, which every page of this extension hears about. The check before
-  // the request had already passed, so the one on the page that came back is
-  // the only thing left that can stop the write.
+  // Remove the repository from the allowlist during the fetch.
+  // The writer must check the allowlist again before posting.
   const page = triagePage();
   const talk = session(page);
   try {

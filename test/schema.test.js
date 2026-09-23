@@ -166,8 +166,6 @@ test('normalization settles line endings, trailing space, outer blanks, and NFC'
   for (const [name, raw, normalized] of cases) {
     assert.strictEqual(schema.normalize(raw), normalized, name);
   }
-  // The composed form is one code point per letter, which is what makes the
-  // row above a Unicode normalization and not an equality of two spellings.
   assert.ok('café'.length === 4, 'the composed expectation is not NFC');
 });
 

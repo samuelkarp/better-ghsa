@@ -8,44 +8,30 @@ if (typeof require === 'function') {
 }
 
 /**
- * Where a duplicate points, as a link on github.com.
- *
  * @typedef {object} DuplicatePointer
- * @property {string} text What the link reads.
- * @property {string} href Where it leads, as a path on github.com.
+ * @property {string} text The link text.
+ * @property {string} href The link path on github.com.
  */
 
 (() => {
-  /** How every surface builds an element. */
   const element = globalThis.bghsa.dom.element;
 
-  /** The word between the closure reason and what it points at. */
   const OF = 'of';
 
   /**
-   * A GHSA identifier, whole. GitHub writes one as `GHSA` and three groups of
-   * four, and reads it case-insensitively, so the two spellings of one
-   * identifier both match and both resolve.
+   * GHSA identifiers are case-insensitive.
    */
   const GHSA_ID = /^GHSA(?:-[0-9a-z]{4}){3}$/i;
 
   /**
-   * One issue or one pull request on github.com, whole, as its address reads.
-   * A repository numbers the two in one sequence and GitHub writes a reference
-   * to either as `#12`, so one pattern reads both and one form renders them.
-   * The path segment is carried out of the match, because it is what parts the
-   * two addresses.
-   *
-   * Nothing after the number matches, so a query or a fragment leaves the value
-   * unrecognized.
+   * Issue and pull request references share GitHub's `#number` notation.
+   * Only complete URLs without a query or fragment are recognized.
    */
   const NUMBERED_URL =
     /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/(issues|pull)\/(\d+)$/;
 
   /**
-   * The stored value as it is displayed. The angle brackets go, because the
-   * field is free text a maintainer typed and nothing downstream reads it as
-   * markup.
+   * Remove angle brackets from the displayed free text.
    *
    * @param {string} value
    * @returns {string}
@@ -55,25 +41,14 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Where one stored duplicate points.
-   *
-   * The value is free text: REQUIREMENTS.md section 6 stores what a maintainer
-   * typed and validates none of it. So the forms this reader knows are
-   * matched whole, and a value that is not exactly one of them points nowhere
-   * and is displayed as it stands. Nothing partial is recognized, so every
-   * address a link carries is one this reader built out of a pattern it
-   * matched.
-   *
-   * A GHSA identifier names no repository, so it is read as an advisory of the
-   * repository in hand, which is where a maintainer marking a duplicate is
-   * working. An identifier from another repository leads to an address that
-   * repository does not answer for.
+   * Duplicate references are stored as free text (REQUIREMENTS.md section 6).
+   * Recognize only a complete GHSA identifier or issue/pull request URL.
+   * GHSA identifiers resolve within the current repository.
    *
    * @param {string} value
-   * @param {{ owner: string, repo: string } | null} ref The repository the
-   *   surface is showing, and null where it names none.
-   * @returns {DuplicatePointer | null} null where the value is neither form,
-   *   and where a GHSA identifier stands with no repository to read it in.
+   * @param {{ owner: string, repo: string } | null} ref The current repository, or null if unknown.
+   * @returns {DuplicatePointer | null} Null if the reference is unrecognized or
+   *   a GHSA identifier lacks a repository.
    */
   function pointerOf(value, ref) {
     if (GHSA_ID.test(value)) {
@@ -89,8 +64,7 @@ if (typeof require === 'function') {
     const repo = /** @type {string} */ (numbered[2]);
     const kind = /** @type {string} */ (numbered[3]);
     const number = /** @type {string} */ (numbered[4]);
-    // GitHub writes one of the repository in hand as `#12` and one of another
-    // as `owner/repo#12`, and both surfaces here stand on a repository.
+    // Qualify references to other repositories as `owner/repo#12`.
     const here =
       ref !== null &&
       ref.owner.toLowerCase() === owner.toLowerCase() &&
@@ -102,12 +76,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * What one advisory duplicates, as the panel and the completed row both draw
-   * it: the word, and then the link where this reader knows where the value
-   * points and the value itself where it does not.
-   *
    * @param {Document} doc
-   * @param {string} className What the surface names the span.
+   * @param {string} className The span's CSS class.
    * @param {string} value The stored value.
    * @param {{ owner: string, repo: string } | null} ref
    * @returns {Element}

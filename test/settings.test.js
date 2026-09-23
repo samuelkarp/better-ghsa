@@ -18,9 +18,6 @@ const root = path.join(__dirname, '..');
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
 
 /**
- * The settings page itself, so the ids the script reaches for are the ids the
- * page carries and not a copy of them written here.
- *
  * @returns {{ window: any, document: Document }}
  */
 function page() {
@@ -30,12 +27,6 @@ function page() {
 }
 
 /**
- * A storage seeded with the allowlist and with whatever else the extension has
- * left behind. `remove` is on it because the clear will not use a storage
- * without it, and a stand-in it declines is one no clear could ever reach: an
- * assertion that a key went would then fail for the wrong reason, and one that
- * a key stayed would hold however much was cleared.
- *
  * @param {readonly string[]} [initial] The repositories on the list.
  * @param {Record<string, unknown>} [rest] What else the extension has stored.
  * @returns {import('../test-support/storage.js').FakeStorage}
@@ -57,8 +48,7 @@ function shown(doc) {
 
 /**
  * @param {Document} doc
- * @returns {string} the reason the page is showing for refusing an entry, and
- *   empty where it is showing none.
+ * @returns {string} The entry validation message, or an empty string.
  */
 function errorText(doc) {
   const error = doc.getElementById('add-error');
@@ -80,8 +70,7 @@ async function type(doc, typed) {
 
 /**
  * @param {Document} doc
- * @returns {string} what the page is saying about the clear, and empty where it
- *   is saying nothing.
+ * @returns {string} The clear-data status message, or an empty string.
  */
 function clearedText(doc) {
   const status = doc.getElementById('clear-status');
@@ -89,14 +78,11 @@ function clearedText(doc) {
   return status.textContent ?? '';
 }
 
-/** Two repositories in one organization, and one in another. */
 const CONTAINERD = 'containerd/containerd';
 const NERDCTL = 'containerd/nerdctl';
 const SPOON = 'git-utensils/spoon-knife';
 
 /**
- * The keys one repository's reads are held under.
- *
  * @param {string} repository
  * @returns {string[]}
  */
@@ -109,8 +95,6 @@ function keysOf(repository) {
 }
 
 /**
- * Everything a browser that has read these repositories holds besides the list.
- *
  * @param {readonly string[]} repositories
  * @returns {Record<string, unknown>}
  */
@@ -145,7 +129,7 @@ function survivors(store, repository) {
 /**
  * @param {ReturnType<typeof memory>} store
  * @param {string} key
- * @returns {string[]} the names the map at that key still carries.
+ * @returns {string[]} The keys of the stored map.
  */
 function namesIn(store, key) {
   const value = store.entries[key];
@@ -155,8 +139,7 @@ function namesIn(store, key) {
 /**
  * @param {Document} doc
  * @param {any} window
- * @returns {Promise<void>} presses the control that empties the stores and lets
- *   the reads and writes it starts land.
+ * @returns {Promise<void>} Clicks Clear and waits one event-loop turn.
  */
 async function pressClear(doc, window) {
   const button = doc.getElementById('clear-button');
@@ -172,11 +155,7 @@ test.afterEach(() => {
 
 test('the manifest declares the settings page and no background script', () => {
   assert.strictEqual(manifest.options_ui.page, 'src/settings/settings.html');
-  // In a tab rather than a popup, because the list is edited rather than read.
   assert.strictEqual(manifest.options_ui.open_in_tab, true);
-  // Every surface is a content script, and nothing runs outside a page.
-  // REQUIREMENTS.md section 12. Both the key and the file are checked: either
-  // one alone leaves the other free to come back and sit there unnoticed.
   assert.ok(!Object.hasOwn(manifest, 'background'), 'the manifest declares a background script');
   assert.ok(
     !fs.existsSync(path.join(root, 'src', 'background.js')),
@@ -184,23 +163,16 @@ test('the manifest declares the settings page and no background script', () => {
   );
   for (const file of ['src/settings/settings.html', 'src/settings/settings.js'])
     assert.ok(fs.existsSync(path.join(root, file)), `${file} is declared and missing`);
-  // The settings page is not a content script and belongs in neither list.
   assert.ok(!manifest.content_scripts[0].js.includes('src/settings/settings.js'));
 });
 
 test('the manifest forbids any page from framing the extension pages', () => {
-  // The settings page is in `web_accessible_resources` for `https://github.com/*`,
-  // which is what lets the button on an off-allowlist advisory page open it. That
-  // same listing lets a script on `github.com` put the page in a frame, so the
-  // policy denies framing outright. Firefox has enforced `frame-ancestors` on
-  // extension pages since 97 (CVE-2022-22761) and Chrome always has; the manifest
-  // asks for 128 or later.
+  // The web-accessible settings page can be embedded by github.com.
+  // The content security policy must forbid framing.
   const policy = manifest.content_security_policy.extension_pages;
   assert.match(policy, /frame-ancestors 'none'/);
-  // Declaring the key replaces the browser's default, so the default's own
-  // protections are restated here: Chrome's `script-src 'self'; object-src 'self';`
-  // and Firefox's `script-src 'self'; upgrade-insecure-requests;`. Anything looser
-  // in `script-src` would let the page run code it did not ship with.
+  // An explicit content security policy replaces the browser defaults.
+  // It must retain their restrictions on scripts, objects, and insecure requests.
   assert.match(policy, /script-src 'self';/);
   assert.match(policy, /object-src 'self';/);
   assert.match(policy, /upgrade-insecure-requests/);
@@ -216,8 +188,6 @@ test('a fresh install shows an empty list and says what to do about it', async (
   assert.deepStrictEqual(shown(document), []);
   const empty = document.getElementById('empty');
   assert.ok(empty?.hasAttribute('hidden') === false, 'nothing said so');
-  // On a fresh install this is the only thing on the page explaining why
-  // nothing is happening, so it names the next step rather than the absence.
   assert.strictEqual(empty?.textContent?.trim(), 'Add a repository to get started');
 });
 
@@ -232,7 +202,6 @@ test('a repository typed into the page is stored and listed', async () => {
   assert.deepStrictEqual(store.entries[allowlist.STORAGE_KEY], ['containerd/containerd']);
   assert.strictEqual(errorText(document), '');
   assert.strictEqual(document.getElementById('empty')?.hasAttribute('hidden'), true);
-  // The field is cleared, so the next repository is typed into an empty one.
   assert.strictEqual(
     /** @type {HTMLInputElement} */ (document.getElementById('add-input')).value,
     ''
@@ -259,7 +228,6 @@ test('what is not a repository is refused, listed nowhere, and stored nowhere', 
       settings.MALFORMED_MESSAGE,
       `said nothing about ${JSON.stringify(typed)}`
     );
-    // What was typed stays in the field, so it can be corrected.
     assert.strictEqual(
       /** @type {HTMLInputElement} */ (document.getElementById('add-input')).value,
       typed
@@ -270,8 +238,6 @@ test('what is not a repository is refused, listed nowhere, and stored nowhere', 
   assert.strictEqual(store.writes.length, 0, 'a repository the page refused was stored');
   assert.deepStrictEqual(store.entries, {});
 
-  // A repository the page accepts does store, so the zero above is the refusal
-  // and not a count that cannot move.
   assert.strictEqual(await type(document, 'containerd/containerd'), true);
   assert.strictEqual(store.writes.length, 1, 'an accepted repository went unstored');
 });
@@ -286,8 +252,6 @@ test('an empty field is not an error and stores nothing', async () => {
   assert.strictEqual(errorText(document), '');
   assert.strictEqual(store.writes.length, 0, 'an empty field was stored');
 
-  // A field carrying a repository does store, so the zero above is the empty
-  // field and not a count that cannot move.
   assert.strictEqual(await type(document, 'containerd/containerd'), true);
   assert.strictEqual(store.writes.length, 1, 'a filled field went unstored');
 });
@@ -303,8 +267,6 @@ test('a repository already listed is refused once and listed once', async () => 
   assert.deepStrictEqual(shown(document), ['containerd/containerd']);
   assert.strictEqual(store.writes.length, 0, 'a repository already listed was stored again');
 
-  // A repository the list does not carry does store, so the zero above is the
-  // duplicate and not a count that cannot move.
   assert.strictEqual(await type(document, 'containerd/nerdctl'), true);
   assert.strictEqual(store.writes.length, 1, 'a repository not yet listed went unstored');
   assert.deepStrictEqual(shown(document), ['containerd/containerd', 'containerd/nerdctl']);
@@ -319,15 +281,13 @@ test('pressing Remove takes the repository out of storage and off the page', asy
 
   const button = document.querySelector('#list button[data-entry="containerd/containerd"]');
   assert.ok(button !== null, 'the row carries no control that removes it');
-  // Every row's control reads Remove, so the name is what tells one from the
-  // next for a reader moving between them by control alone.
+  // Accessible names must distinguish each repository's Remove button.
   assert.strictEqual(
     button.getAttribute('aria-label'),
     'Remove containerd/containerd',
     'the control does not name the repository it removes'
   );
   button.dispatchEvent(new window.Event('click', { bubbles: true }));
-  // The press reads and writes storage, so the page catches up a turn later.
   await new Promise((resolve) => setTimeout(resolve, 0));
 
   assert.deepStrictEqual(shown(document), ['git-utensils/spoon-knife']);
@@ -336,8 +296,6 @@ test('pressing Remove takes the repository out of storage and off the page', asy
 });
 
 test('submitting the form adds what is typed', async () => {
-  // The page is driven through its own control here, which is what proves the
-  // control is wired to the code the rest of these tests call directly.
   allowlist.setStorage(memory());
   const { window, document } = page();
   await settings.start(document);
@@ -376,8 +334,7 @@ test('pressing Clear cache empties every store and leaves the list', async () =>
   }
   assert.strictEqual(Object.hasOwn(store.entries, members.MEMBERS_KEY), false, 'members survived');
   assert.strictEqual(Object.hasOwn(store.entries, branches.BRANCHES_KEY), false, 'branches survived');
-  // The list is what the clear leaves, so the extension goes on running where
-  // it was listed. REQUIREMENTS.md section 2.
+  // Preserve the allowlist to keep the extension enabled (REQUIREMENTS.md section 2).
   assert.deepStrictEqual(store.entries[allowlist.STORAGE_KEY], [CONTAINERD, NERDCTL, SPOON]);
   assert.deepStrictEqual(Object.keys(store.entries), [allowlist.STORAGE_KEY]);
   assert.deepStrictEqual(shown(document), [CONTAINERD, NERDCTL, SPOON]);
@@ -395,8 +352,6 @@ test('a press of Clear cache is answered on the page', async () => {
   await pressClear(document, window);
   assert.strictEqual(clearedText(document), settings.CLEARED_MESSAGE);
 
-  // It comes down again the next time the maintainer works the list, so what
-  // the page says answers the last thing that was pressed.
   await type(document, 'containerd/nerdctl');
   assert.strictEqual(clearedText(document), '');
 });
@@ -418,17 +373,13 @@ test('pressing Remove clears that repository and leaves the others', async () =>
   assert.deepStrictEqual(survivors(store, NERDCTL), keysOf(NERDCTL));
   assert.deepStrictEqual(survivors(store, SPOON), keysOf(SPOON));
   assert.deepStrictEqual(namesIn(store, branches.BRANCHES_KEY), [NERDCTL, SPOON].sort());
-  // `containerd/nerdctl` is still listed, so the organization's members stay.
   assert.deepStrictEqual(namesIn(store, members.MEMBERS_KEY), ['containerd', 'git-utensils']);
   assert.deepStrictEqual(shown(document), [NERDCTL, SPOON]);
 });
 
 test('the page loads every file its script reaches, in an order that works', () => {
-  // The page is not a content script, so the manifest does not order what it
-  // loads and its own script tags do. A file reached through `bghsa` but never
-  // loaded, or loaded after the file that reaches it, is a page that throws on
-  // a press and a suite that never sees it: the tests here load each file
-  // through `require`, which finds them whatever the page says.
+  // The settings page loads dependencies through its own script tags.
+  // Node require calls do not check that order.
   const html = fs.readFileSync(path.join(root, 'src', 'settings', 'settings.html'), 'utf8');
   const loaded = [...html.matchAll(/<script src="([^"]+)"><\/script>/g)].map((found) =>
     path.posix.normalize(path.posix.join('src/settings', String(found[1])))

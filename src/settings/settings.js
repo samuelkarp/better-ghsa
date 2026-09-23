@@ -2,16 +2,13 @@
 
 globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
 
-// The page's own script tags order these; under Node the dependencies are named
-// here.
+// Script tags order browser dependencies; Node loads them here.
 if (typeof require === 'function') {
   require('../common/allowlist.js');
   require('../common/forget.js');
 }
 
 /**
- * The elements this page reads and writes.
- *
  * @typedef {object} SettingsElements
  * @property {HTMLFormElement | null} form
  * @property {HTMLInputElement | null} input
@@ -23,16 +20,14 @@ if (typeof require === 'function') {
  */
 
 (() => {
-  /** What a typed entry that is not a repository is answered with. */
+
   const MALFORMED_MESSAGE = 'Enter a repository as owner/repo.';
 
-  /** What a repository already on the list is answered with. */
   const DUPLICATE_MESSAGE = 'That repository is already listed.';
 
   /**
-   * What a press of the clear is answered with. The clear changes nothing the
-   * page draws, so without a word for it a maintainer cannot tell a press that
-   * emptied the cache from one the page never heard.
+   * Cache clearing needs a status message because the repository list stays
+   * unchanged.
    */
   const CLEARED_MESSAGE = 'Cache cleared';
 
@@ -54,8 +49,7 @@ if (typeof require === 'function') {
 
   /**
    * @param {Document} doc
-   * @param {string | null} message The reason nothing was added, and null where
-   *   there is none to show.
+   * @param {string | null} message The error to display, or null to clear it.
    * @returns {void}
    */
   function showError(doc, message) {
@@ -68,9 +62,7 @@ if (typeof require === 'function') {
 
   /**
    * @param {Document} doc
-   * @param {boolean} cleared Whether to say the cache has been emptied. It
-   *   comes down again the next time the maintainer works the list, so what the
-   *   page says answers the last thing that was pressed.
+   * @param {boolean} cleared Whether to show the cache-cleared status.
    * @returns {void}
    */
   function showCleared(doc, cleared) {
@@ -82,8 +74,6 @@ if (typeof require === 'function') {
   }
 
   /**
-   * One row: the repository, and the control that takes it off the list.
-   *
    * @param {Document} doc
    * @param {string} entry
    * @returns {Element}
@@ -99,8 +89,7 @@ if (typeof require === 'function') {
     button.className = 'button button-danger';
     button.type = 'button';
     button.dataset.entry = entry;
-    // The name is in the row beside it, and a reader moving between rows by
-    // control alone gets it from the label rather than the row.
+    // Identify the repository when a screen reader navigates directly to buttons.
     button.setAttribute('aria-label', `Remove ${entry}`);
     button.textContent = 'Remove';
     row.append(button);
@@ -108,9 +97,6 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Draws the list. The rows are rebuilt from the stored entries every time, so
-   * what the page shows is what storage holds and never a row the page kept.
-   *
    * @param {Document} doc
    * @param {readonly string[]} entries
    * @returns {void}
@@ -127,12 +113,10 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Adds what is typed in the field. A malformed entry and one already listed
-   * are refused with a reason and leave the field alone, so the maintainer can
-   * correct what they typed.
+   * Preserve rejected input for correction.
    *
    * @param {Document} doc
-   * @returns {Promise<boolean>} whether the list changed.
+   * @returns {Promise<boolean>} Whether the list changed.
    */
   async function submit(doc) {
     showCleared(doc, false);
@@ -164,13 +148,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Empties what the extension has read. The repository list is left alone, so
-   * the extension goes on running where it was listed and fills the cache again
-   * as those pages are read. REQUIREMENTS.md section 2.
-   *
-   * Nothing is asked first. Everything this takes is rederivable from the
-   * advisories, so the cost of a press nobody meant is the reads that fill it
-   * back in.
+   * Clear cached observations while retaining the allowlist. Advisory reads
+   * rebuild the cache (REQUIREMENTS.md section 2).
    *
    * @param {Document} doc
    * @returns {Promise<void>}
@@ -182,9 +161,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Puts the page in charge of the list: it draws what storage holds, adds and
-   * removes on the controls, and redraws when the list changes underneath it,
-   * which is what a second settings tab or a reset does.
+   * Subscribe to allowlist changes from other settings tabs as well as this page.
    *
    * @param {Document} [doc]
    * @returns {Promise<void>}

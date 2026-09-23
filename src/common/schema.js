@@ -7,64 +7,42 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
  * @property {string} raw The JSON source recovered from the fenced block.
  * @property {unknown} parsed The parsed payload, or null when it did not parse.
  * @property {string | null} version The `betterGhsa` schema version.
- * @property {number | null} major The schema major, when `version` reads as
- *   `major.minor`. A payload that names no version this reader can read leaves
- *   it null and fails validation.
- * @property {boolean} schemaSupported Whether this reader reads the payload's
- *   schema. False names one case: a readable major other than this reader's.
- *   A payload with no readable major is a validation failure, not a version
- *   this reader is too old for, and leaves this true.
- * @property {number | null} seq The ordering claim, a whole number from 0 to
- *   `MAX_SEQ`. A number outside that range is no ordering claim this reader
- *   reads.
+ * @property {number | null} major The major version parsed from `major.minor`.
+ * @property {boolean} schemaSupported For parsed objects, false indicates an
+ *   unsupported major version. Missing or malformed versions fail validation.
+ * @property {number | null} seq The sequence number, an integer from 0 to MAX_SEQ.
  * @property {string | null} by The login the snapshot names as its writer.
- * @property {boolean} ordered Whether the envelope carries an ordering claim.
+ * @property {boolean} ordered Whether the sequence number is valid.
  * @property {boolean} valid Whether the payload passed validation.
  * @property {string[]} problems Why the snapshot is not usable, in display order.
- * @property {string[]} unrecognized Known enum fields holding a value this
- *   reader does not interpret. Their values are displayed raw and carried
- *   forward.
+ * @property {string[]} unrecognized Known enum fields with unknown values.
+ *   Preserve those values for display and subsequent writes.
  */
 
 (() => {
-  /** The schema version this writer stamps on every snapshot it writes. */
   const SCHEMA_VERSION = '1.0';
 
-  /** The schema major version this reader interprets. */
   const SCHEMA_MAJOR = 1;
 
-  /** The shape `betterGhsa` carries: a major and a minor, as section 5 states. */
+  /** The version uses major.minor notation. */
   const VERSION_PATTERN = /^(\d+)\.(\d+)$/;
 
   /**
-   * What says a comment is a state comment. The body carries it once, in a code
-   * span inside the collapsed block alongside the fence, so the thread shows
-   * only the summary line: GitHub's sanitizer strips HTML comments and keeps
-   * `code`, so the token is in the rendered document the content script reads.
-   * The segment after `state` is the body format, so a later format can be told
-   * from this one.
-   *
-   * The marker says a comment is a state comment whatever its fence holds, which
-   * is what lets a fence that does not parse be warned on by name.
+   * The marker identifies state comments even when their JSON is invalid.
+   * It appears in a code span because GitHub preserves code but strips HTML
+   * comments. The number after `state` identifies the body format.
    */
   const STATE_COMMENT_MARKER = 'better-ghsa:state:1:';
 
-  /** Where this extension lives. */
   const PROJECT_URL = 'https://github.com/samuelkarp/better-ghsa';
 
   /**
-   * The extension's name in a comment summary, linked to the project, so a
-   * reader who has not seen the extension can find out what wrote the comment.
-   *
-   * A raw anchor rather than a markdown link: an anchor inside a `summary` is
-   * verified to render, and how markdown inside an HTML block renders is not.
+   * HTML anchors render inside GitHub's summary elements.
    */
   const PROJECT_LINK = `<a href="${PROJECT_URL}">Better GHSA</a>`;
 
   /**
-   * The summary line of a state comment's `details` block. It is prose for the
-   * reader: recognition rests on the marker, so it can be rewritten without
-   * breaking anything.
+   * State comment recognition uses the marker independently of this summary.
    */
   const STATE_COMMENT_SUMMARY = `${PROJECT_LINK} tracking state`;
 
@@ -83,21 +61,16 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
   ];
 
   /**
-   * The greatest ordering claim this reader reads. One above it is still a safe
-   * integer, so the claim the next write carries is exact and is strictly
-   * greater than every claim on the advisory.
+   * Reserve one safe integer above the highest accepted sequence number for
+   * the next write.
    */
   const MAX_SEQ = Number.MAX_SAFE_INTEGER - 1;
 
-  /** How many hex characters of the digest a fingerprint keeps. */
   const FINGERPRINT_LENGTH = 12;
 
   /**
-   * The shape a fingerprint takes. A string of another length, or one carrying a
-   * character no digest produces, is no fingerprint this reader wrote, and it
-   * cannot match the value on the page. Reading it as a fingerprint would report
-   * the value as changed and name a maintainer for a change nobody made, so the
-   * validator rejects it and the snapshot carrying it is excluded from state.
+   * Reject malformed fingerprints during validation to avoid reporting them
+   * as changes to the confirmed value.
    */
   const FINGERPRINT_PATTERN = new RegExp(`^[0-9a-f]{${FINGERPRINT_LENGTH}}$`);
 
@@ -139,8 +112,7 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
   }
 
   /**
-   * Checks the type of every field this reader knows. Unknown fields pass, and so
-   * does an unrecognized value in a known enum field.
+   * Validate known field types. Preserve unknown fields and enum values.
    *
    * @param {Record<string, unknown>} payload
    * @returns {{ problems: string[], unrecognized: string[] }}
@@ -209,9 +181,8 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
   }
 
   /**
-   * Reads the snapshot a state comment carries. The envelope, `seq` and `by`, is
-   * read independently of the payload, so ordering holds for a snapshot whose
-   * payload is invalid.
+   * Read `seq` and `by` independently of field validation. An invalid payload
+   * can still contribute a sequence number.
    *
    * @param {string} raw The JSON source from the fenced block.
    * @returns {SnapshotReport}
@@ -276,9 +247,8 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
   }
 
   /**
-   * The form a value takes before it is fingerprinted: CRLF becomes LF, each
-   * line loses its trailing whitespace, leading and trailing blank lines go, and
-   * the result is in Unicode NFC.
+   * Normalize fingerprint inputs to LF and NFC. Remove trailing whitespace
+   * from each line and leading and trailing blank lines.
    *
    * @param {string | null | undefined} value
    * @returns {string}
@@ -295,9 +265,8 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
   }
 
   /**
-   * The fingerprint of a source value: the first 12 hex characters of the
-   * SHA-256 of its normalized form. It detects change and is not a security
-   * boundary.
+   * Use the first 12 hex characters of SHA-256 to detect changes. This
+   * fingerprint is not a security boundary.
    *
    * @param {string | null | undefined} value Raw markdown from a metadata form
    *   field, not rendered text.
@@ -312,15 +281,8 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
   }
 
   /**
-   * The source value the scoring fingerprint covers. A real advisory carries a
-   * severity or a CVSS vector and not both, so each half is labeled and an
-   * absent half is written as the empty string. A null half and an empty half
-   * therefore fingerprint alike.
-   *
-   * Each half is written as a JSON string, so a newline in one of them reads as
-   * the two characters `\n` and no content can spell the separator that divides
-   * the halves. Two scoring states that differ therefore differ here, and their
-   * fingerprints differ with them.
+   * Label and JSON-encode both scoring fields to escape embedded newlines.
+   * Null and empty fields produce the same normalized input.
    *
    * @param {string | null | undefined} severity The stored severity selection.
    * @param {string | null | undefined} vector The CVSS vector.

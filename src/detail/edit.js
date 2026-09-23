@@ -32,9 +32,7 @@ if (typeof require === 'function') {
  */
 
 /**
- * The values the controls hold that the advisory does not. A field is present
- * only while it differs from the stored state, so an advisory with an entry
- * here is one with changes waiting to be written.
+ * Pending fields differ from stored state and are waiting to be saved.
  *
  * @typedef {object} Pending
  * @property {string | null} [triage]
@@ -45,150 +43,119 @@ if (typeof require === 'function') {
  * @property {string | null} [closureReason]
  * @property {string | null} [closureDuplicateOf]
  * @property {Partial<Record<ConfirmationTrack, boolean>>} [confirm]
- * @property {boolean} [supersede] Whether the maintainer has confirmed a write
- *   that supersedes a snapshot this reader could not interpret. It is not a
- *   change of its own, and it is not carried into a snapshot.
+ * @property {boolean} [supersede] Approval to supersede an unreadable snapshot. This flag
+ *   is excluded from the snapshot and the pending-change count.
  */
 
 /**
- * Everything the editing controls read, and everything a save needs. The panel
- * builds one of these per pass, so the controls always describe the document
- * the panel last read.
+ * Each render pass builds the state used by the editor and its save handler.
  *
  * @typedef {object} EditorContext
  * @property {ParsedDetail} advisory
  * @property {DerivedState} derived
  * @property {TrackingView} tracking The stored state, as the panel displays it.
- * @property {Fingerprints} fingerprints The fingerprints of the values the
- *   confirmations bind to, which are what a confirmation written here records.
- * @property {MergedState} merged The state the panel loaded with. Its
- *   `observedSeq` is what a write is refused against.
- * @property {() => Promise<void> | void} [rerender] Runs a render pass, which
- *   is how the panel shows what a write left behind.
+ * @property {Fingerprints} fingerprints Fingerprints of displayed values for confirmation
+ *   records.
+ * @property {MergedState} merged Loaded state used for concurrency checks.
+ * @property {() => Promise<void> | void} [rerender] Redraws the surface after a save.
  * @property {WriteFetch} [fetch]
  * @property {(html: string) => Document} [parseDocument]
- * @property {string} [at] The write time, for a test that stamps its own.
+ * @property {string} [at] An explicit write timestamp.
  */
 
 /**
- * One list of values a maintainer adds to and removes from: a chip per value
- * carrying a Remove button, a text field with the candidates behind it, and an
- * Add button. Owners and backport targets are one control over two sets of
- * values.
+ * Owners and backport targets share a control with removable chips and a text
+ * field for adding values.
  *
  * @typedef {object} ChipList
  * @property {string} label The row's label.
- * @property {string} name The stem of the `bghsa-` class every part carries.
- * @property {string} noun What one value is, as the Remove button names it.
+ * @property {string} name The CSS class suffix for each control part.
+ * @property {string} noun The item name used in Remove labels.
  * @property {string} placeholder
- * @property {string[]} candidates The values offered behind the text field, in
- *   the order they are offered.
- * @property {(value: string) => string} fold Two values folding alike are one
- *   value. A login names one account whatever its case; a git branch name is
- *   case-sensitive and names one branch only as it is spelled.
- * @property {Map<string, string>} drafts Where the half-typed value lives
- *   between passes.
- * @property {() => string[]} held What the control holds now.
- * @property {(values: string[]) => void} put Records what it holds.
+ * @property {string[]} candidates Suggestions in display order.
+ * @property {(value: string) => string} fold Normalizes equality comparisons. Logins are
+ *   case-insensitive; branch names are case-sensitive.
+ * @property {Map<string, string>} drafts Retains unfinished input across renders.
+ * @property {() => string[]} held Returns selected values.
+ * @property {(values: string[]) => void} put Stages selected values.
  */
 
 (() => {
-  /**
-   * What the panel says where a snapshot names a schema version it cannot read.
-   * It stands where the controls would be, so the absence is already visible.
-   */
+
   const READ_ONLY_MESSAGE = 'Update the extension to edit';
 
-  /** What the panel says once a write has landed. */
   const SAVED_MESSAGE = 'Saved.';
 
-  /**
-   * What the panel says while a write from it is on its way to GitHub. The done
-   * view says the same, so one event reads the same however it was started.
-   */
   const WRITING_MESSAGE = globalThis.bghsa.write.SAVING_MESSAGE;
 
-  /** What marks a control the flight took away, so the flight can give it back. */
+  /**
+   * Mark controls disabled during a save to restore only those controls afterward.
+   */
   const FLIGHT_MARK = 'data-bghsa-flight';
 
-  /** What a maintainer is asked before leaving changes that were never written. */
   const LEAVE_MESSAGE = 'Better GHSA: Leave without saving your changes?';
 
   /**
-   * What the checkbox reads that supersedes a snapshot the merge would not
-   * take. Nothing is deleted: the save writes a higher sequence number and the
-   * unreadable comment stays where it is.
+   * Superseding writes a higher sequence number. The unreadable comment remains.
    */
   const SUPERSEDE_LABEL = 'Supersede unparsed state';
 
   /**
-   * The advisories with control changes waiting, keyed as {@link keyOf} keys
-   * them. The store outlives a render pass, which is what carries an unsaved
-   * change across GitHub replacing the panel's surroundings.
+   * Retain unsaved changes across panel rebuilds, keyed by {@link keyOf}.
    *
    * @type {Map<string, Pending>}
    */
   const edits = new Map();
 
   /**
-   * The state a write left an advisory in, which the page's own markup does not
-   * show: a comment written from here is on GitHub, not in this document. The
-   * panel reads this in preference to the document while it is ahead.
+   * Prefer locally written state until the live document includes that write.
    *
    * @type {Map<string, MergedState>}
    */
   const written = new Map();
 
   /**
-   * What the last save on an advisory did, in the words the panel shows.
+   * Record the latest save result for each advisory.
    *
    * @type {Map<string, { ok: boolean, message: string, diagnostic?: import('../common/write.js').WriteDiagnostic }>}
    */
   const results = new Map();
 
-  /** The advisories whose editing disclosure the maintainer has opened. */
   const opened = new Set();
 
   /**
-   * The half-typed owner logins, keyed as {@link keyOf} keys them. A login is a
-   * change once it is added and not before, and until then it is text in a
-   * control that a render pass would otherwise take away.
+   * Retain partially typed logins across renders. They become pending changes
+   * only when added to the owner list.
    *
    * @type {Map<string, string>}
    */
   const drafts = new Map();
 
   /**
-   * The half-typed backport branches, held as {@link drafts} holds a login.
+   * Retain partially typed backport branches across renders.
    *
    * @type {Map<string, string>}
    */
   const branchDrafts = new Map();
 
   /**
-   * The advisory the panel is showing, keyed as {@link keyOf} keys them, and
-   * null where the page shows none. The staged values outlive the page, so this
-   * is what says which of them belong to the advisory in front of the
-   * maintainer and which belong to one already left.
+   * Identify the visible advisory for navigation warnings. Pending edits can
+   * belong to advisories visited earlier in the same document.
    *
    * @type {{ key: string | null }}
    */
   const showing = { key: null };
 
   /**
-   * How the panel puts a yes-or-no question to the maintainer, and null while
-   * no warning is armed. A pass finds the page has left an advisory long after
-   * the arming, so the arming leaves what it settled on here.
+   * Retain the confirmation callback for departures detected by later renders.
    *
    * @type {((message: string) => boolean) | null}
    */
   let asker = null;
 
   /**
-   * The advisories a save from this panel is on its way to GitHub for. A pass
-   * during the flight builds the controls again, and this is what the pass reads
-   * to build them held still: a value staged against a request already out is a
-   * value that request does not carry.
+   * Disable rebuilt controls while a save is pending. Changes staged during a
+   * request would be absent from that request.
    *
    * @type {Set<string>}
    */
@@ -196,8 +163,7 @@ if (typeof require === 'function') {
 
   /**
    * @param {ParsedDetail} advisory
-   * @returns {string} the key this advisory's changes are held under. Two
-   *   spellings of one advisory are one advisory, as they are for a write.
+   * @returns {string} The lowercase key for this advisory's edits.
    */
   function keyOf(advisory) {
     const ref = advisory.ref;
@@ -207,21 +173,15 @@ if (typeof require === 'function') {
 
   /**
    * @param {string} key
-   * @returns {Pending} the changes waiting on this advisory.
+   * @returns {Pending} The pending edits.
    */
   function editsFor(key) {
     return edits.get(key) ?? {};
   }
 
   /**
-   * Records what a control now holds, less anything a save would not carry: a
-   * value the advisory already has, and a value another control has made
-   * irrelevant. REQUIREMENTS.md section 3 stages neither, so what the panel
-   * holds and what a write carries cannot come apart. {@link differences} is
-   * the one place that decides, so a control added later inherits the rule.
-   *
-   * The value stays in the control it was typed into. Only the store drops it,
-   * so putting the gate back where it was puts the value back with it.
+   * Stage only changes a save can write, as determined by {@link differences}.
+   * Values excluded by another control remain in their input fields.
    *
    * @param {string} key
    * @param {TrackingView} tracking
@@ -247,9 +207,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Takes one staged confirmation back out. What a save last reported stands:
-   * this is the panel putting a control where the page says it belongs, and not
-   * a maintainer changing anything.
+   * Remove an unavailable confirmation without clearing the last save result.
    *
    * @param {string} key
    * @param {ConfirmationTrack} track
@@ -270,7 +228,7 @@ if (typeof require === 'function') {
 
   /**
    * @param {string} key
-   * @returns {void} drops every change waiting on this advisory.
+   * @returns {void}
    */
   function discard(key) {
     edits.delete(key);
@@ -280,9 +238,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * What makes two logins one account. GitHub reads a login case-insensitively,
-   * so `SamuelKarp` and `samuelkarp` are one owner, and the same fold decides
-   * whether the Add button takes a typed login the list already holds.
+   * GitHub logins are case-insensitive.
    *
    * @param {string} login
    * @returns {string}
@@ -292,9 +248,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * What makes two GHSA identifiers one advisory. GitHub reads the identifier
-   * case-insensitively, so `GHSA-cm76-qm8v-3j95` and `ghsa-cm76-qm8v-3j95` name
-   * one advisory, as they do to {@link keyOf}.
+   * GHSA identifiers are case-insensitive.
    *
    * @param {string | null | undefined} id
    * @returns {string | null | undefined}
@@ -304,19 +258,13 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Owners and backport targets are sets: REQUIREMENTS.md section 6 has owners be
-   * org members and backports be release branches, and neither carries an order
-   * that means anything. A value taken off and put back leaves the same set in a
-   * different order, and that is not a change.
-   *
-   * Sameness is the value's own: `fold` is what makes two spellings one value,
-   * and a login folds where a git branch name, which names one branch only as it
-   * is spelled, does not.
+   * Owner and backport order is insignificant. Compare logins case-insensitively
+   * and branch names case-sensitively.
    *
    * @param {string[]} left
    * @param {string[]} right
    * @param {(value: string) => string} [fold]
-   * @returns {boolean} whether both name the same values.
+   * @returns {boolean} Whether the lists contain the same values.
    */
   function sameList(left, right, fold = (value) => value) {
     if (left.length !== right.length) return false;
@@ -329,19 +277,16 @@ if (typeof require === 'function') {
    * @template T
    * @param {T | undefined} staged
    * @param {T} stored
-   * @returns {T} what a control holds: what was typed into it where anything was,
-   *   and the stored value otherwise. A staged null is a value cleared by hand
-   *   and is not the absence of one.
+   * @returns {T} The staged value, including null for a cleared field, or the stored value
+   *   when unstaged.
    */
   function pick(staged, stored) {
     return staged === undefined ? stored : staged;
   }
 
   /**
-   * The fields of `pending` the advisory does not already carry. A control put
-   * back where it started is not a change. A value in a control whose gate is
-   * off is one the panel holds and a save does not write, and it is here,
-   * because the panel is what holds it.
+   * Compare pending values with stored state. This includes values retained in
+   * disabled controls; {@link differences} excludes those from saves.
    *
    * @param {TrackingView} tracking
    * @param {Pending} pending
@@ -388,10 +333,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The staged fields a save writes: the ones the advisory does not already
-   * carry, less a date on an embargo that is off and a duplicate on a closure
-   * that is not a duplicate. Neither has a place in the snapshot the controls
-   * describe, so neither is a change to write.
+   * Exclude a lift date when embargo is off and a duplicate ID when the closure
+   * reason is not duplicate.
    *
    * @param {TrackingView} tracking
    * @param {Pending} pending
@@ -407,12 +350,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The tracks whose controls hold something the advisory does not, named by the
-   * label the panel puts on each row. An empty list is a panel with nothing to
-   * write.
-   *
-   * {@link differences} is the one gate a save, the Save button and the note all
-   * read, so the panel never counts a change the write would leave out.
+   * Use the same comparison for the save, button state, and unsaved-change list.
    *
    * @param {TrackingView} tracking
    * @param {Pending} pending
@@ -436,14 +374,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Drops the staged values a save from this pass would not carry, so a control
-   * put back where it started, a value another maintainer wrote in the
-   * meantime, and a value the state that arrived has made irrelevant all stop
-   * counting as unsaved work.
-   *
-   * A pass judges what {@link stage} judged when the value arrived, against the
-   * state the pass reads. The two agree on every value staged against this
-   * state, and the ones they disagree on are the ones the advisory moved under.
+   * Recheck pending edits against freshly read state and discard matching or
+   * inapplicable values.
    *
    * @param {string} key
    * @param {TrackingView} tracking
@@ -461,15 +393,11 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Takes the staged values a write carried back out and leaves the rest where
-   * it is. A value staged after the request went is not in that request, so
-   * dropping it would lose work the panel never wrote and never reported.
-   *
-   * The confirmation that supersedes an unreadable snapshot is spent on the
-   * write that carried it.
+   * Remove saved values while preserving edits staged after the request started.
+   * Supersede confirmation applies only to the write that used it.
    *
    * @param {string} key
-   * @param {Pending} captured The staged values the write carried.
+   * @param {Pending} captured The edits sent in the request.
    * @returns {void}
    */
   function release(key, captured) {
@@ -522,10 +450,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * One field of a snapshot object, as a change carries it. A value the panel
-   * holds is written; a value it does not hold takes the stored one away where
-   * there is one and is left out where there is none, because null in a field
-   * the snapshot never had is a null the validator refuses.
+   * Use null to delete a stored field. Omit absent fields because snapshot
+   * validation rejects null values left in the resulting object.
    *
    * @param {string} key
    * @param {string | null} value
@@ -538,9 +464,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The staged fields that stand for work a maintainer would lose. The
-   * confirmation that supersedes an unreadable snapshot is not among them: it
-   * says how to write a change and is not one.
+   * Supersede approval permits a write but does not count as an unsaved change.
    *
    * @type {readonly string[]}
    */
@@ -557,8 +481,7 @@ if (typeof require === 'function') {
 
   /**
    * @param {string} key
-   * @returns {boolean} whether this advisory holds a change that was never
-   *   written.
+   * @returns {boolean} Whether this advisory has pending edits.
    */
   function pendingOn(key) {
     const pending = edits.get(key);
@@ -567,8 +490,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * @returns {boolean} whether any advisory this page has shown holds a change
-   *   that was never written.
+   * @returns {boolean} Whether any advisory has pending edits.
    */
   function anyPending() {
     for (const key of edits.keys()) {
@@ -578,16 +500,11 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Records which advisory the panel is showing, and asks about the changes the
-   * advisory the page has left still holds.
+   * Detect advisory departures after GitHub replaces the content frame.
+   * Confirmation discards pending changes; declining retains them for a return
+   * to that advisory.
    *
-   * A pass is what finds the page has moved: GitHub replaces the content frame
-   * with no document load, so the departure reaches the extension as a render
-   * pass over a document that shows another advisory or none. Answering yes
-   * drops the changes, which is what leaving them behind is; answering no keeps
-   * them staged, and the panel holds them again on the advisory they belong to.
-   *
-   * @param {string | null} key the advisory the panel is showing now.
+   * @param {string | null} key The visible advisory key, or null.
    * @returns {void}
    */
   function panelShows(key) {
@@ -599,9 +516,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Whether a click would take the maintainer off this page. A click that opens
-   * a second place to read the advisory in, and a click that moves within the
-   * page, both leave the panel where it is.
+   * Ignore navigation within the page and links opened in another tab or window.
    *
    * @param {Event} event
    * @returns {boolean}
@@ -629,25 +544,14 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Warns before changes that were never written are lost.
-   *
-   * Three paths, because a page is left three ways. A document load fires
-   * `beforeunload`, and the browser asks its own question there; the whole store
-   * goes with the document, so every advisory holding a change is a reason to
-   * ask. A link GitHub follows by replacing `#repo-content-turbo-frame` fires
-   * nothing, so the click that starts it is asked about here and is stopped
-   * where the answer is no: the handler runs before the page's own, and a click
-   * it cancels never reaches the code that would swap the frame. A departure no
-   * click started, the back button among them, reaches {@link panelShows} on the
-   * pass that finds the page has moved.
-   *
-   * The click and the pass ask about the advisory the panel is showing. The
-   * store outlives the page, so asking about any advisory would put the question
-   * on the page after the one holding the changes.
+   * Warn before unsaved changes are lost. A document unload checks all pending
+   * edits because it destroys the store. Captured link clicks check the visible
+   * advisory and can cancel GitHub frame navigation. Other departures are
+   * detected by {@link panelShows}.
    *
    * @param {Document} doc
    * @param {{ confirm?: (message: string) => boolean }} [options]
-   * @returns {() => void} takes the warnings back off.
+   * @returns {() => void} Removes the navigation warnings.
    */
   function armNavigationWarning(doc, options) {
     const view = doc.defaultView;
@@ -659,7 +563,7 @@ if (typeof require === 'function') {
     const onUnload = (event) => {
       if (!anyPending()) return;
       event.preventDefault();
-      // What a browser asking the question of its own reads as a reason to.
+      // Trigger the browser's native unload confirmation.
       /** @type {{ returnValue?: unknown }} */ (/** @type {unknown} */ (event)).returnValue = '';
     };
     /** @param {Event} event @returns {void} */
@@ -684,13 +588,9 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The snapshot fields a save writes. Every value comes from the controls; a
-   * track no control changed is not named, so the merge carries it forward.
-   *
-   * A confirmation records the login and the time the write itself stamps and the
-   * fingerprint of the value on the page, which is the same fingerprint the
-   * display is judged against, so a value confirmed here reads as confirmed on
-   * the next pass.
+   * Build changes from edited controls. Omitted fields remain unchanged.
+   * Confirmations record the write's login and timestamp with the fingerprint
+   * of the displayed value.
    *
    * @param {TrackingView} tracking
    * @param {Fingerprints} fingerprints
@@ -741,8 +641,7 @@ if (typeof require === 'function') {
         confirmed[track.key] = null;
         continue;
       }
-      // The gate keeps a confirmation with nothing behind it out of the diff, so
-      // a fingerprint stands behind every one that reaches here.
+
       const fingerprint = fingerprints[track.key];
       if (fingerprint === null) continue;
       confirmed[track.key] = { by: envelope.by, at: envelope.at, fp: fingerprint };
@@ -753,8 +652,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The stored objects one control removes as a whole, and the fields this reader
-   * knows inside each.
+   * These controls remove whole objects. List their known fields for deletion
+   * checks.
    *
    * @type {readonly { key: string, name: string, fields: readonly string[] }[]}
    */
@@ -764,8 +663,6 @@ if (typeof require === 'function') {
   ];
 
   /**
-   * The fields a stored object carries that this reader does not interpret.
-   *
    * @param {Record<string, unknown> | null} state
    * @param {string} key
    * @param {readonly string[]} known
@@ -778,16 +675,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The stored objects a save would take away that carry fields this reader does
-   * not know.
-   *
-   * A control here stands for the record as a whole: the embargo is in force
-   * while the object is there, so turning it off removes the object, and every
-   * field inside it goes with it. REQUIREMENTS.md section 3 has a write preserve
-   * what it does not recognize, and a field a newer version of this extension
-   * wrote inside the embargo is exactly that. The write is refused and says
-   * which fields stand in the way, because a refusal is recoverable by a
-   * maintainer running a version that knows those fields and a deletion is not.
+   * Reject deletion of nested objects containing unknown fields to preserve
+   * data written by newer extension versions (REQUIREMENTS.md section 3).
    *
    * @param {Record<string, unknown> | null} state The state the write builds on.
    * @param {Record<string, unknown>} changes
@@ -807,24 +696,16 @@ if (typeof require === 'function') {
   /**
    * @param {string} key
    * @param {MergedState} merged
-   * @returns {void} holds the state an advisory stands in after a write this
-   *   page made.
+   * @returns {void}
    */
   function remember(key, merged) {
     written.set(key, merged);
   }
 
   /**
-   * Puts the advisory a write read into the cache.
-   *
-   * REQUIREMENTS.md section 2: a write this extension makes updates the entry
-   * to carry what was written. The comment went to GitHub and is in no open
-   * document, so every surface reading the cache would otherwise go on showing
-   * the state this save replaced until a refetch came due. A refused write
-   * carries the page as its own fetch found it, which is state no open document
-   * holds either. The entry is stamped with the moment the write read the
-   * advisory, which is when everything in it but a landed write's own comment
-   * was observed. A result carrying no page writes nothing.
+   * Cache the advisory returned by a write, including fresh reads from refused
+   * writes. Use the fetch timestamp because all data except a successfully
+   * written comment was observed then (REQUIREMENTS.md section 2).
    *
    * @param {StateWriteResult} outcome
    * @returns {Promise<void>}
@@ -840,17 +721,10 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Whether a document shows at least the state held against it.
+   * Compare sequence numbers, then holders when the numbers match. Concurrent
+   * maintainers can use the same sequence number for different snapshots.
    *
-   * The sequence number settles it wherever the two differ. Where they claim
-   * the same number the holder settles it, for the reason a `superseded`
-   * refusal exists: two maintainers can claim one number, the tie goes to a
-   * login, and a document showing this maintainer's own snapshot at that number
-   * shows neither the rival's snapshot nor what the extension holds. A
-   * `superseded` refusal reads the rival's state, and a document that has not
-   * caught up with it is behind at a number that looks level.
-   *
-   * @param {MergedState} fromPage The state a document's comments merge to.
+   * @param {MergedState} fromPage The merged document state.
    * @param {MergedState} held
    * @returns {boolean}
    */
@@ -861,13 +735,11 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Whether a write from this page holds state the document has not caught up
-   * with, which is every moment between a save landing and the page being read
-   * again. What that document parses to is not this advisory's state, and
-   * nothing may store it as an observation of one.
+   * Detect a document behind locally retained state. Such a document must not
+   * replace newer cache data.
    *
    * @param {string} key
-   * @param {MergedState} fromPage The state this document's comments merge to.
+   * @param {MergedState} fromPage The merged document state.
    * @returns {boolean}
    */
   function ahead(key, fromPage) {
@@ -876,11 +748,10 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The state the panel reads: the one a write from this page left behind while
-   * it is ahead of the document, and the document's own once the page catches up.
+   * Prefer locally retained state until the document catches up.
    *
    * @param {string} key
-   * @param {MergedState} fromPage The state this document's comments merge to.
+   * @param {MergedState} fromPage The merged document state.
    * @returns {MergedState}
    */
   function preferred(key, fromPage) {
@@ -894,8 +765,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The state an advisory stands in once a write of `outcome` landed: the
-   * snapshot this page wrote, at the ordering claim it carried.
+   * Represent a successful write as merged state at its new sequence number.
    *
    * @param {StateWriteResult} outcome
    * @returns {MergedState | null}
@@ -910,8 +780,7 @@ if (typeof require === 'function') {
       seq: merged.nextSeq,
       observedSeq: merged.nextSeq,
       nextSeq: merged.nextSeq + 1,
-      // The write outranks the snapshot the merge would not take, so the next
-      // one takes no confirmation of its own.
+      // The written snapshot supersedes the unreadable snapshot.
       confirmationRequired: false,
     };
   }
@@ -936,10 +805,7 @@ if (typeof require === 'function') {
 
   /**
    * @param {unknown} error
-   * @returns {string} what the panel says where a save ended in an error rather
-   *   than a result. Where the request went and what became of it are both
-   *   unknown here, which is the same outcome as a write GitHub took and would
-   *   not read back. The error goes to the console.
+   * @returns {string} The message for an exception with an unknown write outcome.
    */
   function failedMessage(error) {
     console.warn('[better-ghsa] the save did not finish', error);
@@ -947,9 +813,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Asks for a render pass. A pass that fails is not one asking again would fix,
-   * and the result a maintainer is owed is recorded before this runs, so the
-   * failure ends here and the press that started the save puts the panel back.
+   * Request a render. If it fails, the save handler updates the existing controls.
    *
    * @param {EditorContext} context
    * @returns {Promise<void>}
@@ -958,16 +822,12 @@ if (typeof require === 'function') {
     try {
       await context.rerender?.();
     } catch {
-      // Nothing here can rebuild the panel. The controls come back where they
-      // stand, and the note says what the last save did.
+      // The save handler restores the controls and displays the recorded result.
     }
   }
 
   /**
-   * A save that stopped before a request was built. The reason is recorded and a
-   * pass is asked for, because the press that started the save put "Writing to
-   * GitHub" on the panel and disabled the controls, and the panel holds those
-   * until something replaces them.
+   * Record a refusal and redraw to restore disabled controls.
    *
    * @param {EditorContext} context
    * @param {string} key
@@ -982,26 +842,20 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Writes the controls' changes to this maintainer's state comment.
-   *
-   * A save that lands clears the controls and holds the state it wrote, because
-   * the comment is on GitHub and not in this document. A save that does not land
-   * leaves every change where it is, so nothing typed is lost to a refusal.
+   * Save the staged changes. Successful writes clear their edits and retain the
+   * written state until the document catches up. Failures preserve pending edits.
    *
    * @param {EditorContext} context
    * @returns {Promise<StateWriteResult>}
    */
   async function save(context) {
     const key = keyOf(context.advisory);
-    // A save while one is already going out is refused here, where the mark is
-    // set. The write refuses it too, and a second call reaching that refusal
-    // would take the mark the first call is still flying under with it.
+    // Reject concurrent saves before either call can clear the first call's mark.
     if (saving.has(key)) {
       return stopped(context, key, 'in-flight', globalThis.bghsa.state.IN_FLIGHT_MESSAGE);
     }
     const pending = editsFor(key);
-    // The Save button is disabled in exactly this state, so the refusal says
-    // nothing: there is no press that reaches it and nothing to report.
+    // The Save button is disabled when there are no changes.
     if (changedTracks(context.tracking, pending).length === 0) {
       return stopped(context, key, 'unchanged', '');
     }
@@ -1011,8 +865,7 @@ if (typeof require === 'function') {
     }
 
     results.delete(key);
-    // What the request carries, held from before it goes out. The store moves on
-    // under a save, and what lands is what was captured here.
+    // Capture the edits sent by this request to preserve later edits on completion.
     const captured = differences(context.tracking, pending);
     saving.add(key);
     /** @type {StateWriteResult} */
@@ -1021,14 +874,11 @@ if (typeof require === 'function') {
       outcome = await globalThis.bghsa.state.writeState({
         ref,
         loadedSeq: context.merged.observedSeq,
-        // The state a save remembers is at a sequence number the page has not
-        // caught up with, and a rival write claiming that same number is state
-        // this panel never showed. The holder is what tells the two apart.
+        // Distinguish concurrent snapshots with the same sequence number.
         loadedHolder: globalThis.bghsa.state.holderOf(context.merged),
         changes: (envelope) => changesOf(context.tracking, context.fingerprints, pending, envelope),
-        // What a clear would take away is judged against the state the write
-        // builds on, which is the one its own fetch read. The state the panel
-        // loaded with is older and can hold other fields.
+        // Check deletion against the freshly fetched state, which may contain
+        // additional fields.
         guard: (state, changes) => {
           const blocked = unclearable(state, changes);
           if (blocked.length === 0) return null;
@@ -1044,14 +894,12 @@ if (typeof require === 'function') {
         ...(context.parseDocument === undefined ? {} : { parseDocument: context.parseDocument }),
       });
     } catch (error) {
-      // Every failure the writer knows comes back as a result. One that reaches
-      // here is the ground moving under it, and the panel says so rather than
-      // holding "Saving..." until something else asks for a pass.
+      // Unexpected exceptions must also clear the saving state and redraw
+      // the panel to restore its controls.
       saving.delete(key);
       return stopped(context, key, 'failed', failedMessage(error));
     }
-    // Released by the call that set it, and before the pass below, so the pass
-    // builds controls a maintainer can use again.
+    // Clear the mark before rendering to enable the rebuilt controls.
     saving.delete(key);
 
     const landed = outcome.ok ? afterWrite(outcome) : null;
@@ -1061,10 +909,7 @@ if (typeof require === 'function') {
     } else if (outcome.merged !== null) {
       remember(key, outcome.merged);
     }
-    // The cache takes the page the write read whether the write landed on it or
-    // was refused by what it said. A refusal spent the fetch all the same, and
-    // REQUIREMENTS.md section 3 has the panel reloading with the state that
-    // fetch found, which no surface reading the cache would otherwise see.
+
     await hold(outcome);
     results.set(key, {
       ok: outcome.ok,
@@ -1075,7 +920,6 @@ if (typeof require === 'function') {
     return outcome;
   }
 
-  /** How every surface builds an element. */
   const element = globalThis.bghsa.dom.element;
 
   /**
@@ -1089,12 +933,58 @@ if (typeof require === 'function') {
     const details = element(doc, 'details', 'mt-2 bghsa-diagnostic');
     details.append(element(doc, 'summary', '', 'Diagnostic details'));
     const version = globalThis.bghsa.storage.api()?.runtime?.getManifest?.().version ?? 'unknown';
+    /** @param {boolean | null} value */
+    const answer = (value) => value === null ? 'unknown' : value ? 'yes' : 'no';
+    /** @type {string[]} */
+    let facts;
+    switch (diagnostic.code) {
+      case 'edit-form-missing-fields':
+        facts = [`Missing: ${diagnostic.missingFields.join(', ')}`];
+        break;
+      case 'edit-form-missing':
+        facts = ['Missing: edit comment form', `Target comment found: ${answer(diagnostic.targetCommentFound)}`];
+        break;
+      case 'comment-form-missing':
+        facts = ['Missing: new comment form'];
+        break;
+      case 'form-destination-mismatch': {
+        const checks = {
+          'malformed-action': 'form action is a valid URL',
+          origin: 'destination origin is https://github.com',
+          credentials: 'destination URL excludes credentials',
+          'advisory-path': 'destination path matches the advisory comment endpoint',
+          'comment-path': 'destination path matches the target comment',
+        };
+        facts = [`Failed check: ${checks[diagnostic.failedCheck]}`];
+        break;
+      }
+      case 'advisory-page-mismatch':
+        facts = [
+          `Advisory parser recognized page: ${answer(diagnostic.pageRecognized)}`,
+          `Advisory identity read: ${answer(diagnostic.identityReadable)}`,
+          `Identity matches requested advisory: ${answer(diagnostic.identityMatches)}`,
+        ];
+        break;
+      case 'save-unconfirmed':
+        facts = [
+          `HTTP response status: ${diagnostic.status}`,
+          `Matching response containers found: ${answer(diagnostic.commentContainersFound)}`,
+          `Expected content found in one matching container: ${answer(diagnostic.expectedContentFound)}`,
+          'Save unconfirmed: the comment may have been saved.',
+        ];
+        break;
+    }
     const report = [
       `Extension: ${version}`,
-      'Operation: edit tracking comment',
+      diagnostic.code === 'form-destination-mismatch'
+        ? `Operation: ${diagnostic.operation} tracking comment`
+        : diagnostic.code === 'comment-form-missing' || diagnostic.code === 'save-unconfirmed'
+          || diagnostic.code === 'advisory-page-mismatch'
+          ? 'Operation: save tracking state'
+          : 'Operation: edit tracking comment',
       `Diagnostic: ${diagnostic.code}`,
-      `Missing: ${diagnostic.missingFields.join(', ')}`,
-      'Comment POST sent: no',
+      ...facts,
+      `Comment POST sent: ${diagnostic.code === 'save-unconfirmed' ? 'yes' : 'no'}`,
     ].join('\n');
     const text = element(doc, 'pre', 'mt-2', report);
     text.setAttribute('style', 'white-space: pre-wrap; overflow-wrap: anywhere');
@@ -1121,8 +1011,7 @@ if (typeof require === 'function') {
 
   /**
    * @param {Element} field
-   * @returns {string} what a control holds. The live property is read where the
-   *   host offers one, because that is what the maintainer typed or picked.
+   * @returns {string} The control's live value, falling back to its value attribute.
    */
   function valueOf(field) {
     const live = /** @type {{ value?: unknown }} */ (/** @type {unknown} */ (field)).value;
@@ -1131,14 +1020,13 @@ if (typeof require === 'function') {
 
   /**
    * @param {Element} field
-   * @returns {boolean} whether a checkbox is checked.
+   * @returns {boolean} Whether the checkbox is checked.
    */
   function isChecked(field) {
     const live = /** @type {{ checked?: unknown }} */ (/** @type {unknown} */ (field)).checked;
     return typeof live === 'boolean' ? live : field.hasAttribute('checked');
   }
 
-  /** How every reader here reads an empty value as nothing. */
   const orNull = globalThis.bghsa.text.orNull;
 
   /**
@@ -1157,9 +1045,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Reads a text control as it is typed and when the value settles. `change`
-   * alone fires on blur, and a pass that rebuilds the panel between a keystroke
-   * and the blur would take the half-typed value with it.
+   * Read each input event to retain text if the panel is rebuilt before blur.
    *
    * @param {Element} field
    * @param {() => void} handler
@@ -1173,7 +1059,7 @@ if (typeof require === 'function') {
   /**
    * @param {Document} doc
    * @param {string} label
-   * @returns {{ field: Element, body: Element }} one labeled line of controls.
+   * @returns {{ field: Element, body: Element }} The labeled field and its control container.
    */
   function fieldRow(doc, label) {
     const field = element(doc, 'div', 'd-flex flex-items-center flex-wrap mb-2 bghsa-field');
@@ -1184,24 +1070,17 @@ if (typeof require === 'function') {
   }
 
   /**
-   * A `select` over a known set of values. A stored value this reader does not
-   * interpret is offered alongside them, so picking something else does not
-   * hide what the advisory carries.
-   *
-   * The stored value is what the option carries; `label` is how it reads. The
-   * two surfaces that offer the closure vocabulary hand in the same label, so a
-   * reason reads the same wherever it is picked.
+   * Include unknown stored values among the choices. `label` changes display
+   * text while preserving the stored option value.
    *
    * @param {Document} doc
    * @param {string} className
    * @param {readonly string[]} values
    * @param {string | null} current
-   * @param {string} blank What the empty option reads.
+   * @param {string} blank The empty-option label.
    * @param {object} [options]
-   * @param {(value: string) => string} [options.label] How a value reads, where
-   *   that is not the value itself.
-   * @param {string} [options.ariaLabel] What a screen reader calls the control,
-   *   for one standing without a visible label beside it.
+   * @param {(value: string) => string} [options.label] Formats display labels.
+   * @param {string} [options.ariaLabel] The accessible label for a control without a visible label.
    * @returns {Element}
    */
   function selectControl(doc, className, values, current, blank, options = {}) {
@@ -1256,19 +1135,9 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The logins the panel offers as owners: the org members this page shows,
-   * followed by the members this extension has seen on this organization's other
-   * advisories. REQUIREMENTS.md section 6 has owners be org members, and a member
-   * badge is what says a login is one. Membership is per organization, so a login
-   * badged on another organization is not offered here.
-   * A login outside the set is accepted when it is typed, and is flagged where it
-   * is shown.
-   *
-   * Where no member of this organization has been seen, the advisory's
-   * collaborators other than its reporter stand in, so the control is usable
-   * before anything has been observed. GitHub counts the reporter as a
-   * collaborator on the advisory they reported, which is why the reporter is left
-   * out of that fallback.
+   * Suggest members observed in this organization. Fall back to advisory
+   * collaborators when membership is unknown. Exclude the reporter from that
+   * fallback because GitHub also lists the reporter as a collaborator.
    *
    * @param {EditorContext} context
    * @returns {string[]}
@@ -1290,25 +1159,14 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Everything a surface needs to show one advisory's stored state and to write
-   * it: what the advisory's state comments merge to, with a write from this
-   * session preferred over the document it has not reached yet, the
-   * fingerprints the confirmations bind to, the tracking view those two make,
-   * and what the page derives.
-   *
-   * What the advisory says about the repository is taken here, on every surface
-   * that assembles a context. A member badge says a login is an org member, and
-   * a branch a pull request in the private fork targets or a maintainer asked
-   * for a backport on is a branch the repository has. Both are read off the
-   * advisory and both outlive it, so the pickers offer what any surface has
-   * seen and not only what was opened by hand. Holding them is synchronous, so
-   * the caller draws with them however slow storage is.
+   * Build the editor context using merged state, preferring locally retained
+   * state until the document catches up. Record observed members and branches
+   * synchronously to make them available to the pickers before storage finishes.
    *
    * @param {ParsedDetail} advisory
    * @param {object} [options]
-   * @param {() => Promise<void> | void} [options.rerender] What runs a render
-   *   pass on the surface asking, which is how it shows what a write left
-   *   behind.
+   * @param {() => Promise<void> | void} [options.rerender] Redraws the requesting surface
+   *   after a save.
    * @param {import('../common/write.js').WriteFetch} [options.fetch]
    * @param {(html: string) => Document} [options.parseDocument]
    * @returns {Promise<EditorContext>}
@@ -1364,14 +1222,9 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The branches the panel offers as backport targets: the release branches this
-   * extension has seen on this repository, together with the ones this advisory
-   * already carries, ordered by version descending. Version order puts
-   * `release/2.10` before `release/2.9`; string order puts it after.
-   *
-   * A typed branch is accepted whether or not it is offered here, so a
-   * repository whose branches this extension has never read still has a usable
-   * control.
+   * Suggest observed and stored backport branches in descending version order,
+   * including release/2.10 before release/2.9. The control also accepts typed
+   * branches outside these suggestions.
    *
    * @param {EditorContext} context
    * @returns {string[]}
@@ -1514,10 +1367,8 @@ if (typeof require === 'function') {
       pick(pending.embargoLift, context.tracking.embargoLift),
       'yyyy-mm-dd'
     );
-    // A snapshot with no embargo holds no lift date, so the field is off while
-    // the embargo is. Unticking the box stages no date, because the gate is
-    // read where every value is staged. The date itself stays in the box, so
-    // ticking the box again puts it back.
+    // Retain the date in the disabled field for reuse if embargo is re-enabled.
+    // Staging excludes it while embargo is off.
     setDisabled(lift, !inForce);
     applies.box.addEventListener('change', () => {
       const held = isChecked(applies.box);
@@ -1566,10 +1417,8 @@ if (typeof require === 'function') {
       setDisabled(duplicate, orNull(valueOf(control)) !== 'duplicate');
     };
     showDuplicate();
-    // A snapshot closed for another reason holds no duplicate, so the id is off
-    // while the reason is not duplicate and staging it there stages nothing.
-    // The id itself stays in the box, so moving the reason back takes it with
-    // it, the way the lift date comes back under an embargo.
+    // Retain the duplicate ID in the disabled field for reuse if the reason
+    // returns to duplicate. Staging excludes it for other reasons.
     control.addEventListener('change', () => {
       const reason = orNull(valueOf(control));
       stage(key, context.tracking, { closureReason: reason });
@@ -1590,10 +1439,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The three confirmations. A checkbox stands for the record: checking it
-   * records this maintainer against the value on the page, and clearing it takes
-   * the record away. A value the page did not give cannot be confirmed, so its
-   * checkbox is unavailable and says so.
+   * Checking a track stages a confirmation of the displayed value. Clearing it
+   * removes the confirmation record.
    *
    * @param {Document} doc
    * @param {EditorContext} context
@@ -1606,9 +1453,7 @@ if (typeof require === 'function') {
     const pending = editsFor(key);
     for (const track of globalThis.bghsa.tracking.CONFIRMATION_TRACKS) {
       const stored = context.tracking[track.key].status === 'confirmed';
-      // A confirmation records a fingerprint of the value approved. A value the
-      // page did not give cannot be fingerprinted, so the box is cleared and
-      // taken away rather than standing ticked over a record nothing can hold.
+      // A new confirmation requires a readable value to fingerprint.
       const unreadable = context.fingerprints[track.key] === null && !stored;
       if (unreadable) unstageConfirmation(key, track.key);
       const checked = unreadable ? false : pick(pending.confirm?.[track.key], stored);
@@ -1655,9 +1500,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The editing controls for one advisory, and the save that writes them. A pass
-   * builds these again from the changes the store holds, so a change survives
-   * GitHub replacing what surrounds the panel.
+   * Rebuild controls from retained pending edits after GitHub replaces the
+   * surrounding content.
    *
    * @param {Document} doc
    * @param {EditorContext} context
@@ -1665,8 +1509,7 @@ if (typeof require === 'function') {
    */
   function buildEditor(doc, context) {
     const key = keyOf(context.advisory);
-    // Building the editor is the panel taking up this advisory, and what a
-    // departure from it is judged against.
+
     panelShows(key);
     prune(key, context.tracking);
     const box = element(doc, 'div', 'Box-row bghsa-editor');
@@ -1678,9 +1521,7 @@ if (typeof require === 'function') {
 
     const disclosure = element(doc, 'details', 'bghsa-editor-details');
     if (opened.has(key)) disclosure.setAttribute('open', '');
-    // A Primer button, so the disclosure reads as a control and not as a line
-    // of bold text with a triangle beside it. It stays a `summary`, so the
-    // native disclosure semantics and the expanded state still hold.
+    // Use a summary element to retain native disclosure semantics.
     const summary = element(doc, 'summary', 'btn btn-sm bghsa-editor-summary', 'Edit tracking state');
     summary.addEventListener('click', () => {
       if (opened.has(key)) opened.delete(key);
@@ -1691,12 +1532,9 @@ if (typeof require === 'function') {
     const controls = element(doc, 'div', 'pt-2 bghsa-controls');
     disclosure.append(controls);
 
-    // The result this panel is built for, which is the one the flash below
-    // carries. The note names anything that lands after it.
+    // The flash displays this result. The note displays results received afterward.
     const shown = results.get(key);
 
-    // Built before the controls so their handlers can call it, and given its work
-    // once the nodes it reports on are in hand.
     /** @type {{ run: () => void }} */
     const hook = { run: () => {} };
     const update = () => hook.run();
@@ -1729,22 +1567,17 @@ if (typeof require === 'function') {
       /** @type {string[]} */
       const said = [];
       if (names.length > 0) said.push(`Unsaved changes: ${names.join(', ')}.`);
-      // What a save did lands in the panel as a flash on the next pass. A result
-      // this panel was not built for is one no pass has shown, so the note
-      // carries it: the pass may be the thing that failed.
+      // Display newer results in the existing note if the replacement render failed.
       const result = results.get(key);
       if (result !== undefined && result !== shown && result.message !== '') {
         said.push(result.message);
       }
-      // Nothing staged says nothing: the Save button is disabled in exactly
-      // that state.
+
       note.textContent = flight ? WRITING_MESSAGE : said.join(' ');
       setDisabled(saveButton, flight || names.length === 0);
       setDisabled(discardButton, flight || names.length === 0);
-      // Every control is held still while the request is out, whether this is
-      // the pass that sent it or a pass the page asked for in the meantime, and
-      // the flight gives back what it took once it settles. A control already
-      // off for a reason of its own is left alone.
+      // Mark controls disabled by this save. Preserve controls disabled for
+      // other reasons when restoring them.
       if (flight) {
         for (const node of controls.querySelectorAll('input, select, button')) {
           if (node.hasAttribute('disabled')) continue;
@@ -1761,10 +1594,8 @@ if (typeof require === 'function') {
     hook.run();
 
     saveButton.addEventListener('click', () => {
-      // The save marks the advisory before it awaits anything, so the controls
-      // this press leaves behind read the flight from the same place a pass does,
-      // and they are read again once it settles, because the pass that would
-      // replace them can be the thing that went wrong.
+      // Update existing controls before and after saving, including when the
+      // replacement render fails.
       void save(context).then(update, update);
       update();
     });

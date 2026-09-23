@@ -12,8 +12,7 @@ if (typeof require === 'function') {
 /**
  * @typedef {object} MetadataField
  * @property {boolean} present Whether the metadata form carries the field.
- * @property {string | null} value The source value, and null where the field is
- *   there and holds nothing.
+ * @property {string | null} value The source value, or null if empty or absent.
  */
 
 /**
@@ -28,8 +27,7 @@ if (typeof require === 'function') {
  * @property {string} id The numeric comment id.
  * @property {string} elementId The `advisory-comment-{id}` element id.
  * @property {string | null} author
- * @property {string | null} role The one role this comment's author carries,
- *   resolved once per comment identifier.
+ * @property {string | null} role The highest-priority role observed for the author.
  * @property {string[]} roles Every distinct badge on the comment.
  * @property {boolean} trusted Whether this author's snapshots count.
  * @property {string | null} at
@@ -50,8 +48,7 @@ if (typeof require === 'function') {
  * @property {number | null} number
  * @property {string | null} url
  * @property {string} title
- * @property {string | null} state `open`, the one state a fork row is drawn in,
- *   or null where the row named no state this reader places.
+ * @property {string | null} state `open`, or null if unreadable.
  * @property {string | null} baseRef The branch in the advisory's repository.
  * @property {string | null} headRef The branch in the private fork.
  * @property {string | null} author
@@ -81,9 +78,8 @@ if (typeof require === 'function') {
  * @property {string | null} state `Triage`, `Draft`, `Published`, or `Closed`.
  * @property {string | null} severity The severity, lowercased, or null when unset.
  * @property {string | null} severityLabel The severity as displayed.
- * @property {string | null} severityClass The color GitHub paints the severity
- *   chip with, as the `Label--` modifiers it carries, and null where the chip
- *   carries none. See {@link labelModifiers}.
+ * @property {string | null} severityClass GitHub's severity color classes.
+ *   See {@link labelModifiers}.
  * @property {string | null} reportedAt The time the report was opened, from the
  *   description Box header.
  * @property {string | null} reporter The login the description Box header names.
@@ -91,10 +87,8 @@ if (typeof require === 'function') {
  * @property {string | null} description Source markdown from the metadata form.
  * @property {string | null} severityField The stored severity selection, which
  *   is `cvss_v3` or `cvss_v4` when the severity comes from a vector.
- * @property {boolean} severityFieldPresent Whether the metadata form carries
- *   the severity selection. A form this extension cannot find the field in
- *   states no severity, and the scoring confirmation cannot be judged against
- *   a value that was not read.
+ * @property {boolean} severityFieldPresent Whether the severity field was
+ *   found. Scoring confirmation requires a readable field.
  * @property {string | null} cvssV3
  * @property {boolean} cvssV3Present Whether the metadata form carries the CVSS
  *   v3 vector field, which the scoring confirmation binds to alongside the
@@ -113,59 +107,42 @@ if (typeof require === 'function') {
 
 (() => {
   /**
-   * The header of the Box the advisory's description sits in.
-   *
-   * Several regions carry `js-repository-advisory-details`. The description's is
-   * the one whose own child is a comment-style Box header. That header names the
-   * reporter and the report time in every advisory state; the page header meta
-   * names the publisher and the publication time once published. The panel
-   * anchors itself on the same header, so GitHub renaming it takes the reporter
-   * and the panel together.
+   * The description's Box header identifies the reporter and report time in
+   * every advisory state. The page header identifies the publisher and publication
+   * time on published advisories. The panel uses this selector for placement.
    */
   const DESCRIPTION_HEADER =
     'div.js-repository-advisory-details > div.Box-header.timeline-comment-header';
 
   /**
-   * The attribute the extension's own comment chips carry. A chip carries
-   * GitHub's `Label` classes so it sits with the role badges, and this attribute
-   * is what keeps a re-read from taking one for a role badge.
+   * Exclude extension chips from role badge parsing. They share GitHub's
+   * `Label` classes.
    */
   const EXTENSION_CHIP_ATTRIBUTE = 'data-bghsa-comment-chip';
 
   /**
-   * The `color-fg-*` modifier a fork row's icon carries for an open pull
-   * request, which is the only modifier such a row is drawn with. The fork's
-   * list shows open pull requests only: merging deletes the fork and the Box
-   * with it, and a closed pull request is not rendered there either.
+   * The private fork lists only open pull requests. Closed pull requests are
+   * omitted; merging deletes the fork and its Box.
    */
   const OPEN_PULL_COLOR = 'color-fg-open';
 
   /**
-   * The `aria-label` an open row's icon carries, read where the modifier is
-   * absent or renamed. A row neither reading places leaves the state null,
-   * which marks the patch state incomplete and paints the chip `Unknown`.
+   * The icon's aria-label also identifies open pull requests. An unreadable
+   * state remains null and makes the derived patch state incomplete.
    */
   const OPEN_PULL_LABEL = /^open\b/;
 
-  /** How every reader here squares up the text a page carries. */
   const collapse = globalThis.bghsa.text.collapse;
 
-  /** How every reader here reads an empty value as nothing. */
   const orNull = globalThis.bghsa.text.orNull;
 
   /**
-   * The `Label--` modifiers a chip carries, which is what GitHub colors it with.
-   *
-   * The level a severity chip names does not say which modifier it takes:
-   * GitHub paints high with `Label--orange` and moderate with `Label--warning`.
-   * So the extension reads the modifier off GitHub's own chip and reuses it,
-   * and paints a level it has never seen correctly without being told about it.
+   * Reuse GitHub's severity color classes. Severity names do not map directly
+   * to class names: high uses `Label--orange`, moderate uses `Label--warning`.
    *
    * @param {Element | null} label
-   * @param {readonly string[]} [except] Modifiers that carry no color, such as
-   *   the size the chip is drawn at.
-   * @returns {string | null} the modifiers in the order the chip carries them,
-   *   and null for a chip carrying none.
+   * @param {readonly string[]} [except] Modifiers to exclude, such as size classes.
+   * @returns {string | null} The remaining modifiers in DOM order, or null if empty.
    */
   function labelModifiers(label, except = []) {
     if (label === null) return null;
@@ -190,8 +167,8 @@ if (typeof require === 'function') {
 
   /**
    * @param {string | null | undefined} href
-   * @returns {string | null} the login a `/{login}` href names. A percent escape
-   *   that does not decode names no login.
+   * @returns {string | null} The decoded login from a `/{login}` path, or null
+   *   if the path or percent encoding is invalid.
    */
   function loginFromHref(href) {
     const match = /^\/([^/?#]+)\/?$/.exec(String(href ?? ''));
@@ -214,8 +191,6 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Whether `form` is the one that posts a new comment on the advisory.
-   *
    * @param {Element} form
    * @returns {boolean}
    */
@@ -226,30 +201,15 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The login of the account this page was rendered for.
-   *
-   * An advisory page names the signed-in account in one place: the avatar on the
-   * box that composes a new comment, `div.timeline-new-comment`. Every other
-   * login on the page belongs to a comment author, a timeline actor, or a
-   * collaborator, and none of those says who is reading. The write path needs
-   * this login to find that maintainer's own state comment and to stamp `by`.
-   *
-   * The box has to hold the form that posts a comment on this advisory, so the
-   * login read here is the one that would author a comment written from this
-   * page. A page carrying no such box reads as null.
-   *
-   * The anchor's href and the avatar's `alt` name the login twice, and both have
-   * to name it and agree. A box naming it once is a box this does not read. A
-   * login this cannot read is null, and a write with no login in hand is
-   * refused: writing under the wrong identity edits another maintainer's
-   * comment.
+   * Identify the signed-in account from the new-comment composer. Require one
+   * composer with a comment form and matching avatar link and alt text. The
+   * writer uses this identity to select the maintainer's comment and stamp `by`.
    *
    * @param {Document} root
    * @returns {string | null}
    */
   function parseViewer(root) {
     const boxes = root.querySelectorAll('div.timeline-new-comment');
-    // Two boxes name no one box, and the page carries one.
     if (boxes.length !== 1) return null;
     const box = boxes[0];
     if (box === undefined) return null;
@@ -269,13 +229,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The source value of one advisory metadata form field. A `select` reads from
-   * the option the server marked selected, which is the stored value whether or
-   * not the maintainer has since touched the control.
-   *
-   * A field the form does not carry is a value this extension could not read. A
-   * field that is there and holds nothing is a value the advisory does not set.
-   * Both leave `value` null, and `present` is what tells them apart.
+   * Read the server-rendered metadata value, including the selected attribute
+   * on options. `present` distinguishes an empty field from a missing field.
    *
    * @param {Document} root
    * @param {string} name The field name inside `repository_advisory[...]`.
@@ -296,8 +251,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The advisory this document belongs to, read from the live region partials
-   * every detail page carries.
+   * Read the advisory reference from the live-region partial URLs.
    *
    * @param {Document} root
    * @returns {AdvisoryRef | null}
@@ -318,17 +272,9 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The state comment a rendered comment body holds, if it holds one.
-   *
-   * The marker in a code span says so, whatever the summary reads and whatever
-   * state the fence is in, so a fence that does not parse is read and carried to
-   * the merge, which warns on it by name. A marker inside the fence is text in a
-   * code block and says nothing.
-   *
-   * A body carrying no marker qualifies where its fence parses to an object
-   * naming `betterGhsa`. State comments written before the marker existed are
-   * recognized on that path alone, and one of those whose fence does not parse
-   * is not recognized at all.
+   * An inline code marker identifies a state comment even when its JSON is
+   * invalid. Markers inside fenced blocks do not count. A markerless comment
+   * qualifies only if its JSON object contains `betterGhsa`.
    *
    * @param {Element | null} body The rendered comment body.
    * @returns {import('./schema.js').SnapshotReport | null}
@@ -355,9 +301,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Every advisory comment in the thread. Role badges repeat across the
-   * responsive duplicates and across the minimized and unminimized container
-   * shapes, so roles are collected per comment identifier and deduplicated.
+   * GitHub repeats role badges in responsive and minimized comment layouts.
+   * Collect and deduplicate roles per comment ID.
    *
    * @param {Document} root
    * @returns {ParsedComment[]}
@@ -403,8 +348,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The advisory's timeline. Comment groups carry `TimelineItem-body` themselves
-   * and are excluded here; they are read as comments.
+   * Exclude comment groups, which also have the `TimelineItem-body` class.
    *
    * @param {Document} root
    * @returns {TimelineEvent[]}
@@ -470,7 +414,7 @@ if (typeof require === 'function') {
 
   /**
    * @param {Document} root
-   * @returns {PrivateFork | null} null when the advisory has no private fork.
+   * @returns {PrivateFork | null} null when the private fork is absent.
    */
   function parseFork(root) {
     const box = root.querySelector('private-forks-git-clone-help');
@@ -500,8 +444,6 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Everything the panel reads from an advisory detail page.
-   *
    * @param {Document} root
    * @returns {ParsedDetail | null} null when the document is not a detail page.
    */
@@ -542,8 +484,7 @@ if (typeof require === 'function') {
             ? null
             : orNull(collapse(severity.textContent).toLowerCase()),
       severityLabel: severity === null ? null : orNull(collapse(severity.textContent)),
-      // `Label--large` is the size the detail page draws the chip at, and it is
-      // the selector this parser found the chip by, so it is not its color.
+      // Exclude the size modifier from the severity color classes.
       severityClass: labelModifiers(severity, ['Label--large']),
       reportedAt: datetimeOf(descriptionHeader),
       reporter: descriptionHeader === null ? null : authorIn(descriptionHeader),

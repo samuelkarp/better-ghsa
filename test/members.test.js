@@ -14,9 +14,7 @@ const { fakeStorage } = require('../test-support/storage.js');
 /** @typedef {import('../test-support/storage.js').FakeStorage} Fake */
 
 /**
- * A storage seeded under the one key this module owns.
- *
- * @param {unknown} [held] What an earlier session left under the members key.
+ * @param {unknown} [held] The initial stored member map.
  * @returns {Fake}
  */
 const memberStorage = (held) =>
@@ -31,10 +29,8 @@ function fixture(name) {
   return /** @type {Document} */ (/** @type {unknown} */ (parseHTML(html).document));
 }
 
-/** The organization the advisory fixtures belong to. */
 const UTENSILS = { owner: 'git-utensils' };
 
-/** Another organization, whose members are not the first one's. */
 const CONTAINERD = { owner: 'containerd' };
 /**
  * @param {Fake} storage
@@ -48,7 +44,7 @@ function stored(storage, key) {
   return Array.isArray(logins) ? logins.map((login) => String(login)) : [];
 }
 
-/** @returns {void} takes this session's set and its storage back to empty. */
+/** @returns {void} */
 function forget() {
   members.clear();
   members.setStorage(null);
@@ -121,8 +117,6 @@ test('a session that adds nothing leaves the entry as it stands', async () => {
   assert.strictEqual(storage.writes.length, 0, 'the entry was written with nothing new in it');
   assert.deepStrictEqual(members.known(UTENSILS), ['SAMUELKARP', 'dmcgowan']);
 
-  // A login the entry does not carry does write, so the zero above is a session
-  // that added nothing and not a count that cannot move.
   members.remember(UTENSILS, ['estesp']);
   assert.strictEqual(await members.sync(), false, 'storage held a login this session did not');
   assert.strictEqual(storage.writes.length, 1, 'a write went unrecorded');
@@ -224,8 +218,7 @@ test('a render pass holds the members the page shows and stores them', async () 
     'the pass held the page members against another organization'
   );
 
-  // The pass hands storage the logins on its way out, which settles after the
-  // pass itself does.
+  // Member storage completes after the render pass returns.
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepStrictEqual(
     stored(storage, 'git-utensils'),

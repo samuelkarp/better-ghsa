@@ -9,25 +9,19 @@ const cache = require('../src/common/cache.js');
 const members = require('../src/common/members.js');
 const forget = require('../src/common/forget.js');
 
-// A stand-in for `browser.storage.local`. Its `get(null)` answers with
-// everything, which is what the real one does and what the clear reads.
 const { fakeStorage } = require('../test-support/storage.js');
 
-/** Two repositories in one organization, and one in another. */
 const CONTAINERD = 'containerd/containerd';
 const NERDCTL = 'containerd/nerdctl';
 const SPOON = 'git-utensils/spoon-knife';
 
 /**
- * A repository whose whole name is a prefix of another repository's in the same
- * organization. `containerd/con` and `containerd/containerd` are what a key
- * matched on `adv:{owner}/{repo}` without its trailing colon would confuse.
+ * The trailing colon in cache keys distinguishes containerd/con
+ * from containerd/containerd.
  */
 const CON = 'containerd/con';
 
 /**
- * The keys one repository's reads are held under.
- *
  * @param {string} repository
  * @returns {string[]}
  */
@@ -41,8 +35,6 @@ function keysOf(repository) {
 }
 
 /**
- * Storage as a browser that has read every one of these repositories holds it.
- *
  * @param {readonly string[]} repositories
  * @returns {ReturnType<typeof fakeStorage>}
  */
@@ -77,7 +69,7 @@ function survivors(storage, repository) {
 /**
  * @param {ReturnType<typeof fakeStorage>} storage
  * @param {string} key
- * @returns {string[]} the names the map at that key still carries.
+ * @returns {string[]} The keys of the stored map.
  */
 function namesIn(storage, key) {
   const held = storage.entries[key];
@@ -93,7 +85,6 @@ test('the clear empties every store and leaves the repository list', async () =>
   const storage = stored([CONTAINERD, NERDCTL, SPOON]);
   const outcome = await forget.everything({ storage });
 
-  // Three repositories, four cache keys each, plus `members` and `branches`.
   assert.strictEqual(outcome.taken, 14, 'the clear took the wrong number of keys');
   assert.strictEqual(outcome.members, true);
   assert.strictEqual(outcome.branches, true);
@@ -102,8 +93,7 @@ test('the clear empties every store and leaves the repository list', async () =>
   }
   assert.strictEqual(Object.hasOwn(storage.entries, members.MEMBERS_KEY), false);
   assert.strictEqual(Object.hasOwn(storage.entries, branches.BRANCHES_KEY), false);
-  // The list is the one thing the clear leaves: taking it would turn the
-  // extension off. REQUIREMENTS.md section 2.
+  // Preserve the allowlist to keep the extension enabled (REQUIREMENTS.md section 2).
   assert.deepStrictEqual(storage.entries[allowlist.STORAGE_KEY], [CONTAINERD, NERDCTL, SPOON]);
   assert.deepStrictEqual(Object.keys(storage.entries), [allowlist.STORAGE_KEY]);
 });
@@ -133,22 +123,16 @@ test('unlisting clears that repository and leaves a sibling in the same organiza
 
   assert.strictEqual(outcome.taken, 4, 'the wrong number of keys was taken');
   assert.deepStrictEqual(survivors(storage, CONTAINERD), []);
-  // A fixture with one repository would pass here whether the code took that
-  // repository's keys or every key in the store.
   assert.deepStrictEqual(survivors(storage, NERDCTL), keysOf(NERDCTL));
   assert.deepStrictEqual(survivors(storage, SPOON), keysOf(SPOON));
   assert.strictEqual(outcome.branches, true);
   assert.deepStrictEqual(namesIn(storage, branches.BRANCHES_KEY), [NERDCTL, SPOON].sort());
-  // `containerd/nerdctl` is still listed, so the organization's members stay.
   assert.strictEqual(outcome.members, false);
   assert.deepStrictEqual(namesIn(storage, members.MEMBERS_KEY), ['containerd', 'git-utensils']);
 });
 
 test('unlisting takes the keys of a repository named the way a maintainer typed it', async () => {
-  // Storage keys spell a repository the way the allowlist stores it, lowercased
-  // and trimmed, while the name reaching here is the one that was typed. A
-  // fixture whose name is already in that spelling would pass whether the name
-  // was normalized or used as it stands.
+  // Storage keys use trimmed, lowercase repository names. Input may use another spelling.
   const storage = stored([CONTAINERD, NERDCTL]);
 
   const outcome = await forget.repository('  Containerd/Containerd  ', [' Containerd/NerdCTL '], {
@@ -160,8 +144,6 @@ test('unlisting takes the keys of a repository named the way a maintainer typed 
   assert.deepStrictEqual(survivors(storage, NERDCTL), keysOf(NERDCTL));
   assert.strictEqual(outcome.branches, true);
   assert.deepStrictEqual(namesIn(storage, branches.BRANCHES_KEY), [NERDCTL]);
-  // The sibling is still listed under a name in another spelling, so the
-  // organization's members stay.
   assert.strictEqual(outcome.members, false);
   assert.deepStrictEqual(namesIn(storage, members.MEMBERS_KEY), ['containerd']);
 });
@@ -175,7 +157,6 @@ test('unlisting the last repository of an organization clears its members', asyn
   assert.strictEqual(outcome.members, true);
   assert.deepStrictEqual(namesIn(storage, members.MEMBERS_KEY), ['git-utensils']);
   assert.deepStrictEqual(namesIn(storage, branches.BRANCHES_KEY), [SPOON]);
-  // The organization it was not in is untouched throughout.
   assert.deepStrictEqual(survivors(storage, SPOON), keysOf(SPOON));
 });
 
@@ -215,7 +196,6 @@ test('the keys one repository owns are its own three kinds and nothing else', ()
 
   assert.deepStrictEqual(forget.keysFor(CONTAINERD, held), keysOf(CONTAINERD));
   assert.deepStrictEqual(forget.keysFor(CON, held), keysOf(CON));
-  // The comparison folds case, because every key is written folded.
   assert.deepStrictEqual(forget.keysFor(' ContainerD/ContainerD ', held), keysOf(CONTAINERD));
 });
 

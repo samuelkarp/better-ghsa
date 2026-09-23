@@ -15,9 +15,7 @@ const { fakeStorage } = require('../test-support/storage.js');
 /** @typedef {import('../test-support/storage.js').FakeStorage} Fake */
 
 /**
- * A storage seeded under the one key this module owns.
- *
- * @param {unknown} [held] What an earlier session left under the branches key.
+ * @param {unknown} [held] The initial stored branch map.
  * @returns {Fake}
  */
 const branchStorage = (held) =>
@@ -32,7 +30,6 @@ function fixture(name) {
   return /** @type {Document} */ (/** @type {unknown} */ (parseHTML(html).document));
 }
 
-/** The repository every test here reads and writes branches for. */
 const REF = { owner: 'containerd', repo: 'containerd', ghsaId: 'GHSA-1111-1111-1111' };
 
 /**
@@ -47,7 +44,7 @@ function stored(storage, repository) {
   return Array.isArray(held) ? held.map((name) => String(name)) : [];
 }
 
-/** @returns {void} takes this session's set and its storage back to empty. */
+/** @returns {void} */
 function forget() {
   branches.clear();
   branches.setStorage(null);
@@ -148,8 +145,6 @@ test('a session that adds nothing leaves the entry as it stands', async () => {
   assert.strictEqual(await branches.sync(), true);
   assert.strictEqual(storage.writes.length === 0, true, 'the entry was written with nothing new');
 
-  // A branch the entry does not carry does write, so the zero above is a session
-  // that added nothing and not a count that cannot move.
   branches.remember(REF, ['release/2.2']);
   assert.strictEqual(await branches.sync(), false, 'storage held a branch this session did not');
   assert.strictEqual(storage.writes.length, 1, 'a write went unrecorded');
@@ -230,8 +225,7 @@ test('a render pass holds the release branches the advisory names and stores the
     'the pass did not hold the advisory branches before it drew'
   );
 
-  // The pass hands storage the branches on its way out, which settles after
-  // the pass itself does.
+  // Branch storage completes after the render pass returns.
   await new Promise((resolve) => setImmediate(resolve));
   assert.strictEqual(
     stored(storage, 'git-utensils/spoon-knife').join(' '),
@@ -242,10 +236,8 @@ test('a render pass holds the release branches the advisory names and stores the
 });
 
 /**
- * The elements a render pass is keyed on, as panel.test.js establishes them,
- * with the fork fixture placed in the main column. The advisory it stands for
- * carries no state comment, so the branches its fork names are the only ones
- * a pass over it can hold.
+ * The fixture contains a private fork and does not contain state comments.
+ * Only the fork supplies branches.
  *
  * @returns {Document}
  */
@@ -274,14 +266,13 @@ function forkPage() {
 }
 
 /**
- * Points the pull requests in a document's private fork at another branch. The
- * base ref is the last `span.css-truncate-target` of `span.commit-ref.base-ref`
- * on the row, which is what `parse-detail.js` reads.
+ * The base ref is the last `span.css-truncate-target` within
+ * `span.commit-ref.base-ref` on each pull request row.
  *
  * @param {Document} doc
  * @param {string} from The branch the row names now.
  * @param {string} to The branch to point it at.
- * @returns {number} how many rows were pointed at it.
+ * @returns {number} The number of updated rows.
  */
 function retargetFork(doc, from, to) {
   let moved = 0;
@@ -310,9 +301,8 @@ test('the release branches an advisory fork patches become candidates', async ()
 test('a branch a fork names is offered on the other advisories of its repository', async () => {
   forget();
   const doc = fixture('triage-thread.html');
-  // The capture's fork patches the branch its snapshot already names as a
-  // backport target. Pointing it at another branch separates the two sources,
-  // so what the fork alone supplies is visible.
+  // The captured fork and snapshot name the same backport branch.
+  // Change the fork branch to distinguish its contribution.
   assert.strictEqual(
     retargetFork(doc, 'release/1.0', 'release/9.9'),
     1,
@@ -320,7 +310,6 @@ test('a branch a fork names is offered on the other advisories of its repository
   );
   assert.strictEqual(await panel.render(doc) !== null, true, 'the fixture offered no anchor');
 
-  // Another advisory on the same repository, which this session has not read.
   const elsewhere = { owner: 'git-utensils', repo: 'Spoon-Knife', ghsaId: 'GHSA-2222-2222-2222' };
   assert.strictEqual(
     branches.known(elsewhere).join(' '),

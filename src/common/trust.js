@@ -4,9 +4,7 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
 
 (() => {
   /**
-   * The author role badges GitHub renders on an advisory comment, most
-   * privileged first. A comment carries every badge that applies, so this order
-   * is also the precedence used to name one role per comment.
+   * Comments can have multiple badges. This order determines which role to display.
    *
    * @type {readonly string[]}
    */
@@ -20,12 +18,8 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
   const TRUSTED_ROLES = ['Owner', 'Member'];
 
   /**
-   * Whether snapshots written by a comment's author count toward advisory state.
-   * The merge, the panel's warning, and the per-comment role labels all decide
-   * through this function.
-   *
-   * A login is required because a snapshot with no identifiable author carries
-   * no claim, and the role is the badge GitHub rendered on the comment.
+   * Require an identifiable author with an Owner or Member badge for a snapshot
+   * to contribute to advisory state.
    *
    * @param {string | null | undefined} login
    * @param {string | null | undefined} role One of {@link ROLES}, or any other

@@ -10,36 +10,27 @@ if (typeof require === 'function') {
 /**
  * @typedef {object} OrderEntry
  * @property {string | null} ghsaId
- * @property {string | null} state The state GitHub holds the advisory in, as it
- *   names it.
- * @property {boolean} neverReviewed No org member has commented on or acted on
- *   the advisory.
- * @property {boolean} newActivity The reporter has spoken since the last member
- *   comment or member action.
+ * @property {string | null} state The GitHub advisory state.
+ * @property {boolean} neverReviewed Whether the advisory lacks evidence of maintainer review.
+ * @property {boolean} newActivity Whether a non-member commented after the last
+ *   member comment or action.
  * @property {string | null} triage The stored triage value.
  * @property {boolean} embargoOverdue The embargo lift date has gone by and the
  *   advisory is not published.
- * @property {string | null} severity The severity the advisory carries.
+ * @property {string | null} severity The advisory severity.
  * @property {boolean} severityConfirmed Whether a maintainer confirmed that
- *   severity. A confirmation that no longer binds to the current value has
- *   already reverted to unconfirmed by the time it reaches here.
+ *   severity. The caller clears confirmations for changed values.
  * @property {string | null} waitingSince The time the advisory entered its
  *   current triage value.
  */
 
 /**
- * What the waiting state is read from. It is the three fields of an
- * {@link OrderEntry} that answer it, and no more, so a surface holding a parsed
- * advisory and its tracking state can ask for the waiting state without
- * assembling a row.
- *
  * @typedef {Pick<OrderEntry, 'neverReviewed' | 'newActivity' | 'triage'>} WaitingEntry
  */
 
 (() => {
   /**
-   * The groups the list table orders within a state by, as REQUIREMENTS.md
-   * section 9 names them.
+   * Group ordering follows REQUIREMENTS.md section 9.
    */
   const GROUPS = {
     EMBARGO_OVERDUE: 'embargo overdue',
@@ -50,9 +41,7 @@ if (typeof require === 'function') {
   };
 
   /**
-   * The groups of a draft advisory, most urgent first. Never reviewed is not
-   * among them: a maintainer moved the advisory to draft, so it has been
-   * reviewed.
+   * Moving an advisory to draft requires a maintainer review.
    *
    * @type {readonly string[]}
    */
@@ -63,14 +52,7 @@ if (typeof require === 'function') {
     GROUPS.BLOCKED_ON_REPORTER,
   ];
 
-  /**
-   * The groups of an advisory in triage, most urgent first. This is a different
-   * order from {@link DRAFT_GROUPS} and not the same order with an exception:
-   * blocked on us and new activity swap ends, and never reviewed sits between
-   * them.
-   *
-   * @type {readonly string[]}
-   */
+  /** @type {readonly string[]} */
   const TRIAGE_GROUPS = [
     GROUPS.EMBARGO_OVERDUE,
     GROUPS.BLOCKED_ON_US,
@@ -80,9 +62,7 @@ if (typeof require === 'function') {
   ];
 
   /**
-   * The waiting state one row's chip carries, in the order the chip prefers
-   * them. This says what an advisory is waiting on, which the filter and the
-   * chip show; it is not what the default order sorts by.
+   * Chip and filter precedence is independent of the table's sort order.
    *
    * @type {readonly string[]}
    */
@@ -93,13 +73,7 @@ if (typeof require === 'function') {
     GROUPS.BLOCKED_ON_REPORTER,
   ];
 
-  /**
-   * Which side each triage value leaves the advisory waiting on. `evaluating` and
-   * `awaiting maintainer input` both need a maintainer, and only `awaiting
-   * reporter` hands the advisory back.
-   *
-   * @type {Readonly<Record<string, 'us' | 'reporter'>>}
-   */
+  /** @type {Readonly<Record<string, 'us' | 'reporter'>>} */
   const BLOCKED_ON = {
     evaluating: 'us',
     'awaiting reporter': 'reporter',
@@ -107,8 +81,7 @@ if (typeof require === 'function') {
   };
 
   /**
-   * Severity as a number, highest first, so an unset severity ranks below every
-   * severity that is set.
+   * Unknown and unset severities rank below known severities.
    *
    * @type {Readonly<Record<string, number>>}
    */
@@ -116,8 +89,7 @@ if (typeof require === 'function') {
 
   /**
    * @param {string | null | undefined} severity
-   * @returns {number} the rank of `severity`, and 0 for one that is unset or that
-   *   this reader does not know.
+   * @returns {number} The severity rank, or zero if unset or unknown.
    */
   function severityRank(severity) {
     if (typeof severity !== 'string') return 0;
@@ -125,14 +97,10 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Which side a triage value leaves the advisory waiting on.
-   *
-   * A value this reader does not know is waiting on us: it takes a maintainer
-   * to say otherwise. An advisory carrying no stored triage value is waiting on
-   * nobody, because this reads triage values and it has none.
+   * Unknown triage values require maintainer attention.
    *
    * @param {string | null | undefined} triage
-   * @returns {'us' | 'reporter' | null} null where no triage value is stored.
+   * @returns {'us' | 'reporter' | null} Null if triage is unset.
    */
   function classifyTriage(triage) {
     if (typeof triage !== 'string' || triage.trim() === '') return null;
@@ -140,12 +108,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Whether the advisory is waiting on a maintainer, by REQUIREMENTS.md section
-   * 9.
-   *
-   * An advisory carrying no stored triage value answers to this in draft alone,
-   * where a maintainer accepted it and has not said where it stands. In triage
-   * it answers to never reviewed, which draft does not hold.
+   * Draft advisories without stored triage require maintainer attention
+   * (REQUIREMENTS.md section 9).
    *
    * @param {OrderEntry} entry
    * @returns {boolean}
@@ -158,18 +122,14 @@ if (typeof require === 'function') {
 
   /**
    * @param {OrderEntry} entry
-   * @returns {boolean} whether the advisory carries no stored triage value.
+   * @returns {boolean} Whether triage is unset.
    */
   function untriaged(entry) {
     return classifyTriage(entry.triage) === null;
   }
 
   /**
-   * Which state's group order an advisory takes.
-   *
-   * Only draft and triage reach this table. A state this reader cannot read, and
-   * the published and closed states the done page holds, take the triage order,
-   * the way an unknown triage value counts as blocked on us.
+   * Use triage ordering for every state except draft.
    *
    * @param {OrderEntry} entry
    * @returns {'draft' | 'triage'}
@@ -187,11 +147,7 @@ if (typeof require === 'function') {
     return state === 'draft' ? DRAFT_GROUPS : TRIAGE_GROUPS;
   }
 
-  /**
-   * Whether an advisory answers to one group.
-   *
-   * @type {Readonly<Record<string, (entry: OrderEntry) => boolean>>}
-   */
+  /** @type {Readonly<Record<string, (entry: OrderEntry) => boolean>>} */
   const MEMBER_OF = {
     [GROUPS.EMBARGO_OVERDUE]: (entry) => entry.embargoOverdue,
     [GROUPS.NEW_ACTIVITY]: (entry) => entry.newActivity,
@@ -201,12 +157,7 @@ if (typeof require === 'function') {
   };
 
   /**
-   * The group an advisory sorts in, which is the first of its state's groups it
-   * answers to.
-   *
-   * Every advisory reaches a group. A triage value names us or the reporter,
-   * and those two are groups of both states; no triage value takes blocked on
-   * us in draft and never reviewed in triage.
+   * Choose the first matching group in the advisory state's priority order.
    *
    * @param {OrderEntry} entry
    * @returns {string} one of {@link GROUPS}.
@@ -219,8 +170,8 @@ if (typeof require === 'function') {
 
   /**
    * @param {OrderEntry} entry
-   * @returns {number} how far down its state's groups the advisory sits, and the
-   *   length of that list for a group it does not hold.
+   * @returns {number} The group's index in the state's priority list, or the list
+   *   length if the group is absent.
    */
   function groupRank(entry) {
     const groups = groupsFor(stateOf(entry));
@@ -229,13 +180,9 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The waiting state one advisory shows, which is the first of
-   * {@link WAITING_STATES} it answers to.
-   *
-   * Never reviewed here is section 6's derived value, which member activity
-   * says, and the ordering group of the same name is the absence of a stored
-   * triage value. An advisory a member has touched and nobody has triaged shows
-   * blocked on us and sorts in never reviewed.
+   * The chip uses evidence of maintainer review. The never-reviewed sort group
+   * also includes advisories without stored triage. A reviewed advisory without
+   * stored triage can therefore show blocked on us while sorting as never reviewed.
    *
    * @param {WaitingEntry} entry
    * @returns {string}
@@ -250,7 +197,7 @@ if (typeof require === 'function') {
 
   /**
    * @param {OrderEntry} entry
-   * @returns {number} the severity a maintainer confirmed, and 0 where none is.
+   * @returns {number} The confirmed severity rank, or zero if unconfirmed.
    */
   function confirmedRank(entry) {
     return entry.severityConfirmed ? severityRank(entry.severity) : 0;
@@ -258,8 +205,7 @@ if (typeof require === 'function') {
 
   /**
    * @param {OrderEntry} entry
-   * @returns {number} the severity nobody has confirmed, and 0 where the severity
-   *   is confirmed.
+   * @returns {number} The unconfirmed severity rank, or zero if confirmed.
    */
   function unconfirmedRank(entry) {
     return entry.severityConfirmed ? 0 : severityRank(entry.severity);
@@ -267,19 +213,15 @@ if (typeof require === 'function') {
 
   /**
    * @param {OrderEntry} entry
-   * @returns {number | null} the instant the advisory started waiting, and null
-   *   for a time this reader cannot read.
+   * @returns {number | null} The waiting start time in epoch milliseconds,
+   *   or null if unreadable.
    */
   function waitingAt(entry) {
     return globalThis.bghsa.text.instantOf(entry.waitingSince);
   }
 
   /**
-   * Alphabetical, with a value the reader could not read after every value it
-   * could. A surface reading a row it could not read every field of shows the
-   * fields it did read, so the row is on the list with a hole in it, and the
-   * hole sorts to the bottom rather than to the top of a queue worked from the
-   * top.
+   * Sort text lexicographically, with null values last.
    *
    * @param {string | null} left
    * @param {string | null} right
@@ -293,8 +235,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Smallest first, with a value the reader could not read after every value it
-   * could, as {@link compareText} orders one.
+   * Sort numbers in ascending order, with null values last.
    *
    * @param {number | null} left
    * @param {number | null} right
@@ -307,9 +248,6 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Longest waiting first. An advisory whose waiting time went unread sorts after
-   * every advisory whose waiting time is known.
-   *
    * @param {OrderEntry} a
    * @param {OrderEntry} b
    * @returns {number}
@@ -319,13 +257,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The last tie-break, so that the order does not depend on the order the rows
-   * arrived in. Two entries carrying one identifier keep the order they came in.
-   *
-   * An advisory whose identifier went unread sorts below every advisory whose
-   * identifier is known. Its link did not match `ADVISORY_HREF`, so the row
-   * names no advisory to open and no cached read to draw from, and a maintainer
-   * working the list from the top has nothing to do with it.
+   * Use the advisory ID as the final tie-breaker, with missing IDs last.
    *
    * @param {OrderEntry} a
    * @param {OrderEntry} b
@@ -336,14 +268,9 @@ if (typeof require === 'function') {
   }
 
   /**
-   * The default order of the list table, by REQUIREMENTS.md section 9.
-   *
-   * State comes first: every draft sorts above every advisory in triage. Within
-   * a state the advisory takes the first group it answers to, and the two states
-   * name their groups in different orders, so the group key is an index into the
-   * state's own list. Within a group the severities a maintainer confirmed come
-   * first, highest first, then the severities nobody has confirmed, highest
-   * first, then the longest waiting, and the identifier settles what is left.
+   * Sort drafts before triage, then by each state's group priority. Within a
+   * group, sort by confirmed severity, unconfirmed severity, waiting time, and
+   * identifier (REQUIREMENTS.md section 9).
    *
    * @param {OrderEntry} a
    * @param {OrderEntry} b
@@ -371,7 +298,7 @@ if (typeof require === 'function') {
   /**
    * @template {OrderEntry} T
    * @param {readonly T[]} entries
-   * @returns {T[]} `entries` in the default order, leaving the argument as it was.
+   * @returns {T[]} A copy of `entries` sorted in the default order.
    */
   function sort(entries) {
     return entries.slice().sort(compare);

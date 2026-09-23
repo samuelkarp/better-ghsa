@@ -27,19 +27,16 @@ if (typeof require === 'function') require('./trust.js');
  * @property {import('./parse-detail.js').ForkPullRequest[]} pullRequests
  * @property {BranchPatch[]} branches In the order the branches first appear.
  * @property {number[]} open
- * @property {number[]} unknown The numbers of the pull requests whose row named
- *   no state this reader knows.
- * @property {boolean} incomplete Whether any row's state went unread, which
- *   makes the counts and the branch flags a lower bound.
+ * @property {number[]} unknown Pull request numbers with an unreadable state.
+ * @property {boolean} incomplete Whether a row has an unreadable state.
+ *   Counts and branch flags are lower bounds when this is true.
  */
 
 /**
  * @typedef {object} DerivedState
  * @property {string[]} members The logins the page shows to be org members.
- * @property {boolean} neverReviewed No member has commented on or acted on the
- *   advisory, and its state does not carry a review. An action is a comment
- *   from a badged author, a timeline event a visible member caused, or a
- *   timeline event only a maintainer can cause.
+ * @property {boolean} neverReviewed Whether the comments, timeline, and
+ *   advisory state lack evidence of a maintainer review.
  * @property {boolean} newActivity The newest comment from a non-member is newer
  *   than the newest member comment or member action.
  * @property {string | null} lastMemberActivityAt
@@ -64,10 +61,8 @@ if (typeof require === 'function') require('./trust.js');
   }
 
   /**
-   * The logins the page shows to be org members. A role badge is the only member
-   * signal the detail page carries, and it appears on comments alone, so a member
-   * who acted without commenting is not visible here. What that member did is
-   * read from the timeline instead, by {@link maintainerOnlyEvent}.
+   * Only comment authors have role badges. {@link maintainerOnlyEvent}
+   * identifies maintainer actions by people who have not commented.
    *
    * @param {import('./parse-detail.js').ParsedDetail} advisory
    * @returns {string[]}
@@ -85,24 +80,12 @@ if (typeof require === 'function') require('./trust.js');
   }
 
   /**
-   * The wording of a timeline event with its actor taken off the front.
-   *
-   * An event reads `<actor> <phrase> <time>`, and the actor is one token that
-   * holds no space. Only a person acts on an advisory, since no app and no bot
-   * takes an act on one, so the actor is that person's login, and a login holds
-   * no space. Everything a phrase is matched against therefore starts where the
-   * phrase starts.
-   *
-   * That front anchor is what keeps a title from being read as a phrase. The
-   * only text on an advisory its reporter writes and the timeline repeats is
-   * the title, and it reaches the timeline through a `changed the title` event,
-   * which puts `changed the title` in the anchored position and the title after
-   * it. A title reading `closed this` lands in the middle of the phrase, where
-   * nothing looks.
+   * Timeline events begin with a login, which cannot contain spaces.
+   * Remove it before matching the event phrase.
    *
    * @param {import('./parse-detail.js').TimelineEvent} event
-   * @returns {string} the phrase, and the empty string for text holding no
-   *   actor and phrase both.
+   * @returns {string} The event phrase, or an empty string if the actor
+   *   separator is missing.
    */
   function eventPhrase(event) {
     const space = event.text.indexOf(' ');
@@ -110,13 +93,9 @@ if (typeof require === 'function') require('./trust.js');
   }
 
   /**
-   * Timeline phrases the reporter or GitHub itself produces. REQUIREMENTS.md
-   * section 6 lists them, and they are checked before the maintainer-only
-   * phrases so that no reading of a reporter's act can reach one.
-   *
-   * `added themselves as a collaborator` is the pair that needs the order: it
-   * holds `as a collaborator` and would otherwise answer to the phrase for a
-   * maintainer adding somebody else.
+   * Exclude reporter and GitHub events before checking maintainer events
+   * (REQUIREMENTS.md section 6). `added themselves as a collaborator` also
+   * matches the pattern for a maintainer adding a collaborator.
    */
   const REPORTER_EVENTS = [
     /^was credited as a reporter\b/,
@@ -128,14 +107,11 @@ if (typeof require === 'function') require('./trust.js');
     /^assigned\b/,
   ];
 
-  /** The phrase a maintainer's CVE request writes, which nothing else writes. */
   const CVE_REQUEST_EVENT = /^requested a CVE\b/;
 
   /**
-   * Timeline phrases only a maintainer can cause, from REQUIREMENTS.md
-   * section 6. Each counts as a review whether or not the actor can be placed,
-   * because the detail page badges comment authors and nothing else, so a
-   * maintainer who acted without commenting is nowhere in the member list.
+   * These events require a maintainer and count as reviews even if the actor
+   * has not commented and therefore lacks a visible role badge.
    */
   const MAINTAINER_EVENTS = [
     /^accepted this report\b/,
@@ -147,17 +123,8 @@ if (typeof require === 'function') require('./trust.js');
   ];
 
   /**
-   * Whether a timeline event carries the act a phrase pattern names.
-   *
-   * Every reading of a timeline event goes through here, and the pattern is
-   * matched against {@link eventPhrase} anchored at its front, so it sees the
-   * wording GitHub writes and never the title the reporter writes. A pattern
-   * that matched anywhere in the text would read a title: `changed the title`
-   * repeats the new title after it, so a title reading `requested a CVE` or
-   * `closed this` would answer to a pattern for the CVE request or the close.
-   *
-   * The anchor is what covers an event neither list here names, because the
-   * reporter's phrases are only refused where this reader knows them.
+   * Match from the start of the event phrase to avoid matching user-supplied
+   * titles inside `changed the title` events.
    *
    * @param {import('./parse-detail.js').TimelineEvent} event
    * @param {RegExp} pattern A phrase pattern, anchored with `^`.
@@ -170,8 +137,6 @@ if (typeof require === 'function') require('./trust.js');
   }
 
   /**
-   * Whether only a maintainer could have caused this timeline event.
-   *
    * @param {import('./parse-detail.js').TimelineEvent} event
    * @returns {boolean}
    */
@@ -180,9 +145,8 @@ if (typeof require === 'function') require('./trust.js');
   }
 
   /**
-   * Whether the advisory's state carries a review. A `draft` or `published`
-   * advisory is there because a maintainer moved it there. A `closed` advisory
-   * can have been withdrawn by its reporter, so its state carries nothing.
+   * Draft and published states require a maintainer action. A reporter can
+   * withdraw an advisory. Closed state alone does not establish a review.
    *
    * @param {import('./parse-detail.js').ParsedDetail} advisory
    * @returns {boolean}
@@ -192,14 +156,12 @@ if (typeof require === 'function') require('./trust.js');
     return state === 'draft' || state === 'published';
   }
 
-  /** A stored lift date carrying no time of day, which stands for the whole day. */
   const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
   /**
    * @param {string} lift A stored embargo lift date.
-   * @returns {number | null} the instant the embargo has run past, and null for
-   *   a value that does not read as a time. A date with no time of day stands
-   *   for the whole of that day, so it runs out at the end of it in UTC.
+   * @returns {number | null} The embargo deadline, or null for an invalid date.
+   *   Date-only values expire at the end of that day in UTC.
    */
   function liftInstant(lift) {
     const stamp = DATE_ONLY.test(lift) ? `${lift}T23:59:59.999Z` : lift;
@@ -208,16 +170,12 @@ if (typeof require === 'function') require('./trust.js');
   }
 
   /**
-   * Whether the embargo on this advisory has run out: its lift date has gone by
-   * and the advisory is not published.
-   *
-   * An advisory whose state this extension could not read counts as unpublished,
-   * because the page said nothing that says otherwise.
+   * An embargo is overdue after its lift date unless the advisory is published.
+   * Treat an unreadable advisory state as unpublished.
    *
    * @param {import('./parse-detail.js').ParsedDetail} advisory
-   * @param {string | null} lift The stored lift date, and null where no embargo
-   *   is in force or none names a date.
-   * @param {number} [now] The instant to judge the date against.
+   * @param {string | null} lift The stored embargo lift date, or null if unset.
+   * @param {number} [now] The comparison time in epoch milliseconds.
    * @returns {boolean}
    */
   function embargoOverdue(advisory, lift, now = Date.now()) {
@@ -245,12 +203,8 @@ if (typeof require === 'function') require('./trust.js');
   }
 
   /**
-   * Which pull requests the private fork holds and which branches they target.
-   *
-   * REQUIREMENTS.md section 6 has the fork's list show open pull requests only,
-   * so `open` is the one state a row is read in and any other reading is a row
-   * this code could not place: it counts as unknown and marks the patch state
-   * incomplete.
+   * The private fork lists only open pull requests (REQUIREMENTS.md section 6).
+   * Any other row state counts as unknown and makes the patch state incomplete.
    *
    * @param {import('./parse-detail.js').ParsedDetail} advisory
    * @returns {PatchState}
@@ -293,8 +247,6 @@ if (typeof require === 'function') require('./trust.js');
   }
 
   /**
-   * Derived state for one parsed advisory. None of it is stored.
-   *
    * @param {import('./parse-detail.js').ParsedDetail} advisory
    * @returns {DerivedState}
    */

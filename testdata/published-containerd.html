@@ -1,21 +1,17 @@
 <!--
-  A capture of a published advisory, redacted before it was committed. Every
-  login, title, identifier, and instant in it was rewritten and is invented; no
-  advisory on GitHub carries them.
+  This published-advisory capture uses invented logins, titles, identifiers,
+  and timestamps.
 
-  The redaction removed the comments. Each of the eleven
-  div.TimelineItem.js-comment-container wrappers kept its avatar and lost the
-  div.timeline-comment-group inside it, taking with it the comment header and
-  its Author, Member, and Collaborator badges, the comment body, the reactions,
-  and the edit form. Every div.timeline-comment-wrapper went with them,
-  including the div.timeline-new-comment box that composes a new comment and
-  names the signed-in account.
+  Redaction removed the comment groups from all eleven
+  div.TimelineItem.js-comment-container wrappers, leaving their avatars.
+  The removed div.timeline-comment-group elements contained comment headers,
+  Author/Member/Collaborator badges, bodies, reactions, and edit forms.
+  Redaction also removed every div.timeline-comment-wrapper, including the
+  div.timeline-new-comment composer and its signed-in account identity.
 
-  Those absences are the redaction, not GitHub's rendering. A published
-  advisory carries comments, carries the composer box, and can be saved.
-  testdata/draft.html and testdata/triage-thread.html each hold one composer
-  box and their comment groups; compare against them before reading anything
-  into what is missing here.
+  Published advisories support comments and saving. To examine comment groups
+  and composers, use testdata/draft.html or testdata/triage-thread.html.
+  Their absence in this fixture reflects the redaction.
 -->
 <div class="clearfix new-discussion-timeline container-xl tmp-px-3 tmp-px-md-4 tmp-px-lg-5 tmp-mt-6">
     <header class="tmp-mb-3 d-block">

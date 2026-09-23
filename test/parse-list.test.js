@@ -55,17 +55,13 @@ test('a triage row carries the advisory the table paints before any fetch', () =
   assert.strictEqual(row.state, 'Triage');
   assert.strictEqual(row.severity, 'high');
   assert.strictEqual(row.severityLabel, 'High');
-  // What GitHub paints a high severity: the modifier names the color and not
-  // the level, so it is carried out beside the level rather than derived from
-  // it.
   assert.strictEqual(row.severityClass, 'Label--orange');
   assert.strictEqual(row.openedAt, '2026-08-25T22:15:18Z');
   assert.strictEqual(row.reporter, 'prakleumas');
 });
 
 test('a draft row carries no state Label and no severity', () => {
-  // The draft advisory sets no severity, and the row it renders holds no Label
-  // at all: the tooltip is the only state signal on it.
+  // The draft row omits severity. Its tooltip supplies the advisory state.
   const row = onlyRow(list('list-page-draft.html'));
   assert.strictEqual(row.ghsaId, 'GHSA-5hg2-rfq2-8fm5');
   assert.strictEqual(row.title, 'Command injection in the sharpening scheduler');
@@ -100,8 +96,6 @@ test('the state tabs carry the corpus size of every state', () => {
 });
 
 test('the open set is the two open tabs together', () => {
-  // Both fixtures are one page of the same repository, so both name the same
-  // corpus and differ only in which tab is showing.
   const triage = list('list-page-triage.html');
   const draft = list('list-page-draft.html');
   assert.strictEqual(triage.selectedState, 'triage');
@@ -135,8 +129,7 @@ test('the tab a count cannot be read from reports no count', () => {
 });
 
 test('the next link walks the page number of the state showing', () => {
-  // GitHub marks both the numbered link and the Next button `rel="next"`, and
-  // a state other than the default travels in the same query.
+  // GitHub marks both the numbered link and Next button with rel="next".
   const parsed = parse.parseList(
     document(`<div id="advisories"><div class="paginate-container"><div class="pagination">
       <a rel="prev" href="/o/r/security/advisories?state=draft&amp;page=2">Previous</a>
@@ -149,10 +142,8 @@ test('the next link walks the page number of the state showing', () => {
 });
 
 test('only a Label titled with the level names the severity', () => {
-  // The row carries two `span.Label`, the state first, and `Label--secondary`
-  // is both the state Label's color and a severity color. The title is what
-  // names the level, so a row carrying no titled Label has no severity,
-  // whatever else it labels.
+  // Both state and severity chips can use Label--secondary.
+  // The title attribute identifies the severity chip.
   const stateOnly = parse.parseRow(
     element(`<div class="d-flex Box-row--drag-hide">
       <span class="tooltipped" aria-label="Triage advisory"></span>
@@ -184,8 +175,6 @@ test('the severity class is every Label modifier the chip carries', () => {
       <span title="Severity: high" class="Label Label--orange mr-2 tmp-mr-2">High</span>
     </div>`)
   );
-  // Only the modifiers come out. `mr-2` and `tmp-mr-2` are the spacing GitHub's
-  // own row needs and would move the extension's chip if they came with it.
   assert.strictEqual(painted?.severityClass, 'Label--orange');
 
   const bare = parse.parseRow(
@@ -204,8 +193,7 @@ test('a document carrying no advisory list parses as none', () => {
 });
 
 test('the container element parses on its own', () => {
-  // The list content script holds `div#advisories` itself, and GitHub replaces
-  // that subtree on a soft navigation.
+  // Soft navigation replaces the div#advisories subtree.
   const container = fixture('list-page-triage.html').querySelector('#advisories');
   assert.notStrictEqual(container, null);
   const parsed = container === null ? null : parse.parseList(container);

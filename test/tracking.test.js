@@ -27,9 +27,6 @@ const triage = advisory('triage-thread.html');
 const draft = advisory('draft.html');
 
 /**
- * The fingerprints of a value that is confirmed, so a confirmation record
- * built on `fp` reads as confirmed against them.
- *
  * @param {string} fp
  * @returns {import('../src/detail/tracking.js').Fingerprints}
  */

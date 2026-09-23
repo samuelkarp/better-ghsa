@@ -14,30 +14,21 @@ const statistics = require('../src/stats/statistics.js');
 
 const { fakeStorage } = require('../test-support/storage.js');
 
-// The queue and the crawl turn a fetched page into a document the way a content
-// script does. Nothing in this file reaches the network: every response is a
-// string a test wrote.
 globalThis.DOMParser = /** @type {typeof globalThis.DOMParser} */ (
   /** @type {unknown} */ (DOMParser)
 );
 
-/** A clock the queue moves rather than waiting on, so a crawl costs no time. */
 let clockAt = Date.parse('2026-08-27T12:00:00Z');
 cache.setClock(() => clockAt);
 cache.setStorage(fakeStorage());
 
-/** What the queue answers with, by path. A test fills this in before it runs. */
 /** @type {Record<string, string>} */
 const pages = {};
 
-/** Every path the queue asked for, in order. @type {string[]} */
+/** @type {string[]} */
 const asked = [];
 
 /**
- * What a queue this file makes reads and waits with. Every answer is a string a
- * test wrote, so no queue made with these reaches the network, whichever
- * repository it is for.
- *
  * @type {import('../src/list/table.js').RefreshOptions}
  */
 const QUEUE_OPTIONS = {
@@ -77,7 +68,7 @@ function textOf(scope, selector) {
 /**
  * @param {ParentNode} scope
  * @param {string} selector
- * @returns {string[]} what every match reads, whitespace collapsed.
+ * @returns {string[]} The matched texts with whitespace collapsed.
  */
 function textsOf(scope, selector) {
   return Array.from(scope.querySelectorAll(selector)).map((node) =>
@@ -103,18 +94,15 @@ function pageOf(html) {
 }
 
 /**
- * One advisory as a list row names it.
+ * Describe the values available from a list row.
  *
  * @typedef {object} Named
  * @property {string} ghsaId
- * @property {string | null} [severity] Null for a row GitHub painted no
- *   severity chip on, which is what a count with no value for a member reads.
+ * @property {string | null} [severity] Null when the row omits severity.
  * @property {string} [openedAt]
  */
 
 /**
- * One page of the advisory list, in the shape `parse-list` reads.
- *
  * @param {{
  *   ref: { owner: string, repo: string },
  *   state: string,
@@ -152,9 +140,7 @@ function listHtml(page) {
       );
     })
     .join('');
-  // GitHub carries the segmented control and the rows in one Box, which is what
-  // the extension holds out of view as one act, and what it anchors its own
-  // surface to on a repository with no advisory in the state being shown.
+  // GitHub's Box contains both the tabs and rows. It exists even for an empty list.
   return (
     '<div id="advisories"><div class="Box">' +
     `<segmented-control><ul>${tabs}</ul></segmented-control>${rows}</div></div>`
@@ -162,9 +148,6 @@ function listHtml(page) {
 }
 
 /**
- * An advisory record in the shape the cache holds, carrying only what a
- * statistic reads.
- *
  * @param {{
  *   ref: { owner: string, repo: string },
  *   ghsaId: string,
@@ -240,13 +223,8 @@ function ghsa(suffix) {
 }
 
 /**
- * A repository whose list pages this file answers for, its rendered list page,
- * and the crawls that have been run over it.
- *
- * The advisory reads are put in the cache rather than fetched, because a
- * statistic is over what a read holds and not over the markup it came from.
- * The list pages are fetched, because walking them is what the two crawls do
- * and what this view must not do again.
+ * Populate cached advisory records and serve list pages through the queue.
+ * Run the requested crawls before returning the rendered page.
  *
  * @param {{
  *   owner: string,
@@ -285,8 +263,6 @@ async function repository(setup) {
     });
   }
 
-  // The one queue this repository's requests go through, made here so neither
-  // surface makes one that would reach the network.
   table.queueFor(ref, QUEUE_OPTIONS);
   const showing = setup.showing ?? 'triage';
   const doc = pageOf(
@@ -304,9 +280,7 @@ async function repository(setup) {
 }
 
 /**
- * Lets whatever the last act started run to the point of asking for something.
- * A crawl spends its first request after several turns of the event loop, so a
- * test that asserts nothing was asked for has to wait for the asking.
+ * Allow the crawl to reach its first request before checking request counts.
  *
  * @param {number} [turns]
  * @returns {Promise<void>}
@@ -331,7 +305,7 @@ function statsToggle(doc) {
 
 /**
  * @param {Document} doc
- * @returns {string[]} the chips saying what the numbers are over.
+ * @returns {string[]} The corpus status chips.
  */
 function over(doc) {
   return textsOf(doc, `#${statistics.ROOT_ID} .bghsa-stats-over span.Label`);
@@ -340,8 +314,7 @@ function over(doc) {
 /**
  * @param {Document} doc
  * @param {string} selector
- * @returns {string[]} one list's lines, each as the cells it carries. The cells
- *   sit against each other, so the text of the line alone runs them together.
+ * @returns {string[]} Each row's nonempty cell texts, separated by spaces.
  */
 function lines(doc, selector) {
   return Array.from(doc.querySelectorAll(`#${statistics.ROOT_ID} ${selector} li`)).map((line) => {
@@ -425,8 +398,6 @@ test('the statistics are over the whole corpus, open and done', async () => {
         ghsaId: drafting,
         state: 'Draft',
         reportedAt: '2026-03-02T00:00:00Z',
-        // An advisory still being worked contributes a timing. A statistic over
-        // the done half alone would not count it.
         timeline: [{ at: '2026-03-04T00:00:00Z', text: 'samuelkarp accepted this report' }],
       },
       { ghsaId: publishedId, state: 'Published', reportedAt: '2026-04-05T00:00:00Z' },
@@ -444,8 +415,6 @@ test('the statistics are over the whole corpus, open and done', async () => {
     'the corpus is both halves, and both are walked to their last page'
   );
 
-  // Four states, which is what says the count is not over the done half alone
-  // and not over the open half alone.
   assert.deepStrictEqual(countLines(doc, 'state'), [
     'Triage 2 40%',
     'Closed 1 20%',
@@ -462,10 +431,6 @@ test('the statistics are over the whole corpus, open and done', async () => {
     ['2026-03 3 60%', '2026-04 2 40%'],
     'and so does the month'
   );
-  // The list is how a finished advisory finished. Three of these five are still
-  // being worked, so they are in none of it; the published one ended by being
-  // published, and the closed one ended with nobody having given a reason,
-  // which is an ending of its own and holds a share like any other.
   assert.deepStrictEqual(countLines(doc, 'reason'), ['Published 1 50%', 'None 1 50%']);
   assert.strictEqual(
     textOf(doc, `#${statistics.ROOT_ID} [data-bghsa-count="reason"] .bghsa-stats-meta`),
@@ -485,10 +450,6 @@ test('the statistics are over the whole corpus, open and done', async () => {
 });
 
 test('the endings list counts a close with no reason and omits one nobody read', async () => {
-  // Five advisories, one of each thing an ending can be. REQUIREMENTS.md
-  // section 10 omits a metric where the event it needs is not observable, so
-  // the closed advisory no read backs is counted nowhere: nothing has been read
-  // to say what reason it carries.
   const open = ghsa('kaaa');
   const publishedId = ghsa('kbbb');
   const named = ghsa('kccc');
@@ -497,8 +458,6 @@ test('the endings list counts a close with no reason and omits one nobody read',
   const { doc } = await repository({
     owner: 'stats-endings',
     states: {
-      // This one carries no severity chip, so the severity count holds no value
-      // for it and draws the row a count holds for the members carrying none.
       triage: [{ ghsaId: open, severity: null }],
       published: [{ ghsaId: publishedId }],
       closed: [{ ghsaId: named }, { ghsaId: bare }, { ghsaId: unread }],
@@ -525,9 +484,6 @@ test('the endings list counts a close with no reason and omits one nobody read',
     'the advisory nobody read is inside the endings'
   );
 
-  // The other counts are unchanged by that. A severity nobody set is an absence
-  // to them: it stands outside the shares, which are over the four that carried
-  // one, and it is marked as holding none.
   assert.deepStrictEqual(countLines(doc, 'severity'), ['High 4 100%', 'None 1 —']);
   assert.strictEqual(
     textOf(doc, `#${statistics.ROOT_ID} [data-bghsa-count="severity"] .bghsa-stats-meta`),
@@ -550,8 +506,6 @@ test('a half nothing has crawled says what its numbers are over', async () => {
   statsToggle(doc).click();
   await statistics.load(doc);
 
-  // The open half is the page the maintainer is looking at and nothing more,
-  // because no walk of it has run. It says so beside the numbers.
   assert.deepStrictEqual(over(doc), [
     '4 total advisories',
     '2 open',
@@ -565,7 +519,6 @@ test('a half nothing has crawled says what its numbers are over', async () => {
     'Published 1 25%',
   ]);
 
-  // The other way round: the open half walked and the done half not.
   const other = await repository({
     owner: 'stats-half-other',
     states: {
@@ -623,15 +576,13 @@ test('the statistics view asks GitHub for nothing of its own', async () => {
   const before = asked.length;
   statsToggle(doc).click();
   await statistics.load(doc);
-  // Opening it again, and drawing it again, are both free.
   statsToggle(doc).click();
   statsToggle(doc).click();
   await statistics.load(doc);
   statistics.draw(doc);
   await settle();
 
-  // Scoped to this repository: another test's crawl retrying a page this file
-  // never wrote is not this view asking for something.
+  // Other repositories may retry pending crawls. Count this repository's requests only.
   assert.deepStrictEqual(
     asked.slice(before).filter((url) => url.startsWith(base)),
     [],
@@ -697,8 +648,6 @@ test('the export is the whole corpus, written here in the page', async () => {
 });
 
 test('pressing the export writes the file', async () => {
-  // The press is the only way the corpus leaves the page. Everything under it
-  // is asserted above; this is the button reaching it.
   const { doc } = await repository({
     owner: 'stats-press',
     states: { triage: [{ ghsaId: ghsa('rrrr') }] },
@@ -750,8 +699,6 @@ test('the statistics say a crawl is filling the corpus they are over', async () 
   await statistics.load(doc);
   assert.ok(!over(doc).includes(statistics.READING_TEXT), 'nothing is running');
 
-  // The done view's collection is what fills the done half, and the numbers
-  // move under the reader while it runs.
   view.setState(doc, { reading: true });
   statistics.draw(doc);
   assert.ok(over(doc).includes(statistics.READING_TEXT), 'and the numbers do not say so');
@@ -769,8 +716,6 @@ test('the numbers are not drawn under the repository the maintainer moved to', a
   assert.deepStrictEqual(over(doc), ['2 total advisories', '1 open', '1 done', '2 unread']);
   assert.strictEqual(statistics.current(doc).ref?.owner, ref.owner);
 
-  // GitHub replaces the turbo frame on a soft navigation and keeps the
-  // document. The page now names another repository.
   const other = { owner: 'stats-moved-to', repo: 'Fork-Knife' };
   one(doc, '#repo-content-turbo-frame').innerHTML = listHtml({
     ref: other,
@@ -847,11 +792,6 @@ test('each timing says how many it could not measure and why', async () => {
   statsToggle(doc).click();
   await statistics.load(doc);
 
-  // Six advisories: one nothing has read, three accepted, one of those three
-  // published, and two closed. No comment is on any of them, so nobody
-  // answered a reporter. Each timing's last row names the event it needed and
-  // how many advisories never had it, and the four numbers differ, so a row
-  // taking another timing's count would read wrong here.
   assert.deepStrictEqual(timingLines(doc, 'firstResponse'), [
     'Min —',
     'Median —',

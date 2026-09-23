@@ -16,14 +16,7 @@ const tracking = require('../src/detail/tracking.js');
 const panel = require('../src/detail/panel.js');
 const table = require('../src/list/table.js');
 
-/**
- * The list row and the detail panel are two renderings of one advisory. These
- * tests build both from one fixture and one stored state and hold their chips
- * against each other, because a panel that says something other than the row a
- * maintainer clicked through from is worse than a panel that says nothing.
- */
 
-/** When this render is happening, and when the read behind it was taken. */
 const AT = Date.parse('2026-08-28T12:00:00Z');
 const OBSERVED = Date.parse('2026-08-28T11:00:00Z');
 
@@ -39,19 +32,16 @@ function readFixture(name) {
   return parsed;
 }
 
-/** The one parse of each fixture in this file. */
 const TRIAGE = readFixture('triage-thread.html');
 const DRAFT = readFixture('draft.html');
 const PUBLISHED = readFixture('published-containerd.html');
 
-/** The document the panels are built into. */
 const BLANK = /** @type {Document} */ (
   /** @type {unknown} */ (
     parseHTML('<!doctype html><html><head></head><body></body></html>').document
   )
 );
 
-/** A private fork holding one open pull request. */
 const OPEN_FORK = {
   cloneUrl: null,
   repository: 'git-utensils/Spoon-Knife-ghsa-fork',
@@ -72,13 +62,10 @@ const OPEN_FORK = {
 };
 
 /**
- * The advisory with one more state comment on it, written by a member so that
- * it counts. Both surfaces read stored state out of the comments, so a snapshot
- * put here is one stored state that both of them merge for themselves.
+ * Add a trusted member snapshot for both surfaces to merge.
  *
  * @param {import('../src/common/parse-detail.js').ParsedDetail} advisory
- * @param {Record<string, unknown>} payload What the snapshot holds beyond its
- *   envelope.
+ * @param {Record<string, unknown>} payload Snapshot field overrides.
  * @returns {import('../src/common/parse-detail.js').ParsedDetail}
  */
 function withState(advisory, payload) {
@@ -109,12 +96,11 @@ function withState(advisory, payload) {
 }
 
 /**
- * One chip as both surfaces can be asked for it.
+ * Both surfaces expose a chip as text and a Primer tone.
  *
  * @typedef {object} RenderedChip
  * @property {string} text
- * @property {string | null} tone The Primer state token the chip is colored
- *   with, and null for a dimmed chip.
+ * @property {string | null} tone The Primer tone, or null for a dimmed chip.
  */
 
 /**
@@ -138,7 +124,7 @@ async function listChips(advisory) {
     },
     seenAt: OBSERVED,
   };
-  // The cache holds what JSON holds, which is the shape the list reads from.
+  // Cached records pass through JSON serialization.
   const entry = {
     record: JSON.parse(JSON.stringify(advisory)),
     observedAt: OBSERVED,
@@ -150,8 +136,7 @@ async function listChips(advisory) {
 
 /**
  * @param {import('../src/common/parse-detail.js').ParsedDetail} advisory
- * @returns {Promise<RenderedChip[]>} the chips the detail panel's header
- *   carries, read back off the nodes it built.
+ * @returns {Promise<RenderedChip[]>} The chips rendered in the panel header.
  */
 async function panelChips(advisory) {
   const view = await tracking.readAdvisory(advisory, merge.mergeSnapshots(advisory.comments));
@@ -166,24 +151,18 @@ async function panelChips(advisory) {
   });
 }
 
-/**
- * Every text a waiting chip can read: the four states the default order
- * derives, and the three values a maintainer can store.
- */
 const WAITING_TEXTS = [
   ...order.WAITING_STATES.map(chips.sentenceCase),
   ...schema.TRIAGE_VALUES.map(chips.sentenceCase),
 ];
 
-/** Every text the patch chip can read. */
 const PATCH_TEXTS = [chips.PATCH_IN_REVIEW, chips.NO_PATCH, chips.PATCH_UNKNOWN];
 
 /**
  * @param {RenderedChip[]} rendered
  * @param {readonly string[]} texts The texts this kind of chip can read.
  * @param {string} where Which surface these came from.
- * @returns {RenderedChip} the one chip of that kind. A surface carrying none of
- *   them, or more than one, is the failure this reports.
+ * @returns {RenderedChip} The single matching chip. Fails unless exactly one matches.
  */
 function oneOf(rendered, texts, where) {
   const found = rendered.filter((chip) => texts.includes(chip.text));
@@ -204,9 +183,7 @@ function shown(chip) {
 
 /**
  * @param {RenderedChip[]} rendered
- * @returns {string} every waiting chip the surface carried, in the order it
- *   carried them. A surface carrying none reads as the empty string, so a
- *   missing chip is a difference and not an absent comparison.
+ * @returns {string} The waiting chips in display order, joined by " | ".
  */
 function waitingLine(rendered) {
   return rendered
@@ -215,18 +192,6 @@ function waitingLine(rendered) {
     .join(' | ');
 }
 
-/**
- * Every waiting reading, each from a fixture and the stored state that produces
- * it. One reading would pass on a coincidence: two surfaces that both said
- * `Blocked on us` whatever they read would agree on that row and disagree on
- * every other.
- *
- * A stored triage value carries the chip, because it is what the maintainer who
- * set it said about the advisory, and it parts `evaluating` from `awaiting
- * maintainer input`, which the derivation holds together. The derived chip
- * stands beside it while the derivation still holds something the value does
- * not say.
- */
 const WAITING_CASES = [
   {
     name: 'a draft nobody has triaged',
@@ -276,7 +241,6 @@ for (const one of WAITING_CASES) {
   });
 }
 
-/** Two patch states on a draft, from the same fixture with and without a fork. */
 const PATCH_CASES = [
   {
     name: 'a draft whose fork holds no pull request',
@@ -308,9 +272,6 @@ for (const one of PATCH_CASES) {
 }
 
 test('neither surface carries a patch chip on an advisory in triage', async () => {
-  // The triage fixture holds an open pull request, so this is the rule and not
-  // an advisory with nothing to say: a patch chip here would read
-  // `Patch in review` on both surfaces.
   assert.ok(TRIAGE.state === 'Triage', `the fixture is in ${TRIAGE.state}`);
   assert.ok(
     chips.patchStateOf(derive.derive(TRIAGE).patch) === chips.PATCH_IN_REVIEW,
@@ -344,17 +305,13 @@ test('the patch chip reads Unknown over a pull request whose state went unread',
   assert.ok(unread === 'Unknown', `a patch state this reader cannot judge: ${unread}`);
 });
 
-// The fork's list shows open pull requests only, so a fork listing none reads as
-// the patch that is not there.
+// GitHub's private fork lists only open pull requests.
 test('a fork with no open pull request reads as no patch yet', () => {
   assert.strictEqual(chips.patchStateOf(patchOf([], false)), 'No patch yet');
   assert.strictEqual(chips.patchStateOf(patchOf([pull('open')], false)), 'Patch in review');
 });
 
 test('one builder draws every chip, and each part of a chip reaches its class', () => {
-  // Five surfaces drew a chip of their own before this one. The parts are
-  // asserted together because a builder that dropped one of them, as the done
-  // view's dropped the tone, still drew a chip that looked like a chip.
   const plain = chips.buildChip(BLANK, { text: 'Never reviewed' });
   assert.strictEqual(plain.getAttribute('class'), 'Label Label--secondary');
   assert.strictEqual(plain.textContent, 'Never reviewed');
@@ -374,8 +331,8 @@ test('one builder draws every chip, and each part of a chip reaches its class', 
     `Label Label--danger ${chips.DIM_CLASS}`
   );
 
-  // A filled chip paints its own color, so its text carries the page's
-  // background color and takes an element of its own to be given one.
+  // A filled chip uses the page background color for its text.
+  // The text needs a separate element for that color.
   const filled = chips.buildChip(BLANK, { text: 'Critical', severityClass: 'Label--danger', fill: true });
   assert.strictEqual(filled.getAttribute('class'), `Label Label--danger ${chips.FILL_CLASS}`);
   assert.strictEqual(filled.textContent, 'Critical', 'a filled chip reads what it was given');

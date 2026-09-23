@@ -24,10 +24,6 @@ const allowlist = require('../src/common/allowlist.js');
 
 const { fakeStorage } = require('../test-support/storage.js');
 
-// The list of repositories the extension acts on is stored rather than compiled
-// in, and is empty on a fresh install. The fixtures here are that repository's,
-// so the list is put in place and read before the first test, which is what the
-// extension itself does before it takes a page.
 test.before(async () => {
   allowlist.setStorage({
     get: async () => ({ [allowlist.STORAGE_KEY]: ['git-utensils/spoon-knife'] }),
@@ -46,9 +42,6 @@ function parseFixture(name) {
 }
 
 /**
- * Reads the advisory out of a fixture and drops the document. A parsed record
- * is plain data, so one read supplies every rendering assertion below.
- *
  * @param {string} name
  * @returns {import('../src/common/parse-detail.js').ParsedDetail}
  */
@@ -58,17 +51,12 @@ function readRecord(name) {
   return parsed;
 }
 
-/**
- * The page these tests run on. Every pass asks the gate whether the extension
- * runs here, and the gate reads the path.
- */
 globalThis.location = /** @type {Location} */ (
   /** @type {unknown} */ ({
     pathname: '/git-utensils/Spoon-Knife/security/advisories/GHSA-jmvx-2wfw-xfgj',
   })
 );
 
-/** The one parse of each large fixture in this file. */
 const triageDoc = parseFixture('triage-thread.html');
 const triage = /** @type {import('../src/common/parse-detail.js').ParsedDetail} */ (
   parse.parseDetail(triageDoc)
@@ -76,15 +64,13 @@ const triage = /** @type {import('../src/common/parse-detail.js').ParsedDetail} 
 const draft = readRecord('draft.html');
 const published = readRecord('published-containerd.html');
 
-/** The document panels are built into when the test only reads the panel. */
 const blank = /** @type {Document} */ (
   /** @type {unknown} */ (parseHTML('<!doctype html><html><head></head><body></body></html>').document)
 );
 
 /**
- * The elements the panel's placement is keyed on, nested as GitHub nests them:
- * the description Box inside the live region that GitHub replaces on its own,
- * inside the main column.
+ * GitHub nests the description Box within a live region in the main column.
+ * The panel is placed outside the region GitHub replaces.
  */
 const PAGE = [
   '<!doctype html><html><head></head><body>',
@@ -109,8 +95,8 @@ function page() {
 
 /**
  * @param {import('../src/common/parse-detail.js').ParsedDetail} advisory
- * @param {import('../src/detail/tracking.js').TrackingView} [view] the tracking
- *   state to render, defaulting to an advisory no snapshot holds state for.
+ * @param {import('../src/detail/tracking.js').TrackingView} [view] The tracking
+ *   state to render; defaults to untracked.
  * @returns {Element} the panel this advisory renders to.
  */
 function build(advisory, view = tracking.untracked()) {
@@ -118,9 +104,6 @@ function build(advisory, view = tracking.untracked()) {
 }
 
 /**
- * The panel an advisory renders to with the tracking state its own page
- * carries.
- *
  * @param {import('../src/common/parse-detail.js').ParsedDetail} advisory
  * @returns {Promise<Element>}
  */
@@ -130,8 +113,7 @@ async function buildTracked(advisory) {
 }
 
 /**
- * The panel with its editing controls. `buildPanel` builds them only when it is
- * handed the context a write reads, so a panel built any other way has none.
+ * Editing controls require an editor context.
  *
  * @param {import('../src/common/parse-detail.js').ParsedDetail} advisory
  * @returns {Promise<Element>} the panel this advisory renders to.
@@ -201,8 +183,7 @@ function rowText(root, label) {
 
 /**
  * @param {Element} root
- * @returns {string[]} the chips in the header that carry a date, which is what
- *   an embargo would read as.
+ * @returns {string[]} The dated header chips.
  */
 function headerDates(root) {
   return texts(root, '.Box-header .Label').filter((label) => /\d{4}-\d{2}-\d{2}/.test(label));
@@ -237,9 +218,6 @@ function rowChip(root, label) {
 }
 
 /**
- * The panel `advisory` renders to with `payload` holding its tracking state,
- * judged against the values `advisory` itself carries.
- *
  * @param {import('../src/common/parse-detail.js').ParsedDetail} advisory
  * @param {Record<string, unknown>} payload
  * @returns {Promise<Element>}
@@ -250,8 +228,7 @@ async function buildWith(advisory, payload) {
 
 /**
  * @param {Element} root
- * @returns {string} what the description confirmation line says about the
- *   provenance of the text on the page. It is the second chip on that line.
+ * @returns {string} The description provenance chip text.
  */
 function provenance(root) {
   for (const line of root.querySelectorAll('.bghsa-confirmation')) {
@@ -288,9 +265,6 @@ function rowLabels(root) {
 }
 
 /**
- * The advisory the triage fixture reads to with one metadata field renamed,
- * which is what a GitHub change to the form looks like to the parser.
- *
  * @param {string} name The field name inside `repository_advisory[...]`.
  * @returns {import('../src/common/parse-detail.js').ParsedDetail}
  */
@@ -308,8 +282,6 @@ function withRenamedField(name) {
 }
 
 test('an advisory that is dealt with carries no waiting chip', async () => {
-  // A published or closed advisory has no row on the list, so there is no
-  // waiting state to agree with and nothing a maintainer is waiting on.
   assert.strictEqual(published.state, 'Published');
   const built = await buildTracked(published);
   assert.deepStrictEqual(texts(built, '.Box-header .Label'), []);
@@ -324,8 +296,6 @@ test('an embargo past its lift date says overdue in words, not only in tone', as
     text: 'Overdue since 2000-01-01',
     classes: 'Label Label--secondary bghsa-tone-danger',
   });
-  // The tone repeats what the chip says and never carries a fact on its own, so
-  // the words part the two states without it.
   const inForce = await buildWith(triage, { embargo: { lift: '2999-12-31' } });
   assert.notStrictEqual(
     rowChip(built, 'Embargo').text,
@@ -349,9 +319,6 @@ test('an advisory with no embargo carries no chip about one', async () => {
 });
 
 test('the panel reports whether the description is the original text', () => {
-  // The description is answered in one place: the confirmation line carries
-  // whether a maintainer approved the text and whether it is still the
-  // reporter's own.
   assert.strictEqual(provenance(build(triage)), 'Not updated');
   assert.strictEqual(provenance(build(draft)), 'Updated');
   assert.deepStrictEqual(
@@ -377,9 +344,6 @@ test('the panel leads with the three confirmations', () => {
 });
 
 test('the confirmations go with the state, and with nothing else about the page', () => {
-  // One advisory, read once, rendered under each state GitHub gives it. The
-  // record is the same every time, so what parts is the state and not the
-  // fixture.
   /** @type {readonly [string | null, boolean][]} */
   const states = [
     ['Triage', true],
@@ -405,9 +369,6 @@ test('the confirmations go with the state, and with nothing else about the page'
 });
 
 test('a dealt-with advisory offers no preserve button and no row', async () => {
-  // One advisory, read once, under the state that is the only difference
-  // between the panels. The open state is asserted the same way, so a
-  // selector that matched nothing anywhere would fail here.
   const payload = { triage: 'awaiting reporter' };
   /** @type {readonly [string, boolean][]} */
   const states = [
@@ -489,9 +450,8 @@ test('a scoring source the form does not carry reads as unread, not as drift', a
 });
 
 test('a CVSS vector the form does not carry reads as unread, not as drift', async () => {
-  // The sibling of the severity case above. Either half of the score going
-  // unread leaves the pair unfingerprintable, so a confirmation stored against
-  // the real pair cannot be checked and is not evidence of a change either.
+  // Scoring fingerprints require both severity and the CVSS vector.
+  // A missing field makes confirmation status unknown.
   const unread = withRenamedField('cvss_v3');
   const built = await buildWith(unread, {
     confirmed: {
@@ -528,9 +488,6 @@ test('the stored tracks the triage advisory carries are shown', async () => {
 });
 
 test('the triage chip says which side the advisory is waiting on', () => {
-  // One chip, four values, and only the side that owes the next move parts
-  // them. Two of the four open with the same word, so nothing shallower than
-  // the triage vocabulary can tell them apart.
   const base = tracking.untracked();
   /**
    * @param {string} value
@@ -557,8 +514,6 @@ test('the triage chip says which side the advisory is waiting on', () => {
     `awaiting reporter is on the reporter: ${theirs.classes}`
   );
 
-  // A value this reader does not know leaves the advisory on us: it takes a
-  // maintainer to say otherwise.
   const unknown = triageChip('waiting for the weekend');
   assert.ok(
     unknown.classes === 'Label Label--secondary bghsa-tone-danger',
@@ -573,9 +528,6 @@ test('a track the snapshot says nothing about carries no row', () => {
 test('the editing controls start collapsed', async () => {
   const built = await buildEditable(triage);
 
-  // The panel is for reading state, so the controls that change it are behind
-  // a disclosure the reader opens. What is behind it is the editing form, not
-  // an empty box: the select that stages the triage state is inside.
   const disclosure = built.querySelector('.bghsa-editor details');
   if (disclosure === null) throw new Error('the panel carries no editing disclosure');
   const open = disclosure.getAttribute('open');
@@ -592,8 +544,6 @@ test('a closed advisory shows the reason and what it duplicates', async () => {
     closure: { reason: 'duplicate', duplicateOf: 'GHSA-cm76-qm8v-3j95' },
   });
   assert.strictEqual(rowText(built, 'Closed as'), 'Duplicateof GHSA-cm76-qm8v-3j95');
-  // An identifier names no repository, so it is read as an advisory of this
-  // one, which is the advisory page the panel is standing on.
   assert.strictEqual(
     built.querySelector('.bghsa-duplicate')?.getAttribute('href'),
     '/git-utensils/Spoon-Knife/security/advisories/GHSA-cm76-qm8v-3j95'
@@ -755,8 +705,7 @@ function delay(ms) {
 }
 
 /**
- * Runs the event loop until `ready` holds, or until the wait runs out, so an
- * assertion made afterwards reads a settled document.
+ * Wait until ready returns true or two seconds elapse.
  *
  * @param {() => boolean} ready
  * @returns {Promise<void>}
@@ -777,15 +726,14 @@ function region(suffix) {
 }
 
 /**
- * @returns {number} how many snapshot chips the document carries.
+ * @returns {number} The number of snapshot chips.
  */
 function chipCount() {
   return triageDoc.querySelectorAll(`[${parse.EXTENSION_CHIP_ATTRIBUTE}]`).length;
 }
 
 /**
- * A copy of `source` as GitHub would send it: the extension's chips are not in
- * the markup GitHub renders.
+ * GitHub's refreshed markup omits extension chips.
  *
  * @param {Element} source
  * @returns {Element}
@@ -824,8 +772,6 @@ test('a state a live region moved on reaches the panel', async () => {
   const refreshed = refreshedCopy(title);
   const state = refreshed.querySelector('.State');
   if (state === null) throw new Error('the title region carries no state label');
-  // The confirmations answer whether the text was made publishable and the
-  // score approved, and publication answers both by having happened.
   state.textContent = 'Published';
 
   const injected = await panel.render(triageDoc);
@@ -1220,10 +1166,8 @@ test('candidate stores elsewhere do not replace this panel', async () => {
   }
 });
 
-/** The advisory the fixtures come from, which is on the allowlist. */
 const DETAIL = '/git-utensils/Spoon-Knife/security/advisories/GHSA-jmvx-2wfw-xfgj';
 
-/** An advisory detail page holding what a write reads from one. */
 const ADVISORY_PAGE = [
   '<!doctype html><html><body>',
   '<div class="gh-header-meta"><span class="State">Triage</span>',
@@ -1245,8 +1189,7 @@ const ADVISORY_PAGE = [
 ].join('\n');
 
 /**
- * A response holding the comment the write claims to have made, carrying the
- * marker that write drew.
+ * Render a response containing the marker from the submitted comment.
  *
  * @param {RequestInit} init The write request.
  * @returns {string}
@@ -1264,17 +1207,14 @@ function wroteHtml(init) {
   );
 }
 
-/** Answering a write with the comment it wrote. */
 const WROTE = null;
 
 /**
- * A stand-in for `fetch` answering the advisory page with `page` and the write
- * with `body`.
+ * Return `page` for advisory reads and `body` for writes.
  *
- * @param {number} status The status the write is answered with.
- * @param {string | null} body The markup the write is answered with, or null
- *   for the comment that write wrote.
- * @param {string} [page] The markup the advisory page is answered with.
+ * @param {number} status The write response status.
+ * @param {string | null} body The write response markup; null echoes the submitted comment.
+ * @param {string} [page] The advisory response markup.
  * @returns {{ send: import('../src/common/write.js').WriteFetch, calls: Array<{ url: string, init: RequestInit }>, posts: () => Array<{ url: string, init: RequestInit }> }}
  */
 function fakeFetch(status, body, page) {
@@ -1303,13 +1243,11 @@ function asDocument(markup) {
   return /** @type {Document} */ (/** @type {unknown} */ (parseHTML(markup).document));
 }
 
-/** An advisory in a repository writes are not permitted on. */
 const elsewhere = {
   ...triage,
   ref: { owner: 'someone', repo: 'else', ghsaId: 'GHSA-0000-0000-0000' },
 };
 
-/** The advisory as it stands once the preservation comment is on it. */
 const preserved = {
   ...triage,
   comments: [
@@ -1575,8 +1513,6 @@ test('opening an advisory refreshes its cache entry at no request cost', async (
   const sent = globalThis.fetch;
   cache.setStorage(storage);
   cache.setClock(() => at);
-  // Reading this advisory costs a request from the list page and nothing here:
-  // the document is already in front of the maintainer.
   globalThis.fetch = /** @type {typeof globalThis.fetch} */ (
     /** @type {unknown} */ (() => {
       throw new Error('the detail page sent a request');
@@ -1618,9 +1554,7 @@ test('a document behind a write from this page is not stored as a reading', asyn
     const held = await panel.remember(triage);
     assert.ok(held !== null, 'the page left no entry to stand on');
 
-    // A save wrote a snapshot above every claim this document carries. The
-    // comment holding it is on GitHub and in no open document, so what this
-    // document parses to is state the extension has already replaced.
+    // The saved snapshot has a higher sequence number than the open document.
     edit.written.set(key, { ...fromPage, seq: 8, observedSeq: 8, nextSeq: 9 });
     cache.setClock(() => at + 60 * 1000);
     const again = await panel.remember(triage);
@@ -1650,8 +1584,6 @@ test('a document behind a preservation comment this page wrote is not stored', a
     assert.strictEqual(held, null, 'the pass stored a document missing the comment it wrote');
     assert.deepStrictEqual(Object.keys(storage.entries), []);
 
-    // Once the advisory is read again the comment is in it, and the pass stores
-    // what the document says.
     preserve.attempts.delete(key);
     assert.ok((await panel.remember(triage)) !== null, 'a document that caught up was not stored');
   } finally {

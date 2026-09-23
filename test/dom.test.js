@@ -15,10 +15,7 @@ function delay(ms) {
 }
 
 /**
- * A page carrying one element the surface owns, with the constructor the watcher
- * reaches through the document's view. Two of these tests turn on what the
- * watcher does with a burst that is nothing but the surface's own writing, so
- * the surface owns the node every mutation here is made on.
+ * The document exposes MutationObserver through defaultView.
  *
  * @returns {{ doc: Document, owned: Element }}
  */
@@ -85,8 +82,7 @@ test('two bursts inside the delay take one pass between them', async () => {
   assert.ok(observer !== null, 'the document offered no observer');
   try {
     doc.body?.append(doc.createElement('span'));
-    // Long enough for the watcher to be told about the first change, and short
-    // enough that the pass it scheduled has not run yet.
+    // Deliver the first mutation before the debounced render pass runs.
     await delay(1);
     doc.body?.append(doc.createElement('span'));
     await delay(dom.RENDER_DELAY_MS + 50);

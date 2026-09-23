@@ -17,16 +17,9 @@ if (typeof require === 'function') {
 
 (() => {
   /**
-   * What the chip says about a snapshot the merge would not take. Each phrase
-   * names the condition and stands alone, and no chip is placed where the merge
-   * had nothing to say. A marked comment holding no snapshot and one holding a
-   * snapshot that failed validation read the same: both are a state comment
-   * this extension cannot use.
-   *
-   * The untrusted phrase leads with what the extension did, because a snapshot
-   * an outsider wrote is the one case here that a reader has to act on. It says
-   * what the extension can see, which is that the author carries no member
-   * badge, and not why they wrote it: nothing on the page says that.
+   * Missing snapshots and invalid payloads share a label because both prevent
+   * the extension from reading tracking state. The untrusted label reports the
+   * author's role badge, which determines whether the merge accepts the comment.
    *
    * @type {Record<WarningKind, string>}
    */
@@ -38,9 +31,8 @@ if (typeof require === 'function') {
   };
 
   /**
-   * The Primer state color each chip takes. A snapshot from outside the
-   * organization is a claim on the advisory's triage state by someone who
-   * cannot make one, so it is the loudest of the four.
+   * Untrusted state uses the danger color because only organization members may
+   * set tracking state.
    *
    * @type {Record<WarningKind, 'attention' | 'danger'>}
    */
@@ -52,8 +44,6 @@ if (typeof require === 'function') {
   };
 
   /**
-   * The comment a warning names, if the document still carries it.
-   *
    * @param {Document} doc
    * @param {string} elementId
    * @returns {Element | null}
@@ -76,21 +66,19 @@ if (typeof require === 'function') {
       tone: CHIP_TONE[alert.kind],
     });
     node.setAttribute(parse.EXTENSION_CHIP_ATTRIBUTE, alert.kind);
-    // A warning with nothing to add carries no tooltip, so hovering the chip
-    // does not repeat the words already on it.
+
     if (alert.message !== '') node.setAttribute('title', alert.message);
     return node;
   }
 
   /**
-   * Puts `node` beside the comment's author role badge, which is where
-   * REQUIREMENTS.md section 4's role labels sit. A badge GitHub wrapped in a
-   * tooltip is passed as a whole, so the chip does not inherit that tooltip. A
-   * comment carrying no badge takes the chip at the end of its header.
+   * Place the chip beside the author role badge (REQUIREMENTS.md section 4).
+   * Insert it outside the badge's tooltip wrapper to avoid inheriting the tooltip.
+   * Headers without a badge receive the chip at the end.
    *
    * @param {Element} group
    * @param {Element} node
-   * @returns {boolean} whether the chip was placed.
+   * @returns {boolean} Whether placement succeeded.
    */
   function placeChip(group, node) {
     const parse = globalThis.bghsa.parseDetail;
@@ -114,24 +102,17 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Marks the comments whose snapshots the merge would not take.
-   * REQUIREMENTS.md section 8 puts this on the comment rather than in the panel:
-   * the panel does not list the snapshots it read, and the reader wants to know
-   * which comment the extension is talking about.
-   *
-   * A comment already carrying the chip it should carry is left as it is, so a
-   * second pass over an unchanged document changes nothing and cannot feed the
-   * mutation observer that calls it.
+   * Mark comments whose snapshots the merge rejected (REQUIREMENTS.md section 8).
+   * Reuse matching chips to avoid triggering the mutation observer on each pass.
    *
    * @param {Document} doc
    * @param {MergedState} merged
-   * @returns {Element[]} the chips the document carries afterwards.
+   * @returns {Element[]} The warning chips in the updated document.
    */
   function markComments(doc, merged) {
     const attribute = globalThis.bghsa.parseDetail.EXTENSION_CHIP_ATTRIBUTE;
 
-    // One comment draws at most one warning, because the merge stops reading a
-    // snapshot at the first thing wrong with it.
+    // The merge reports only the first problem with each snapshot.
     /** @type {Map<string, MergeWarning>} */
     const wanted = new Map();
     for (const alert of merged.warnings) {

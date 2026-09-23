@@ -6,16 +6,12 @@ const assert = require('node:assert');
 const cache = require('../src/common/cache.js');
 const queues = require('../src/common/fetch.js');
 
-// A stand-in for `browser.storage.local`. Two queues sharing one of these are
-// two page loads sharing one browser profile.
 const { fakeStorage } = require('../test-support/storage.js');
 
 /** @typedef {import('../test-support/storage.js').FakeStorage} Fake */
 
 /**
- * A clock a test moves by hand, and the wait the queue uses with it. Waiting
- * moves the clock and returns at once, so a pass of a hundred advisories costs
- * no time and the intervals are still exact.
+ * Waiting advances the fake clock immediately.
  *
  * @param {number} [start]
  */
@@ -38,7 +34,6 @@ function fakeClock(start = 0) {
   };
 }
 
-/** The repository every pass here reads. */
 const REF = { owner: 'containerd', repo: 'containerd' };
 
 const MINUTE = 60 * 1000;
@@ -52,8 +47,7 @@ function ghsa(suffix) {
 }
 
 /**
- * A fetch that answers every advisory page, recording the moment each request
- * went out on the clock the queue reads.
+ * Record request times using the queue clock.
  *
  * @param {ReturnType<typeof fakeClock>} clock
  * @param {(url: string) => { status: number, body?: string }} [answer]
@@ -74,9 +68,7 @@ function fakeFetch(clock, answer = () => ({ status: 200 })) {
 }
 
 /**
- * A clock two queues share, whose waits resolve in time order. Time moves when
- * the pump moves it to the next wait that is due, so two passes running at once
- * interleave the way they do on a page and cost no real time.
+ * The pump advances a shared clock and resolves waits in deadline order.
  *
  * @param {number} [start]
  */
@@ -94,14 +86,14 @@ function sharedClock(start = 0) {
       timers.push({ due: at + ms, resolve: () => resolve() });
     });
 
-  /** @returns {Promise<void>} lets every chain that can run without the clock run. */
+  /** @returns {Promise<void>} Allows pending callbacks to run for 40 event-loop turns. */
   const settle = async () => {
     for (let round = 0; round < 40; round += 1) {
       await new Promise((resolve) => setImmediate(resolve));
     }
   };
 
-  /** @returns {Promise<void>} runs time forward until nothing is waiting on it. */
+  /** @returns {Promise<void>} Advances the clock until all timers resolve. */
   const pump = async () => {
     await settle();
     while (timers.length > 0) {
@@ -130,9 +122,6 @@ function options(clock, storage, extra = {}) {
     now: clock.now,
     wait: clock.wait,
     parse: (_html, ref) => ({ state: 'triage', ghsaId: ref.ghsaId }),
-    // A draw of zero is the shortest spread there is, so a test that names no
-    // draw sees the interval on its own. The tests about two queues waking
-    // together name their own.
     random: () => 0,
     ...extra,
   };
@@ -162,9 +151,7 @@ test('a plan orders advisories observed together by identifier', () => {
     [ghsa('dddd'), { record: {}, observedAt: at - 40 * MINUTE, state: 'triage' }],
     [ghsa('cccc'), { record: {}, observedAt: at - 40 * MINUTE, state: 'triage' }],
   ]);
-  // Both pairs are given in the reverse of the order expected back: the two
-  // never seen, and the two observed at the same moment. A comparator that
-  // answers zero for a tie hands them back in the order they came in.
+  // Input order opposes the expected order for both pairs with tied timestamps.
   const { order } = queues.plan(
     [ghsa('bbbb'), ghsa('aaaa'), ghsa('dddd'), ghsa('cccc')],
     entries,
@@ -200,7 +187,6 @@ test('an advisory observed four minutes ago is not fetched and five is', async (
   ]);
   assert.ok(summary.fetched === 1, `${summary.fetched} advisories were fetched`);
   assert.ok(summary.skipped === 1, `${summary.skipped} advisories were skipped`);
-  // The fresh one still reaches the caller, from the cache, so its row paints.
   assert.deepStrictEqual(reported.sort(), [ghsa('aaaa'), ghsa('bbbb')]);
 });
 
@@ -226,9 +212,7 @@ test('a queue that never saw another one waits out its request', async () => {
   await one.run();
   assert.deepStrictEqual(first.at, [0]);
 
-  // A second queue on the same repository: another tab, or what a turbo
-  // re-injection left on this page. It resumes nothing, so the request the
-  // first one sent is known to it only through the progress entry.
+  // The second queue learns about the first request through stored progress.
   clock.advance(200);
   const second = fakeFetch(clock);
   const two = queues.createQueue(options(clock, storage, { fetch: second.send }));
@@ -258,8 +242,6 @@ test('two queues running at once share one second between them', async () => {
   const one = queues.createQueue(options(clock, storage, { fetch: send }));
   await one.add(ids);
   const running = one.run();
-  // The first request goes out, and the second queue starts after it, which is
-  // the second tab opening.
   await clock.settle();
   const two = queues.createQueue(options(clock, storage, { fetch: send }));
   await two.add(ids);
@@ -292,9 +274,8 @@ test('two queues that wake together do not send inside one second', async () => 
     return { status: 200, text: async () => '<html></html>' };
   };
 
-  // Two tabs on one repository, waking on the same claim: neither has sent
-  // anything, so both compute the same moment to send at. They draw different
-  // spreads, which is the only thing keeping them apart.
+  // Both queues start with the same claim. Different jitter values
+  // separate their next requests.
   const one = queues.createQueue(
     options(clock, storage, { fetch: sender('one'), random: () => 0.1 })
   );
@@ -323,8 +304,6 @@ test('two queues that wake together do not send inside one second', async () => 
 test('a request time in the future costs one wait and not the difference', async () => {
   const clock = fakeClock(0);
   const storage = fakeStorage();
-  // What a clock moved back a day leaves behind: a request stamped a day
-  // ahead of what the clock now reads.
   await cache.putProgress(
     REF,
     {
@@ -363,7 +342,6 @@ test('a pass interrupted in flight resumes without losing or repeating work', as
     asked.push(url);
     if (asked.length === 1) return { status: 200, text: async () => '<html></html>' };
     reached(url);
-    // The page went away with this request in flight: it never answers.
     return new Promise(() => {});
   };
 
@@ -378,9 +356,6 @@ test('a pass interrupted in flight resumes without losing or repeating work', as
   assert.deepStrictEqual(held.done, [ghsa('aaaa')], 'the first read was not recorded done');
   assert.deepStrictEqual(held.pending, [ghsa('cccc')], 'the rest of the queue was not held');
 
-  // The next page load. The advisory that was in flight goes back at the head,
-  // and the one the first pass finished is fresh in the cache, so it is not
-  // asked for a second time.
   const next = fakeFetch(clock);
   const two = queues.createQueue(options(clock, storage, { fetch: next.send }));
   const resumed = await two.load();
@@ -400,8 +375,6 @@ test('a pass interrupted in flight resumes without losing or repeating work', as
 test('an answer that landed before the page went away is not fetched again', async () => {
   const clock = fakeClock(0);
   const storage = fakeStorage();
-  // The entry was written and the progress record was not, which is the window
-  // between the cache write and the progress write.
   await cache.putAdvisory(
     { ...REF, ghsaId: ghsa('bbbb') },
     { state: 'triage' },
@@ -483,8 +456,6 @@ test('a stop during the wait spends no further request', async () => {
   const queue = queues.createQueue(
     options(clock, storage, {
       fetch: fetch.send,
-      // The page goes away, or the list is torn down, while the queue is
-      // waiting out the second. No request is in flight to finish.
       wait: async (ms) => {
         queue.stop();
         await clock.wait(ms);
@@ -531,14 +502,13 @@ test('a failed read caches nothing and the pass carries on', async () => {
       null,
     'a failed read was cached'
   );
-  // A request went out for the failed read, so the next one still waits.
+  // Failed requests count toward the rate limit.
   assert.deepStrictEqual(fetch.at, [0, 1000]);
 });
 
 test('a cache write that fails still delivers what was fetched', async () => {
   const clock = fakeClock(0);
   const storage = fakeStorage();
-  // Every write is refused, which is what a quota does.
   storage.set = async () => {
     throw new Error('QuotaExceededError');
   };
@@ -563,9 +533,6 @@ test('a cache write that fails still delivers what was fetched', async () => {
   assert.deepStrictEqual(reported, [`${ghsa('aaaa')}:triage`, `${ghsa('bbbb')}:triage`]);
 });
 
-// The bound under test is the only thing that ends this pass, so the test
-// carries a bound of its own: without one, a queue that never gives up on a
-// request hangs the run in place of failing it.
 test('a request that never answers fails and the pass carries on', { timeout: 5000 }, async (t) => {
   const clock = fakeClock(0);
   const storage = fakeStorage();
@@ -577,7 +544,6 @@ test('a request that never answers fails and the pass carries on', { timeout: 50
   const send = async (url, init) => {
     at.push(clock.now());
     if (!url.endsWith(ghsa('aaaa'))) return { status: 200, text: async () => '<html></html>' };
-    // Nobody answers this one: no status, no error, no close.
     stalled = init.signal ?? null;
     return new Promise(() => {});
   };
@@ -591,9 +557,7 @@ test('a request that never answers fails and the pass carries on', { timeout: 50
     })
   );
   await queue.add([ghsa('aaaa'), ghsa('bbbb')]);
-  // A page always has work of its own pending. This run has none, and the
-  // queue's countdown does not by itself keep a Node loop turning, so the test
-  // supplies the turning.
+  // The queue uses unreferenced timers. Keep the event loop active during the test.
   const turning = setInterval(() => {}, 5);
   t.after(() => clearInterval(turning));
   const summary = await queue.run();
@@ -610,7 +574,7 @@ test('a request that never answers fails and the pass carries on', { timeout: 50
     /** @type {AbortSignal | null} */ (stalled)?.aborted === true,
     'the request that timed out was left running'
   );
-  // The request that timed out spent its slot, so the next one waits it out.
+  // Timed-out requests count toward the rate limit.
   assert.deepStrictEqual(at, [0, 1000]);
 });
 
@@ -625,8 +589,6 @@ test('a failure listener that throws does not end the pass', async () => {
   const queue = queues.createQueue(
     options(clock, storage, {
       fetch: fetch.send,
-      // A panel that throws on the way to painting a row, which the pass hears
-      // through the failure listener that then throws in its turn.
       onEntry: (ghsaId) => {
         throw new Error(`the row for ${ghsaId} blew up`);
       },
@@ -657,8 +619,6 @@ test('an advisory refreshed mid-pass is dropped from the queue', async () => {
     options(clock, storage, {
       fetch: fetch.send,
       onEntry: async (ghsaId) => {
-        // Reading the detail page of the next advisory refreshes its entry from
-        // the live DOM while this pass is running.
         if (ghsaId !== ghsa('aaaa')) return;
         await cache.putAdvisory(
           { ...REF, ghsaId: ghsa('bbbb') },
@@ -716,7 +676,6 @@ test('a progress record of another shape resumes nothing', async () => {
   assert.ok(queues.progressFrom(12) === null, 'a number read as progress');
 });
 
-/** One page of the advisory list, as a crawl asks for it. */
 const LIST_URL = '/containerd/containerd/security/advisories?state=triage';
 
 test('a list page read and an advisory read share one second', async () => {
@@ -735,8 +694,7 @@ test('a list page read and an advisory read share one second', async () => {
     LIST_URL,
     `/containerd/containerd/security/advisories/${ghsa('aaaa')}`,
   ]);
-  // The rate limit counts requests, and a list page is one, so the advisory
-  // read waits out the second the page read started.
+  // List and advisory requests share the rate limit.
   assert.deepStrictEqual(fetch.at, [0, 1000]);
 });
 
@@ -748,8 +706,6 @@ test('a list page read leaves the claim the next page load waits out', async () 
   await one.page(LIST_URL);
   assert.deepStrictEqual(first.at, [0]);
 
-  // Another tab, or what a turbo re-injection left behind: it knows of the page
-  // read only through the claim in the progress entry.
   clock.advance(300);
   const second = fakeFetch(clock);
   const two = queues.createQueue(options(clock, storage, { fetch: second.send }));
@@ -760,10 +716,8 @@ test('a list page read leaves the claim the next page load waits out', async () 
 });
 
 test('every request carries the session and asks GitHub rather than the cache', async () => {
-  // A request without the page's own credentials goes out logged out, and
-  // GitHub answers it with a list and a page that hold no private advisory. A
-  // request served from the browser cache is the poll reading its own earlier
-  // answer back.
+  // Private advisories require session credentials. Refreshes must bypass
+  // the browser cache to read current data.
   const clock = fakeClock(0);
   const storage = fakeStorage();
   /** @type {RequestInit[]} */
@@ -812,15 +766,11 @@ test('a stopped queue sends no list page read', async () => {
   const page = await queue.page(LIST_URL);
   assert.deepStrictEqual(fetch.urls, [], 'a stopped queue spent a request');
   assert.ok(page.body === null, `a stopped queue answered with a body: ${page.body}`);
-  // Nothing was asked of GitHub, and the answer says so: the caller counting
-  // pages that would not answer has this one to leave out.
   assert.ok(page.stopped === true, 'a stop was not told apart from a page that would not answer');
 });
 
 /**
- * Runs one pass over some advisories, on a clock far enough on that whatever
- * the cache holds has gone stale and is read again. Each pass is a fresh queue,
- * which is what a page load is.
+ * Create a new queue and advance the clock past the cache freshness threshold.
  *
  * @param {ReturnType<typeof fakeClock>} clock
  * @param {Fake} storage
@@ -861,8 +811,6 @@ test('three 404 answers in a row take the advisory out of the cache', async () =
     const held = await heldFor(storage, id, clock.now());
     assert.ok(held !== null, `the entry went after ${count} 404 answers`);
     assert.strictEqual(held.misses, count, `the count after ${count} 404 answers`);
-    // A 404 read nothing, so the entry is no fresher for having been asked and
-    // the next pass asks again.
     assert.strictEqual(held.observedAt, observedAt, 'a 404 moved the observation time');
   }
 
@@ -884,8 +832,7 @@ test('a read that lands puts the 404 count back to none', async () => {
   await passOver(clock, storage, [id], () => ({ status: 200 }));
   assert.strictEqual((await heldFor(storage, id, clock.now()))?.misses, 0, 'the count carried on');
 
-  // Two more. Without the reset the second of these is the third 404 the entry
-  // has answered with and it would be gone.
+  // A successful read resets the count of consecutive 404 responses.
   for (const count of [1, 2]) {
     await passOver(clock, storage, [id], () => ({ status: 404 }));
     const held = await heldFor(storage, id, clock.now());
@@ -900,11 +847,9 @@ test('a failure that is not a 404 never counts against the advisory', async () =
   const id = ghsa('aaaa');
   await passOver(clock, storage, [id], () => ({ status: 200 }));
 
-  // GitHub having a bad minute, three times over.
   for (const _ of [1, 2, 3]) await passOver(clock, storage, [id], () => ({ status: 500 }));
   assert.strictEqual((await heldFor(storage, id, clock.now()))?.misses, 0, 'a 500 counted');
 
-  // A request that never reached GitHub at all, three times over.
   for (const _ of [1, 2, 3]) {
     await passOver(clock, storage, [id], () => {
       throw new Error('NetworkError when attempting to fetch resource.');
@@ -914,9 +859,6 @@ test('a failure that is not a 404 never counts against the advisory', async () =
   assert.ok(held !== null, 'six failures that were not 404s took the entry');
   assert.strictEqual(held.misses, 0, 'a request that never answered counted');
 
-  // Three 404s through the same storage, the same clock, and the same queue.
-  // Without this the assertions above would hold against a reader that counted
-  // nothing at all, because no 404 was ever produced here.
   for (const _ of [1, 2, 3]) await passOver(clock, storage, [id], () => ({ status: 404 }));
   assert.strictEqual(await heldFor(storage, id, clock.now()), null, 'a 404 did not count');
 });
@@ -928,9 +870,7 @@ test('a 404 on one advisory leaves another advisory alone', async () => {
   const kept = ghsa('bbbb');
   await passOver(clock, storage, [gone, kept], () => ({ status: 200 }));
 
-  // Two passes over both, and then the third 404 on its own. The advisory that
-  // is evicted is the last thing read, so an eviction reaching past its own
-  // entry has nothing after it to write the other one back.
+  // Evict the advisory last to detect accidental removal of the other entry.
   for (const _ of [1, 2]) {
     await passOver(clock, storage, [gone, kept], (url) =>
       url.endsWith(gone) ? { status: 404 } : { status: 200 }

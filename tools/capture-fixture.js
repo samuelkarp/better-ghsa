@@ -2,18 +2,16 @@
 //
 //   copy(cap('div.js-socket-channel.js-updatable-content'))
 //
-// `copy` is a console helper and only exists in the evaluation you type it in,
-// so `cap` returns the markup and the caller copies it. `capSave` downloads
-// instead, for markup too large for the clipboard.
+// The console's `copy` helper is available only in the console evaluation.
+// Call it with the markup returned by `cap`. Use `capSave` to download markup
+// too large for the clipboard.
 //
 // The optional second argument is a selector, or list of selectors, whose
 // matches are removed from the copy before it leaves the page.
 //
-// The markup is otherwise verbatim, except that session token values are
-// blanked: the field names and attributes are what tests read, and the values
-// would otherwise be committed to the repository. A CSRF input is marked by
-// data-csrf rather than by its name, and data-channel carries a signed
-// websocket subscription token.
+// Blank session token values before saving fixtures. Preserve field names
+// and attributes for the tests. CSRF inputs can be identified by data-csrf;
+// data-channel contains a signed websocket subscription token.
 (() => {
   const BLANK = ['authenticity_token', 'timestamp_secret', 'timestamp'];
 

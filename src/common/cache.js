@@ -9,11 +9,7 @@ if (typeof require === 'function') {
 }
 
 /**
- * The part of `browser.storage.local` this file uses. `chrome.storage.local`
- * satisfies it too, and so does a stand-in a test hands to {@link setStorage}.
- *
- * `get(null)` answers with every entry the extension holds, which is what the
- * clear reads to find the keys that belong to the cache.
+ * `get(null)` returns all stored entries so clearing can select cache keys.
  *
  * @typedef {object} CacheStorage
  * @property {(keys: string | string[] | null) => Promise<Record<string, unknown>>} get
@@ -22,50 +18,36 @@ if (typeof require === 'function') {
  */
 
 /**
- * One cache entry: what was read, and when it was read.
- *
- * The record is whatever the caller cached under that key, which is a parsed
- * advisory for an advisory entry, a parsed list for a list entry, and the
- * refresh queue's progress for a progress entry. It is data an older version of
- * this extension wrote, so a reader checks its shape and never assumes it.
+ * Cache records may contain advisories, lists, or refresh progress. Readers
+ * validate their shape because storage can contain data from other versions.
  *
  * @typedef {object} CacheEntry
  * @property {unknown} record
  * @property {number} observedAt Epoch milliseconds.
- * @property {string | null} state The advisory's state, lowercased, which is
- *   what the entry's refresh schedule follows. Null on an entry that is not an
- *   advisory and on one whose record named no state.
- * @property {number} [jitterMs] How much longer than the table's threshold this
- *   entry waits to be refreshed, milliseconds, drawn once when the entry was
- *   written. Absent on an entry written before entries carried a draw, which
- *   waits the plain threshold the table names.
- * @property {number} [misses] How many times in a row GitHub has answered 404
- *   for this advisory. Absent on an entry no read has missed.
+ * @property {string | null} state The lowercase advisory state for refresh
+ *   scheduling, or null for unknown states and non-advisory entries.
+ * @property {number} [jitterMs] Additional refresh delay in milliseconds,
+ *   chosen when the entry is written. Defaults to zero.
+ * @property {number} [misses] The consecutive 404 count. Defaults to zero.
  */
 
 /**
  * @typedef {object} CacheOptions
- * @property {CacheStorage | null} [storage] The storage to read and write, and
- *   absent to use the one {@link storageOf} names.
- * @property {number} [at] The moment being asked about, epoch milliseconds. On
- *   a read it is the moment staleness is judged at, and on a write it is the
- *   time of the observation. Absent, the clock says.
+ * @property {CacheStorage | null} [storage] The storage provider. Defaults to {@link storageOf}.
+ * @property {number} [at] The observation time in epoch milliseconds.
+ *   Defaults to the current time.
  */
 
 (() => {
-  /** What an advisory entry's key begins with. */
   const ADVISORY_PREFIX = 'adv:';
 
-  /** What a list page entry's key begins with. */
   const LIST_PREFIX = 'list:';
 
-  /** What the refresh queue's progress entry's key begins with. */
   const PROGRESS_PREFIX = 'queue:';
 
   /**
-   * Every prefix the cache owns. The clear takes the entries under these and
-   * nothing else: `members` and `branches` are separate stores, they cost real
-   * relearning, and neither is rederivable from one page.
+   * Clearing removes only these keys. Members and branches accumulate across
+   * advisories and have separate stores.
    *
    * @type {readonly string[]}
    */
@@ -75,23 +57,13 @@ if (typeof require === 'function') {
   const DAY_MS = 24 * 60 * MINUTE_MS;
 
   /**
-   * How long an entry may go unrefreshed before a pass fetches it again, where
-   * nothing named a state.
-   *
-   * Reaching it is not an end. A six-day-old triage entry is stale and still
-   * held: the table paints from it while the queue refetches it.
+   * This refresh threshold applies to entries with an unknown state.
+   * Stale entries remain available for display during refresh.
    */
   const STALE_MS = 5 * MINUTE_MS;
 
   /**
-   * How long an entry may go unrefreshed, by the state of the advisory it
-   * holds.
-   *
-   * A triage or draft advisory is what a maintainer is working, so it refreshes
-   * on the timescale of a page visit. A closed or published one does not change
-   * often, and the REQUIREMENTS.md section 10 corpus is roughly 110 of them: on
-   * one five-minute threshold, opening the done view twice in an afternoon
-   * re-reads the whole corpus twice at a request a second.
+   * Refresh frequency depends on advisory state.
    *
    * @type {Readonly<Record<string, number>>}
    */
@@ -104,71 +76,37 @@ if (typeof require === 'function') {
   };
 
   /**
-   * The most a draw puts off a refresh.
-   *
-   * REQUIREMENTS.md section 10 reads a corpus at one request per second, so the
-   * entries a pass writes are stamped within minutes of each other. On one
-   * shared threshold they fall due together and the corpus re-crawls in one
-   * wave. Spread over five days it is a few advisories a day, which is what
-   * background refreshing already costs.
+   * Spread refreshes across several days for entries initially fetched together.
    */
   const JITTER_MS = 5 * DAY_MS;
 
   /**
-   * The states whose entries carry a draw: the two on the thirty-day threshold,
-   * which are the ones a pass writes in bulk. A triage, draft, or closed entry
-   * comes due within a week and has no herd to spread.
+   * Apply jitter to states with the thirty-day refresh threshold.
    *
    * @type {ReadonlySet<string>}
    */
   const JITTERED_STATES = new Set(['published', 'withdrawn']);
 
   /**
-   * How many 404 answers in a row take an advisory's entry out.
-   * REQUIREMENTS.md section 2 evicts an entry when its advisory no longer
-   * exists, and an advisory GitHub no longer serves is that.
-   *
-   * One 404 is not enough. GitHub answers 404 for an advisory a maintainer has
-   * lost access to and for one behind a bad minute, and the count resets on any
-   * read that succeeds, so an entry is only taken after three passes have each
-   * asked and each been told the advisory is not there.
-   *
-   * `crawl.js` counts three the same way for a list page that will not answer.
-   * The number is written again here and not read from there: `crawl.js`
-   * already reads this file, in the manifest's content script order and under
-   * Node, so reading it back would be a cycle.
+   * Evict after repeated 404 responses (REQUIREMENTS.md section 2). A single
+   * 404 can reflect lost access or a transient failure. Successful reads reset
+   * the count. `crawl.js` uses the same limit independently to avoid a dependency
+   * cycle.
    */
   const MAX_MISSES = 3;
 
-  /**
-   * The storage a caller put in place of the browser's, and null while the
-   * browser's own is what to use.
-   *
-   * @type {CacheStorage | null}
-   */
+  /** @type {CacheStorage | null} */
   let injected = null;
 
-  /**
-   * The clock a caller put in place of the wall clock, and null while the wall
-   * clock is what to read.
-   *
-   * @type {(() => number) | null}
-   */
+  /** @type {(() => number) | null} */
   let injectedClock = null;
 
-  /**
-   * The randomness a caller put in place of `Math.random`, and null while
-   * `Math.random` is what to draw from.
-   *
-   * @type {(() => number) | null}
-   */
+  /** @type {(() => number) | null} */
   let injectedRandom = null;
 
   /**
-   * @returns {CacheStorage | null} `storage.local` under whichever name this
-   *   browser gives the extension API, and null where there is none, which is
-   *   every environment outside a browser. This is the one caller that evicts,
-   *   so a store carrying no `remove` is not one it can use.
+   * @returns {CacheStorage | null} Browser storage with get, set, and remove
+   *   methods, or null if unavailable.
    */
   function browserStorage() {
     return /** @type {CacheStorage | null} */ (
@@ -177,38 +115,34 @@ if (typeof require === 'function') {
   }
 
   /**
-   * @param {CacheStorage | null} storage The storage to use, and null to go back
-   *   to the browser's own.
+   * @param {CacheStorage | null} storage The storage provider, or null for browser storage.
    * @returns {void}
    */
   function setStorage(storage) {
     injected = storage;
   }
 
-  /** @returns {CacheStorage | null} the storage this file reads and writes. */
+  /** @returns {CacheStorage | null} The active storage provider. */
   function storageOf() {
     return injected ?? browserStorage();
   }
 
   /**
-   * @param {(() => number) | null} clock The clock to read, and null to go back
-   *   to the wall clock. Every threshold here is a duration in milliseconds, so
-   *   a test moves time by moving this and waits for nothing.
+   * @param {(() => number) | null} clock The clock, or null for Date.now.
    * @returns {void}
    */
   function setClock(clock) {
     injectedClock = clock;
   }
 
-  /** @returns {number} the current moment, epoch milliseconds. */
+  /** @returns {number} The current time in epoch milliseconds. */
   function now() {
     return injectedClock === null ? Date.now() : injectedClock();
   }
 
   /**
-   * @param {(() => number) | null} source Draws a fraction in [0, 1), and null
-   *   to go back to `Math.random`. The jitter is the only draw this file makes,
-   *   so a test that pins this pins an entry's expiry to the millisecond.
+   * @param {(() => number) | null} source Returns a fraction in [0, 1).
+   *   Null restores Math.random.
    * @returns {void}
    */
   function setRandom(source) {
@@ -222,10 +156,7 @@ if (typeof require === 'function') {
 
   /**
    * @param {{ owner?: unknown, repo?: unknown } | null | undefined} ref
-   * @returns {string | null} the repository as `owner/repo` lowercased, and null
-   *   where the page did not say which repository it is. GitHub treats an owner
-   *   and a repository name case-insensitively, so the key is folded and two
-   *   spellings do not become two entries.
+   * @returns {string | null} The lowercase `owner/repo`, or null if incomplete.
    */
   function repositoryOf(ref) {
     if (ref === null || ref === undefined) return null;
@@ -236,10 +167,8 @@ if (typeof require === 'function') {
 
   /**
    * @param {{ owner?: unknown, repo?: unknown, ghsaId?: unknown } | null | undefined} ref
-   * @returns {string | null} the key one advisory's entry is held under,
-   *   `adv:{owner}/{repo}:{ghsa}`, and null where the reference names no
-   *   advisory. A GHSA identifier names one advisory whatever its case, so it is
-   *   folded with the rest of the key.
+   * @returns {string | null} The lowercase `adv:{owner}/{repo}:{ghsa}` key,
+   *   or null if incomplete.
    */
   function advisoryKey(ref) {
     const repository = repositoryOf(ref);
@@ -249,10 +178,7 @@ if (typeof require === 'function') {
 
   /**
    * @param {{ owner?: unknown, repo?: unknown } | null | undefined} ref
-   * @returns {string | null} the key one repository's list page entry is held
-   *   under. The list entry is per repository for the same reason the advisory
-   *   key carries the repository: a browser open on two repositories' advisory
-   *   lists holds one entry for each.
+   * @returns {string | null} The repository's list cache key.
    */
   function listKey(ref) {
     const repository = repositoryOf(ref);
@@ -261,9 +187,7 @@ if (typeof require === 'function') {
 
   /**
    * @param {{ owner?: unknown, repo?: unknown } | null | undefined} ref
-   * @returns {string | null} the key one repository's refresh progress is held
-   *   under. A pass covers the advisories of one repository, so its progress is
-   *   held per repository.
+   * @returns {string | null} The repository's refresh progress key.
    */
   function progressKey(ref) {
     const repository = repositoryOf(ref);
@@ -281,8 +205,7 @@ if (typeof require === 'function') {
 
   /**
    * @param {unknown} value
-   * @returns {string | null} the state as the life table names it, and null
-   *   where there is none.
+   * @returns {string | null} The trimmed, lowercase state, or null if empty.
    */
   function normalizeState(value) {
     if (typeof value !== 'string') return null;
@@ -292,8 +215,7 @@ if (typeof require === 'function') {
 
   /**
    * @param {unknown} record
-   * @returns {string | null} the state the record names, which is what the
-   *   entry's life follows.
+   * @returns {string | null} The record's normalized state.
    */
   function stateOf(record) {
     if (!globalThis.bghsa.schema.isPlainObject(record)) return null;
@@ -302,12 +224,9 @@ if (typeof require === 'function') {
 
   /**
    * @param {string | null} state The entry's state, already normalized.
-   * @param {unknown} value The draw the entry carries.
-   * @returns {number} how much that draw puts off the entry's refresh,
-   *   milliseconds. It is none where the state takes no draw, and it is held
-   *   inside the range the table allows: an entry carrying a duration that is
-   *   not a real one takes none, because every comparison against one answers
-   *   false and the entry would never come due.
+   * @param {unknown} value The stored jitter.
+   * @returns {number} The bounded refresh delay in milliseconds. Invalid
+   *   values and states without jitter use zero.
    */
   function jitterOf(state, value) {
     if (state === null || !JITTERED_STATES.has(state)) return 0;
@@ -317,10 +236,8 @@ if (typeof require === 'function') {
 
   /**
    * @param {string | null} state The entry's state, already normalized.
-   * @returns {number} the draw to store on an entry being written now, drawn
-   *   here and never again. Drawn at read time the same entry would come due at
-   *   a different moment on every read, and would be refreshed early or late
-   *   depending on when someone looked.
+   * @returns {number} Jitter chosen once per write to give each entry a
+   *   stable refresh deadline.
    */
   function drawJitter(state) {
     return Math.floor(jitterOf(state, random() * JITTER_MS));
@@ -328,11 +245,9 @@ if (typeof require === 'function') {
 
   /**
    * @param {string | null | undefined} state
-   * @param {number} [jitterMs] The draw the entry carries, and absent where the
-   *   caller is asking about a state and not about an entry.
-   * @returns {number} how long an entry in this state may go unrefreshed, its
-   *   own draw included. An entry whose state this extension could not read
-   *   takes the shortest threshold in the table.
+   * @param {number} [jitterMs] Additional refresh delay. Defaults to zero.
+   * @returns {number} The refresh threshold in milliseconds, including jitter.
+   *   Unknown states use STALE_MS.
    */
   function staleAfter(state, jitterMs) {
     const key = normalizeState(state);
@@ -342,10 +257,9 @@ if (typeof require === 'function') {
 
   /**
    * @param {CacheEntry} entry
-   * @param {number} at The instant the read is being made at.
-   * @returns {number} how long ago the entry was observed, in milliseconds. An
-   *   entry observed later than `at`, which a clock moved backwards produces,
-   *   reads as age zero and is not stale.
+   * @param {number} at The comparison time in epoch milliseconds.
+   * @returns {number} The entry's age in milliseconds, clamped to zero for
+   *   observations later than `at`.
    */
   function ageOf(entry, at) {
     return Math.max(0, at - entry.observedAt);
@@ -353,20 +267,16 @@ if (typeof require === 'function') {
 
   /**
    * @param {CacheEntry} entry
-   * @param {number} at The instant the read is being made at.
-   * @returns {boolean} whether the entry is old enough to be refreshed. An entry
-   *   observed within its state's threshold, its own draw included, is not.
-   *   Being stale is not being gone: the entry is shown while its refresh runs.
+   * @param {number} at The comparison time in epoch milliseconds.
+   * @returns {boolean} Whether the entry has reached its refresh threshold.
    */
   function isStale(entry, at) {
     return ageOf(entry, at) >= staleAfter(entry.state, entry.jitterMs);
   }
 
   /**
-   * @param {unknown} value The miss count an entry carries.
-   * @returns {number} how many reads in a row have missed, as a whole count. A
-   *   count that is not a real one is none, so an entry carrying it is asked
-   *   for three more times before it is taken and never taken on the first.
+   * @param {unknown} value The stored miss count.
+   * @returns {number} The nonnegative integer miss count, or zero if invalid.
    */
   function missesOf(value) {
     if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
@@ -374,9 +284,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * @param {unknown} value The entry as storage handed it back.
-   * @returns {CacheEntry | null} the entry it holds, and null where it holds
-   *   something else.
+   * @param {unknown} value The stored entry.
+   * @returns {CacheEntry | null} The validated cache entry, or null if malformed.
    */
   function entryFrom(value) {
     if (!globalThis.bghsa.schema.isPlainObject(value)) return null;
@@ -393,8 +302,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Takes entries out of storage. Failing costs the caller nothing: the entry
-   * stays, and the cache is rederivable either way.
+   * Ignore storage removal failures; cached data can be fetched again.
    *
    * @param {CacheStorage} storage
    * @param {string[]} keys
@@ -405,17 +313,13 @@ if (typeof require === 'function') {
     try {
       await storage.remove(keys);
     } catch {
-      // The entry stays until whatever asked for this asks again.
+      // Leave the entry for a later removal attempt.
     }
   }
 
   /**
-   * Reads one entry. Age alone never takes one away: an entry is answered with
-   * however old it is, and {@link isStale} is what says a refresh is due.
-   *
-   * The cache is never authoritative, so a storage failure is an absent entry
-   * and not an error: the caller rederives what it needed from the page or from
-   * a fetch.
+   * Return stale entries for display during refresh. Storage failures return
+   * null so callers can fetch the data again.
    *
    * @param {string | null} key
    * @param {CacheOptions} [options]
@@ -435,13 +339,9 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Reads many entries in one call, which is what the list table's first paint
-   * takes.
-   *
    * @param {readonly (string | null)[]} keys
    * @param {CacheOptions} [options]
-   * @returns {Promise<Map<string, CacheEntry>>} the entries that are held, by
-   *   key. A key with no entry is absent from the map.
+   * @returns {Promise<Map<string, CacheEntry>>} Available entries, indexed by key.
    */
   async function getEntries(keys, options = {}) {
     const storage = options.storage ?? storageOf();
@@ -464,20 +364,15 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Writes one entry, stamped with the moment it was observed.
-   *
-   * The write puts the whole entry at that key, which is what takes any 404
-   * count off it: a read that landed says the advisory is there, whatever the
-   * reads before it said.
+   * A successful observation replaces the entry and clears its 404 count.
    *
    * @param {string | null} key
    * @param {unknown} record
-   * @param {string | null} state The state the entry's refresh schedule
-   *   follows. Only an advisory has one; a list and a progress entry carry null
-   *   and take the plain threshold.
+   * @param {string | null} state The advisory state for refresh scheduling.
+   *   List and progress entries use null.
    * @param {CacheOptions} [options]
-   * @returns {Promise<CacheEntry | null>} the entry as it was written, and null
-   *   where nothing was written.
+   * @returns {Promise<CacheEntry | null>} The stored entry, or null if storage failed
+   *   or the key or storage provider was missing.
    */
   async function putEntry(key, record, state, options = {}) {
     const storage = options.storage ?? storageOf();
@@ -500,17 +395,14 @@ if (typeof require === 'function') {
   /**
    * @param {{ owner?: unknown, repo?: unknown, ghsaId?: unknown } | null | undefined} ref
    * @param {CacheOptions} [options]
-   * @returns {Promise<CacheEntry | null>} what this extension last read of one
-   *   advisory.
+   * @returns {Promise<CacheEntry | null>} The cached advisory observation.
    */
   function getAdvisory(ref, options = {}) {
     return getEntry(advisoryKey(ref), options);
   }
 
   /**
-   * Holds what was read of one advisory. Both paths that read an advisory land
-   * here: a fetch by the refresh queue, and the live DOM of a detail page the
-   * maintainer opened, which costs no request.
+   * Cache both fetched advisories and observations from the live detail page.
    *
    * @param {{ owner?: unknown, repo?: unknown, ghsaId?: unknown } | null | undefined} ref
    * @param {unknown} record The parsed advisory.
@@ -526,8 +418,8 @@ if (typeof require === 'function') {
    *   repository the advisories are on.
    * @param {readonly string[]} ghsaIds
    * @param {CacheOptions} [options]
-   * @returns {Promise<Map<string, CacheEntry>>} the entries held for those
-   *   advisories, keyed by the GHSA identifier as the caller spelled it.
+   * @returns {Promise<Map<string, CacheEntry>>} Cached advisories keyed by the
+   *   caller's GHSA identifier spelling.
    */
   async function getAdvisories(ref, ghsaIds, options = {}) {
     /** @type {Map<string, string>} */
@@ -547,23 +439,14 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Counts one 404 against an advisory, and takes its entry once
-   * {@link MAX_MISSES} of them have come in a row.
-   *
-   * Only a 404 reaches here. A timeout, a refused connection, a 5xx, and a
-   * queue that was stopped are this extension failing to reach GitHub, and none
-   * of them says the advisory is gone.
-   *
-   * The count goes on the entry beside the observation, and the observation is
-   * left where it stands: an advisory that answered 404 was not read, so the
-   * entry is no fresher for having been asked and the next pass asks again.
+   * Count consecutive 404 responses and evict at MAX_MISSES. Preserve the
+   * observation time because a failed read does not refresh the advisory.
+   * Callers must exclude timeouts, connection errors, other statuses, and stops.
    *
    * @param {{ owner?: unknown, repo?: unknown, ghsaId?: unknown } | null | undefined} ref
    * @param {CacheOptions} [options]
-   * @returns {Promise<{ misses: number, evicted: boolean }>} how many 404s in a
-   *   row this advisory has now answered with, and whether that took its entry.
-   *   An advisory the cache holds nothing for counts none: there is nothing to
-   *   evict and nothing the count would go on.
+   * @returns {Promise<{ misses: number, evicted: boolean }>} The consecutive
+   *   404 count and eviction result. An absent entry returns zero misses.
    */
   async function noteMissing(ref, options = {}) {
     const storage = options.storage ?? storageOf();
@@ -586,8 +469,7 @@ if (typeof require === 'function') {
     try {
       await storage.set({ [key]: { ...entry, misses } });
     } catch {
-      // The count is lost and the entry is not, so the advisory is asked for
-      // again and taken a pass later than it would have been.
+      // A failed count update delays eviction until a later pass.
       return { misses, evicted: false };
     }
     return { misses, evicted: false };
@@ -596,8 +478,7 @@ if (typeof require === 'function') {
   /**
    * @param {{ owner?: unknown, repo?: unknown } | null | undefined} ref
    * @param {CacheOptions} [options]
-   * @returns {Promise<CacheEntry | null>} what this extension last read of one
-   *   repository's list page.
+   * @returns {Promise<CacheEntry | null>} The repository's cached list.
    */
   function getList(ref, options = {}) {
     return getEntry(listKey(ref), options);
@@ -616,8 +497,8 @@ if (typeof require === 'function') {
   /**
    * @param {{ owner?: unknown, repo?: unknown } | null | undefined} ref
    * @param {CacheOptions} [options]
-   * @returns {Promise<unknown>} the refresh queue's progress on this repository,
-   *   and null where there is none to resume. The caller checks its shape.
+   * @returns {Promise<unknown>} The cached refresh progress, or null if absent.
+   *   The caller validates the record.
    */
   async function getProgress(ref, options = {}) {
     const entry = await getEntry(progressKey(ref), options);
@@ -637,8 +518,7 @@ if (typeof require === 'function') {
   /**
    * @param {{ owner?: unknown, repo?: unknown } | null | undefined} ref
    * @param {CacheOptions} [options]
-   * @returns {Promise<void>} takes the progress entry away, which is what a
-   *   finished pass leaves behind.
+   * @returns {Promise<void>} Removes the cached progress entry.
    */
   async function clearProgress(ref, options = {}) {
     const storage = options.storage ?? storageOf();
@@ -648,15 +528,11 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Empties the cache. Every entry it holds is rederivable from the advisories,
-   * so this costs reads and nothing else.
-   *
-   * The `members` and `branches` entries are left alone. They are separate
-   * stores under keys of their own, they accumulate across advisories and
-   * sessions, and what they hold is not rederivable from any one page.
+   * Clear cached observations and progress. Preserve members and branches,
+   * which accumulate across advisories and sessions.
    *
    * @param {CacheOptions} [options]
-   * @returns {Promise<number>} how many entries were taken.
+   * @returns {Promise<number>} The number of entries removed.
    */
   async function clear(options = {}) {
     const storage = options.storage ?? storageOf();

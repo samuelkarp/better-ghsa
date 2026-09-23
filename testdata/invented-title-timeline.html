@@ -1,16 +1,12 @@
 <!--
-  Invented markup, not a capture. Every login and title here was made up for
-  the test; no advisory on GitHub carries them. It holds the timeline region of
-  an advisory whose reporter set the title to a maintainer-only event's wording,
-  so that a reader of the region can be tested against a title that forges one.
+  This synthetic fixture uses invented logins and titles. The reporter's title
+  changes contain phrases used for maintainer events: `accepted this report`,
+  `closed this`, `requested a CVE`, and `published this`.
 
-  Between them the title changes carry all four of the phrases a reader here
-  looks for: `accepted this report`, `closed this`, `requested a CVE`, and
-  `published this`. Each appears in both shapes a title change is rendered in,
-  the old and new titles in `del` and `ins` as the containerd capture holds it,
-  and the title as bare text as testdata/invented-close-timeline.html holds it.
-  None of them may be read as a maintainer's act, as a CVE request, or as the
-  instant a timing is measured to.
+  Each phrase appears in del/ins elements, matching published-containerd.html,
+  and in bare text, matching invented-close-timeline.html. These phrases are
+  title content and must be excluded from maintainer activity, CVE requests,
+  and event timing calculations.
 -->
 <div class="new-discussion-timeline">
   <div class="TimelineItem" id="event-100000101">

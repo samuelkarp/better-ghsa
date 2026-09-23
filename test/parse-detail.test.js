@@ -38,9 +38,7 @@ test('the triage advisory header yields identity, state, severity, and reporter'
   assert.strictEqual(advisory.state, 'Triage');
   assert.strictEqual(advisory.severity, 'high');
   assert.strictEqual(advisory.severityLabel, 'High');
-  // What GitHub paints a high severity. `Label--large` is the size the detail
-  // page draws the chip at and the selector this parser found it by, so it is
-  // not carried out as color.
+  // Label--large sets chip size. Only color modifiers belong in severityClass.
   assert.strictEqual(advisory.severityClass, 'Label--orange');
   assert.strictEqual(advisory.reportedAt, '2026-08-25T22:15:18Z');
   assert.strictEqual(advisory.reporter, 'prakleumas');
@@ -102,8 +100,7 @@ test('a published advisory carries its assigned CVE in the metadata form', () =>
   if (advisory === null) throw new Error('published-containerd.html did not parse');
   assert.strictEqual(advisory.state, 'Published');
   assert.strictEqual(advisory.severity, 'moderate');
-  // GitHub paints a moderate severity with a different modifier than a high
-  // one, and neither modifier names the level.
+  // GitHub severity classes name colors, not severity levels.
   assert.strictEqual(advisory.severityClass, 'Label--warning');
   assert.strictEqual(advisory.severityField, 'moderate');
   assert.strictEqual(advisory.cveId, 'CVE-2026-31984');
@@ -125,8 +122,6 @@ test('the reporter and the report time come from the description Box header', ()
   assert.strictEqual(draft.reporter, 'samuelkarp');
   assert.strictEqual(draft.reportedAt, '2026-08-25T22:19:40Z');
 
-  // The published page's header meta reads `marlowe-tsu published ... Aug 3,
-  // 2026`, which is the publisher and the publication time.
   const published = parse.parseDetail(fixture('published-containerd.html'));
   if (published === null) throw new Error('published-containerd.html did not parse');
   assert.strictEqual(published.reporter, 'pieter-vosk');
@@ -447,7 +442,6 @@ function composer(inner) {
   return document(`<div class="timeline-new-comment">${inner}</div>`);
 }
 
-/** The form that posts a comment, as the box carries it. */
 const COMPOSER_FORM =
   '<form action="/git-utensils/Spoon-Knife/security/advisories/GHSA-jmvx-2wfw-xfgj/comments">' +
   '<textarea name="body"></textarea></form>';
@@ -468,8 +462,6 @@ test('the signed-in login is the one on the new-comment box', () => {
   const advisory = parse.parseDetail(fixture('triage-thread.html'));
   if (advisory === null) throw new Error('triage-thread.html did not parse');
   assert.strictEqual(advisory.viewer, 'samuelkarp');
-  // The thread carries comments by someone else, and the report is theirs, so
-  // the login read here is not the author of any one comment.
   assert.strictEqual(advisory.reporter, 'prakleumas');
   assert.ok(
     advisory.comments.some((comment) => comment.author === 'prakleumas'),
@@ -478,9 +470,8 @@ test('the signed-in login is the one on the new-comment box', () => {
 });
 
 test('a capture carrying no new-comment box names no signed-in login', () => {
-  // The containerd capture holds neither a comment thread nor a box that
-  // composes one. It is a page with nothing to read the login from, and it is
-  // not what a signed-in maintainer of that repository is served.
+  // Comments and the new-comment composer were removed from this capture.
+  // The signed-in account cannot be read from the redacted fixture.
   const advisory = parse.parseDetail(fixture('published-containerd.html'));
   if (advisory === null) throw new Error('published-containerd.html did not parse');
   assert.strictEqual(advisory.viewer, null);
@@ -530,7 +521,6 @@ test('the signed-in login is named only where one box, avatar and form agree', (
 });
 
 test('an href whose percent escape does not decode names no login', () => {
-  // The author link falls back to the text it shows.
   const commented = document(
     '<div class="timeline-comment-group" id="advisory-comment-1">' +
       '<a class="author" href="/%zz">prakleumas</a></div>'

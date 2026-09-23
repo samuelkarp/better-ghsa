@@ -9,80 +9,57 @@ if (typeof require === 'function') {
 }
 
 /**
- * The part of `browser.storage.local` this file uses. `chrome.storage.local`
- * satisfies it too, and so does a stand-in a test hands to
- * {@link setStorage}.
- *
  * @typedef {object} MemberStorage
  * @property {(key: string) => Promise<Record<string, unknown>>} get
  * @property {(items: Record<string, unknown>) => Promise<void>} set
  */
 
 /**
- * The organization a member belongs to, which is the owner half of
- * `owner/repo`. `AdvisoryRef` satisfies it, and so does `RepositoryRef`.
- *
  * @typedef {object} OrganizationRef
  * @property {string} owner
  */
 
 (() => {
   /**
-   * The `browser.storage.local` entry holding the logins this extension has seen
-   * carrying a member badge on each organization. It is its own entry and not
-   * part of the per-advisory cache: a member badge says who belongs to the
-   * organization, which outlives the advisory it was read on.
+   * Observed membership persists by organization, independently of the
+   * advisory cache.
    */
   const MEMBERS_KEY = 'members';
 
   /**
-   * The logins seen carrying a member badge, keyed by the organization
-   * lowercased and then by the login lowercased, and held as the login was
-   * spelled where it was read. Membership is per organization, so a login
-   * badged on one organization's advisories is not a member of another. GitHub
-   * treats an organization name case-insensitively, and a login names one
-   * account whatever its case, so both keys are folded and the spelling is held
-   * as it was read.
+   * Organization and login keys are case-insensitive. Preserve the first
+   * observed spelling of each login for display.
    *
    * @type {Map<string, Map<string, string>>}
    */
   const seen = new Map();
 
-  /**
-   * The storage a caller put in place of the browser's, and null while the
-   * browser's own is what to use.
-   *
-   * @type {MemberStorage | null}
-   */
+  /** @type {MemberStorage | null} */
   let injected = null;
 
   /**
-   * @returns {MemberStorage | null} `storage.local` under whichever name this
-   *   browser gives the extension API, and null where there is none, which is
-   *   every environment outside a browser.
+   * @returns {MemberStorage | null} `storage.local`, or null if unavailable.
    */
   function browserStorage() {
     return /** @type {MemberStorage | null} */ (globalThis.bghsa.storage.local());
   }
 
   /**
-   * @param {MemberStorage | null} storage The storage to use, and null to go
-   *   back to the browser's own.
+   * @param {MemberStorage | null} storage The storage provider, or null for browser storage.
    * @returns {void}
    */
   function setStorage(storage) {
     injected = storage;
   }
 
-  /** @returns {MemberStorage | null} the storage this file reads and writes. */
+  /** @returns {MemberStorage | null} The active storage provider. */
   function storageOf() {
     return injected ?? browserStorage();
   }
 
   /**
    * @param {OrganizationRef | null | undefined} ref
-   * @returns {string | null} the key this organization's members are held under,
-   *   and null where the page did not say which organization it is.
+   * @returns {string | null} The lowercase organization key, or null if missing.
    */
   function keyOf(ref) {
     if (ref === null || ref === undefined) return null;
@@ -93,7 +70,7 @@ if (typeof require === 'function') {
   /**
    * @param {string} key
    * @param {readonly unknown[]} logins
-   * @returns {boolean} whether the set grew.
+   * @returns {boolean} Whether any entries were added.
    */
   function take(key, logins) {
     let grew = false;
@@ -115,14 +92,12 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Takes logins into the set this session holds for an organization. Nothing is
-   * awaited, so a caller rendering from a parsed record has the page's members
-   * the moment it has read them.
+   * Record members synchronously for use during rendering.
    *
    * @param {OrganizationRef | null | undefined} ref The organization the logins
    *   carry a member badge on.
    * @param {readonly unknown[]} logins
-   * @returns {boolean} whether the set grew.
+   * @returns {boolean} Whether any entries were added.
    */
   function remember(ref, logins) {
     const key = keyOf(ref);
@@ -131,8 +106,7 @@ if (typeof require === 'function') {
 
   /**
    * @param {OrganizationRef | null | undefined} ref
-   * @returns {string[]} the logins seen carrying a member badge on this
-   *   organization, oldest first.
+   * @returns {string[]} Observed members of the organization, in observation order.
    */
   function known(ref) {
     const key = keyOf(ref);
@@ -153,19 +127,15 @@ if (typeof require === 'function') {
     return held === undefined ? false : held.has(login.trim().toLowerCase());
   }
 
-  /** @returns {void} empties the set this session holds, leaving storage alone. */
+  /** @returns {void} Clears in-memory observations. */
   function clear() {
     seen.clear();
   }
 
   /**
-   * @param {unknown} value The entry as storage handed it back.
-   * @returns {Map<string, string[]>} the logins it holds, by organization, and
-   *   none where it holds something else. The entry is data an older version of
-   *   this extension wrote, so its shape is checked and never assumed. A version
-   *   before membership was per organization wrote one array of logins across
-   *   every organization; that entry names no organization, is read as holding
-   *   nothing, and is replaced the next time a session has a member to write.
+   * @param {unknown} value The stored entry.
+   * @returns {Map<string, string[]>} Stored logins by organization. Discard
+   *   malformed entries, including unscoped arrays of logins.
    */
   function organizationsOf(value) {
     /** @type {Map<string, string[]>} */
@@ -182,8 +152,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * @returns {Record<string, string[]>} the set this session holds, in the shape
-   *   the entry takes.
+   * @returns {Record<string, string[]>} The observations serialized for storage.
    */
   function entry() {
     /** @type {Record<string, string[]>} */
@@ -194,8 +163,7 @@ if (typeof require === 'function') {
 
   /**
    * @param {Map<string, string[]>} stored
-   * @returns {boolean} whether this session holds an organization or a login the
-   *   entry does not.
+   * @returns {boolean} Whether this session has observations missing from storage.
    */
   function ahead(stored) {
     for (const [key, logins] of seen) {
@@ -208,17 +176,11 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Reads the stored logins into this session's set and writes the set back
-   * where it holds a login the entry does not. The entry accumulates across
-   * advisories and across sessions, and every page that carries a member badge
-   * adds to its organization.
-   *
-   * Storage failing costs the panel nothing: the set still holds what this
-   * session has read, and this runs again on the next page.
+   * Merge stored members with this session's observations and persist additions.
+   * Storage failures leave the session's observations available.
    *
    * @param {MemberStorage | null} [storage]
-   * @returns {Promise<boolean>} whether storage taught this session a login it
-   *   did not have, which is when what was drawn from the set is out of date.
+   * @returns {Promise<boolean>} Whether storage added a login to this session.
    */
   async function sync(storage = storageOf()) {
     if (storage === null) return false;

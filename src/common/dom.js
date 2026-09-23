@@ -4,11 +4,6 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
 
 (() => {
   /**
-   * One element, as every surface builds one: a tag, the classes GitHub or this
-   * extension styles it with, and the text it carries. A class of `''` leaves
-   * the attribute off, and text left out leaves the element empty, so a
-   * container and a leaf are built the same way.
-   *
    * @param {Document} doc
    * @param {string} tag
    * @param {string} className
@@ -23,17 +18,15 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
   }
 
   /**
-   * How long a burst of mutations is gathered before a pass runs. A subtree
-   * replacement arrives as one batch, and this covers a page that makes several
-   * in a row.
+   * Coalesce consecutive DOM mutation batches before rendering.
    */
   const RENDER_DELAY_MS = 50;
 
   /**
    * @param {Node} node
    * @param {string} selector
-   * @returns {boolean} whether `node` is one the extension put in the document,
-   *   or sits inside one.
+   * @returns {boolean} Whether `node` belongs to the extension or is inside
+   *   an extension-owned node.
    */
   function ownedNode(node, selector) {
     const start = node.nodeType === 1 ? /** @type {Element} */ (node) : node.parentElement;
@@ -41,14 +34,7 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
   }
 
   /**
-   * Whether one mutation is the extension's own writing. A pass takes a surface
-   * out and puts it back, adds its stylesheet, and writes inside it; reading
-   * those as page changes would run a pass for every pass.
-   *
-   * A record whose target is one of the extension's nodes covers what a pass
-   * changes inside the surface. A record naming only the extension's nodes
-   * covers the surface, the stylesheet, and anything else it owns going into and
-   * out of the nodes the page owns.
+   * Ignore changes to extension-owned nodes to prevent render loops.
    *
    * @param {MutationRecord} record
    * @param {string} selector
@@ -61,41 +47,25 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
   }
 
   /**
-   * What one surface tells a watcher about itself.
-   *
    * @typedef {object} Watched
-   * @property {() => string} ownedSelector What the nodes this surface put in
-   *   the document match.
+   * @property {() => string} ownedSelector Matches the surface's nodes.
    * @property {(doc: Document) => boolean} outOfPlace Whether the surface is
-   *   gone or has been left behind.
-   * @property {() => Promise<void>} pass The loop its renders run through, which
-   *   is what keeps a pass this asks for from overlapping one started elsewhere.
+   *   missing or misplaced.
+   * @property {() => Promise<void>} pass Serializes renders from all callers.
    */
 
   /**
-   * Watches the document and runs a pass when something the extension did not
-   * write changed, or the surface is gone or has been left behind.
-   *
-   * The target is the document element. `#repo-content-turbo-frame` is the
-   * subtree GitHub swaps when a link is followed with no document load, and the
-   * document element contains it, so a swap of the frame's contents and a swap
-   * of the frame element itself are both seen. Live regions sit under it too. A
-   * content script runs once per document, so this is also what puts a surface
-   * on a page reached from another without a reload.
-   *
-   * Each burst schedules at most one pass, and a burst carrying nothing but the
-   * extension's own writing schedules none.
+   * Observe the document element to detect replacement of GitHub's content
+   * frame and its descendants, including navigation without a document load.
+   * Schedule at most one render per burst of external mutations.
    *
    * @param {Document} doc
    * @param {Watched} surface
-   * @returns {MutationObserver | null} null where the document offers nothing to
-   *   watch or no observer to watch it with.
+   * @returns {MutationObserver | null} Null if the target or MutationObserver is unavailable.
    */
   function watch(doc, surface) {
     const target = doc.documentElement ?? doc.body;
     if (target === null) return null;
-    // The content script's own constructor, with the document's view standing in
-    // for it where there is no global one.
     const Observer = globalThis.MutationObserver ?? doc.defaultView?.MutationObserver;
     if (Observer === undefined || Observer === null) return null;
     let scheduled = false;

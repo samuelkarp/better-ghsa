@@ -1,9 +1,8 @@
 # Better GHSA: requirements
 
-A browser extension for Chrome and Firefox that adds tracking to GitHub
-Security Advisories for the maintainers who handle them. The target user is a
-containerd maintainer working on `containerd/containerd`, and v1 is built for
-that one repository and that one workflow.
+Better GHSA is a Chrome and Firefox extension for maintainers handling GitHub
+Security Advisories. Version 1 is built for `containerd/containerd` and its
+maintainer workflow.
 
 ## 1. Platform facts this design rests on
 
@@ -35,66 +34,56 @@ Observed behavior in the web UI:
 - CVE request and CVE assignment appear as notes on the advisory detail page.
 - Posting a comment notifies advisory participants, including the reporter.
 
-Load-bearing assumptions, to be verified during implementation:
+Assumptions requiring verification:
 
 - Editing an existing comment does not notify participants. The write model in
   section 3 depends on this.
 - The `Member` badge is present for every org member, including security
-  advisors. If it turns out to be unreliable, the fallback is to fetch the
-  `containerd` org member list with the user's session and cache it.
+  advisors. If it is unreliable, fetch and cache the `containerd` org member
+  list through the user's session.
 
 ## 2. Storage
 
 All shared state lives in the advisory it describes. The extension does not
 operate a server or a database.
 
-The extension keeps a local cache in the browser. The cache is never
-authoritative and is always rederivable from the advisories. An entry is kept
-and refreshed on a schedule that follows the advisory's state, and a stale
-entry is shown while its refresh runs. An entry is evicted when its advisory no
-longer exists, and by a control in the extension's settings that clears the
-cache immediately. That control leaves the repository list alone, because
-clearing the list would turn the extension off.
+The browser cache can be reconstructed from the advisories, which remain
+authoritative. Refresh entries according to advisory state and display stale
+entries during refresh. Evict entries for deleted advisories. A settings
+control clears cached data immediately while preserving the repository list.
 
-Taking a repository off the list clears what was stored for it: its advisory
-reads, its list reads, its refresh progress, and the release branches observed
-on it. Observed organization members are keyed by organization, so they are
-cleared only when no repository from that organization is still listed.
+Removing a repository from the allowlist clears its cached advisories, lists,
+refresh progress, and observed release branches. Clear observed organization
+members only after the last repository from that organization is removed.
 
-An entry's observation time is the time the content in it was read. A write
-this extension makes updates the entry to carry what was written, so a surface
-reading the cache afterwards sees the new state. Storing content read before a
-write, under a timestamp taken after it, is the one thing the cache must never
-do: the entry then looks fresh enough to skip a refresh while holding state the
-maintainer has already replaced.
+An entry's observation time records when its content was read. After a write,
+update the entry with the written state. Content read before the write must
+retain its original observation time.
 
-Nothing accumulates for a repository the extension does not read, because the
-allowlist bounds what it ever stores.
+Store data only for allowed repositories.
 
-Every read is a poll. Other maintainers write through their own browsers, and
-GitHub changes derived state without notifying the extension.
+Reads poll for changes made by other maintainers and by GitHub.
 
 ## 3. Write model
 
-Each maintainer has at most one state comment per advisory. The extension
-creates it on that maintainer's first write and edits it on every write after
-that. No maintainer edits another maintainer's comment. Each advisory therefore
-generates one notification per maintainer who uses the extension.
+Each maintainer has at most one state comment per advisory. Create it on the
+maintainer's first write and edit it on subsequent writes. A maintainer edits
+only their own comment. State comments generate one notification per advisory
+for each maintainer who uses the extension.
 
 The state comment body is a collapsed `<details>` block containing a JSON code
-fence. The JSON is the only representation, and it stays in the rendered DOM
-where a content script reads it.
+fence. JSON is the only representation and remains in the rendered DOM for
+content scripts to read.
 
-Each write records a complete snapshot of the extension-managed record, not a
-delta. Each snapshot carries a sequence number one higher than the highest the
-writer observed across all state comments on that advisory. Current state is
+Each write records a complete snapshot of the extension-managed record. Each
+snapshot carries a sequence number one higher than the highest the writer
+observed across all state comments on that advisory. Current state is
 the snapshot with the highest sequence number, with ties broken by the author's
 login in lexicographic order. History is the union of the snapshots in each
 maintainer's comment.
 
-A write is read-merge-write: the writer copies the current merged state
-forward, applies its own changes, and preserves any fields it does not
-recognize.
+Before writing, read the current merged state, apply the staged changes, and
+preserve unrecognized fields.
 
 Immediately before writing, the extension re-reads the advisory's state
 comments. If the highest sequence number has changed since the panel loaded,
@@ -104,52 +93,53 @@ reapplies the change.
 Control changes accumulate in the panel and are written on an explicit save.
 Navigating away with unsaved changes produces a warning.
 
-While a save is in flight, the controls that fed it are disabled, on whichever
-surface the save was started from. The values written are the values on screen.
+Disable the submitting surface's controls while a save is in progress. Write
+the values displayed when the save starts.
 
-A save carries every staged change or the panel refuses it. Nothing the write
-would not carry is staged: a value another control has made irrelevant, and a
-value equal to the one already stored. Turning an embargo off stages no lift
-date, and the date stays in the control until the next save, so turning the
-embargo back on beforehand restores it. A save redraws every control from
-stored state, which no longer carries a lift date. Moving a control away from
-its stored value and back leaves nothing staged.
+Save every staged change or refuse the save. Stage only values that differ
+from stored state and remain applicable under the other controls.
 
-Every snapshot carries a schema version. A reader that encounters a major
-version it does not understand goes read-only and reports that the extension
-needs an update.
+Turning an embargo off excludes its lift date from the staged changes. Retain
+the date in the control until the next save to restore it if the embargo is
+turned back on. After saving, redraw all controls from stored state; a disabled
+embargo does not have a stored lift date. Returning a control to its stored value
+clears its staged change.
+
+Every snapshot carries a schema version. Apply the trust and schema rules in
+section 4 before using it.
 
 ## 4. Trust
 
 A snapshot is honored only when its comment's author carries the `Member` or
 `Owner` badge. Security advisors are org members and are trusted.
 
-A well-formed snapshot in a comment from any other author is ignored for state
-purposes, and the extension displays a warning on that advisory.
+Ignore snapshots without a valid sequence number and display a warning.
+For snapshots with a valid sequence number:
 
-A snapshot from a trusted author that the extension cannot interpret is also
-ignored for state purposes and warned on. Where that snapshot still carries an
-ordering claim, changing state on that advisory takes one explicit
-confirmation, after which the new value supersedes it.
+- Ignore state from untrusted authors and display a warning. Their schema
+  versions do not make the editor read-only.
+- For a trusted author with an unsupported major schema version, make the
+  editor read-only and report that the extension needs an update.
+- For a trusted author with a supported schema but an invalid payload, ignore
+  the state and display a warning. Require explicit confirmation before a
+  write supersedes it.
 
 The extension labels every comment in the thread by author role, distinguishing
 org members from everyone else.
 
 ## 5. Reporter visibility
 
-The reporter reads the whole thread, including every state comment. The
-vocabulary in section 6 is chosen so that every value is something a maintainer
-is willing to say to the reporter. The extension does not encode or obfuscate
-its payload.
+The reporter can read every state comment. Use vocabulary suitable for sharing
+with the reporter, as specified in section 6. Store the payload as readable JSON
+without obfuscation.
 
 ## 6. Tracked state
 
 ### Stored tracks
 
 **Triage.** One of `evaluating`, `awaiting reporter`, `awaiting maintainer
-input`. An advisory that no org member has acted on is reported as unreviewed
-by derivation, and no stored value expresses that. Acceptance and rejection are
-expressed by GitHub's own state.
+input`. Derive unreviewed status from the absence of org member activity.
+GitHub's native state records acceptance and rejection.
 
 **Owner.** Zero or more org members, matching how issues are assigned. Any
 maintainer can set any maintainer.
@@ -164,19 +154,19 @@ time of confirmation. The reporter's proposed score is not stored. The display
 distinguishes a score confirmed by a maintainer from a score supplied by the
 reporter and not yet confirmed.
 
-Every confirmation binds to what it confirmed. When the current value stops
-matching the fingerprint, the track reverts to unconfirmed and reports who
-confirmed a different value and when.
+A confirmation applies only while its fingerprint matches the current value.
+After a mismatch, display the track as unconfirmed and identify the maintainer
+and time of the earlier confirmation.
 
 **Backport targets.** The set of release branches this advisory requires a
-backport to. A maintainer sets it. The affected-version data GitHub stores can
-seed a suggestion, and the containerd branches in support are non-contiguous,
-so the suggestion is not authoritative.
+backport to. A maintainer sets the targets. Suggestions may use GitHub's
+affected-version data. Supported containerd branches are non-contiguous, so
+suggestions require maintainer review.
 
 **Embargo.** Whether an embargo applies, and the lift date.
 
-**Closure reason.** Set once, at close, and settable retroactively on
-advisories that were closed before the extension existed. One of:
+**Closure reason.** A maintainer can set, change, or clear it, including
+retroactively on advisories closed before the extension existed. One of:
 
 - `duplicate`, carrying a pointer to the GHSA it duplicates
 - `not a vulnerability`
@@ -186,13 +176,11 @@ advisories that were closed before the extension existed. One of:
 - `no reporter response`
 - `withdrawn by reporter`
 
-The pointer is free text and is stored as it was typed. The advisory detail
-panel and the completed list link it where it is exactly a GHSA identifier or
-exactly the address of an issue or a pull request on github.com, and display it
-as it stands otherwise. An identifier names no repository, so it is read as an
-advisory of the repository being looked at. A repository numbers its issues and
-its pull requests in one sequence, and either reads as GitHub writes one:
-`#412` for one of that repository and `owner/repo#412` for one of another.
+Store the duplicate pointer as entered. The detail panel and completed list
+link complete GHSA identifiers and github.com issue or pull request URLs.
+Display other values as text. Resolve GHSA identifiers within the current
+repository. Display issue and pull request links as `#412` within that
+repository and `owner/repo#412` for other repositories.
 
 ### Derived state
 
@@ -203,36 +191,33 @@ and which branches they target. Combined with the stored backport targets, this
 yields backport progress as a count of required branches that have a patch
 prepared.
 
-A private fork is deleted when its changes merge into the repository, so a
-merged pull request is never visible on an advisory the extension is tracking,
-and progress counts preparation.
+Merging deletes the private fork. The advisory exposes only open pull
+requests. Backport progress measures patch preparation.
 
 **CVE.** Whether a CVE has been requested and whether one has been assigned,
 from the notes on the detail page and the `cve_id` field.
 
-**Never reviewed.** No org member has commented on or acted on the advisory. An
-advisory in `draft` or `published` has been reviewed, because a maintainer moved
-it there. A `closed` advisory has not, on its own, been reviewed, because the
-reporter can withdraw a report.
+**Never reviewed.** The advisory lacks evidence of org member activity. The
+`draft` and `published` states establish a review because entering either state
+requires a maintainer. The `closed` state alone does not establish a review;
+the reporter can withdraw a report.
 
-A comment counts when its author carries a member or owner badge. A timeline
-event counts when only a maintainer could have caused it, whether or not the
-extension can place its actor: accepting the report, adding another person as a
-collaborator, requesting a CVE, publishing, closing the advisory, and deleting
-the temporary private fork. The rest do not count, because the reporter or
-GitHub itself produces them: crediting a reporter, accepting credit, adding
-themselves as a collaborator, changing the title, creating the temporary
-private fork, releasing, and assigning a CVE identifier.
+Comments with a member or owner badge count as reviews. The following timeline
+events also count, even when the actor's membership is unknown: accepting the
+report, adding another person as a collaborator, requesting a CVE, publishing,
+closing the advisory, and deleting the temporary private fork.
 
-A pull request closed inside the private fork produces no timeline event at
-all. The fork's only events are its creation and its deletion, and the fork's
-pull request list shows open pull requests only. A merged or closed pull
-request is not something the extension can ever read.
+Reporter and GitHub events do not establish a review: crediting a reporter,
+accepting credit, adding themselves as a collaborator, changing the title,
+creating the temporary private fork, releasing, and assigning a CVE identifier.
 
-These phrases are matched whole. `accepted this report` sits in the same
-timeline as `accepted credit`, and `added as a collaborator` inside `added
-themselves as a collaborator`, so a partial match reads a reporter's act as a
-maintainer's.
+Closing a pull request inside the private fork does not produce an advisory
+timeline event. The fork's timeline events are creation and deletion. Its pull
+request list exposes only open pull requests.
+
+Match complete event phrases. Distinguish `accepted this report` from
+`accepted credit`, and `added as a collaborator` from `added themselves as a
+collaborator`.
 
 **New activity.** The most recent comment from a non-member is newer than the
 most recent member comment or member action. It clears when a maintainer
@@ -256,57 +241,43 @@ them for publication.
 
 On an explicit button press, the extension writes one comment per advisory
 holding the advisory's current title and description inside a collapsed
-`<details>` block, formatted for a human reader. The extension never reads this
-comment back, and offers the button only where no such comment exists on that
-advisory.
+`<details>` block, formatted for a human reader. The extension does not read the
+saved report back. Offer the button only while the advisory lacks a
+preservation comment.
 
-A description carrying its own `<details>` blocks keeps them, and they render
-nested inside the enclosing one. A closing `</details>` with no matching opener
-is removed, because it would end the enclosing block early and spill the rest
-of the report into the thread.
+Preserve nested `<details>` blocks. Remove unmatched closing `</details>` tags
+to keep the report inside the enclosing collapsed block.
 
-The summary line is what records that the comment holds the original report.
-The body carries the title and the description under plain labels and says
-nothing further about them.
+Identify the original report in the summary line. The body contains only the
+title and description under plain labels.
 
-The extension refuses to write where it cannot tell whether the description is
+Refuse preservation when the extension cannot verify that the description is
 the reporter's original text.
 
-Pressing the button before a maintainer rewrites the report is what preserves
-the original. Nothing recovers it afterward.
+Preservation requires pressing the button before a maintainer rewrites the
+report. The extension cannot recover the original afterward.
 
-The filer of an advisory is its reporter whether or not they are an org member.
-Advisories a maintainer files are treated the same as any other.
+Treat the filer as the reporter, including when the filer is an org member.
 
 ## 8. Advisory detail page
 
-The extension adds a panel that displays derived state, displays and edits
-stored state, and shows whether each confirmation stands. It offers the button
-that preserves the original report while the advisory is in triage or draft.
-Once an advisory is published or closed it is dealt with, and capturing the
-reporter's original wording serves nothing, so neither the button nor the row
-is shown.
+The detail panel displays derived state, edits stored state, and shows
+confirmation status. Show the original-report preservation row and button only
+for triage and draft advisories.
 
-The editing controls stay live in every state. A closure reason and the owners
-remain worth recording after an advisory is published or closed, and the done
-page exists to set a closure reason retroactively.
+Keep editing controls available in every advisory state, including for
+retroactive owner and closure-reason changes.
 
-On a repository the allowlist does not carry, there is no panel, because the
-extension does not run there at all.
+Show the panel only on allowed repositories.
 
-A confirmation is confirmed or it is not. A value that has changed since it was
-confirmed reads as unconfirmed, the same as one nobody has confirmed, because
-the maintainer's next act is the same either way.
+Show changed values as unconfirmed, using the same status as values that have
+never been confirmed.
 
-The panel shows what a maintainer has to act on. It carries the same waiting
-chips the list row carries, built from the same code, so the reason an advisory
-sits where it does on the list is the first thing its page says. The panel also
-carries the stored triage value in its own row, with how long it has been held,
-so an advisory carrying one names it twice. On a draft advisory it carries the
-patch chip too. It does not restate what the advisory page already carries,
-which is why severity and the CVE stay off it, and it does not list the
-snapshots it read. A snapshot from an untrusted author is marked on that
-comment in the thread, where section 4's author role labels already are.
+Start the panel with the same waiting chips as the list row, using their shared
+implementation. Also show the stored triage value and waiting duration in a
+separate row. Show the patch chip for draft advisories. Omit severity, CVE, and
+the list of snapshots from the panel. Mark untrusted snapshots on their comments
+in the thread alongside the author role labels from section 4.
 
 The extension writes nothing to GitHub beyond its two comment types. It does
 not change `summary`, `description`, severity, advisory state, or any other
@@ -314,10 +285,9 @@ native field.
 
 ## 9. Advisory list page
 
-The extension replaces the body of the repository's advisory list with its own
-table, and provides a toggle back to GitHub's native view. While the table is
-showing, GitHub's own state tabs and query form are hidden, and the toggle
-restores them together with the native rows.
+Replace the advisory list body with the extension's table. Provide a toggle to
+GitHub's native view that restores its rows, state tabs, and query form. Hide
+the native tabs and form while the extension table is visible.
 
 Each row shows the advisory title as a link, GitHub's state, and the owners as
 profile icons in the style of issue assignees. Below the title, chips carry the
@@ -326,33 +296,23 @@ state of text and scoring, the CVE state, the severity marked as confirmed or
 unconfirmed, and the embargo. A confirmed severity is filled with the color
 GitHub paints that level. Each row shows the time its data was observed.
 
-The waiting chip is the stored triage value where one is set, sentence-cased,
-and the derived waiting state where none is. The derived state stands as a chip
-of its own, before it, while it says something the value does not: never
-reviewed and new activity. Blocked on us and blocked on the reporter are the
-classification of the value itself, so they are drawn only where no value is
-stored. Each chip takes the color of the side that owes the next move, so
-evaluating and awaiting maintainer input read as what a maintainer owes and
-awaiting reporter as what the reporter owes.
+Use the sentence-cased stored triage value as the waiting chip. If triage is
+unset, use the derived waiting state. Show never reviewed and new activity as
+additional derived chips before a stored triage chip. Show blocked on us and
+blocked on the reporter only when triage is unset.
 
-Two triage values carry one derived state, and the chip parts them: a row says
-whether a maintainer is evaluating the report or waiting on another maintainer.
+Color waiting chips by who must act next: maintainers for evaluating and
+awaiting maintainer input, and the reporter for awaiting reporter. The stored
+labels distinguish the two maintainer states.
 
-Filtering and ordering read the derived state, so a row showing a triage value
-filters and sorts under the derived state that value classifies to.
+Filter and order rows by derived state, including when the chip shows stored
+triage.
 
 Rows are filterable on waiting, severity, owner, state, patch, backports, and
 embargo, with a control that clears every filter. They are sortable by the
 default order, by severity, and by longest waiting.
 
-Filtering and sorting on every value the extension holds produced eleven
-standing controls and fourteen sort options, which is more than a maintainer
-reads. These are the values worth narrowing a queue by. The default order
-already carries state, group, severity and waiting, so a sort exists for
-looking at the list another way and not for working it.
-
-Default ordering is by state first. A draft advisory has been accepted and
-needs active work, so every draft sorts above every advisory in triage.
+The default order places draft advisories before triage advisories.
 
 Within draft:
 
@@ -361,8 +321,7 @@ Within draft:
 3. Blocked on us.
 4. Blocked on the reporter.
 
-Never reviewed cannot arise in draft, because a maintainer moved the advisory
-there.
+A draft advisory has already received a maintainer review.
 
 Within triage:
 
@@ -372,19 +331,15 @@ Within triage:
 4. New activity.
 5. Blocked on the reporter.
 
-An advisory that answers to more than one group takes the first it matches.
+Assign an advisory to the first matching group.
 
-An advisory carrying no stored triage value is not blocked on anyone, because
-the classification is of triage values and it has none. In triage it takes the
-never reviewed group. In draft, where never reviewed cannot arise, it takes
-blocked on us: a maintainer accepted it and has not said where it stands.
+When stored triage is unset, use the never reviewed group for triage advisories
+and blocked on us for drafts, subject to the group priority above.
 
-Within each group, by confirmed severity descending, then by unconfirmed
-severity descending, then by longest waiting.
-
-Severity is two keys, not one. Every severity a maintainer confirmed ranks
-above every severity nobody has confirmed, so a confirmed low sorts above a
-severity the reporter claimed and no maintainer has checked.
+Within each group, sort by confirmed severity descending, then unconfirmed
+severity descending, then longest waiting. Every confirmed severity ranks above
+every unconfirmed severity. A confirmed low therefore sorts above any
+unconfirmed reporter-supplied severity.
 
 Published and closed advisories are excluded from this table and appear on the
 done page described in section 10.
@@ -394,102 +349,74 @@ stalest first, at a throttled rate. Rows update as data arrives. Reading an
 advisory's state costs one fetch of its detail page, which also supplies every
 derived value.
 
-Reading a repository's advisory lists walks every page. Nothing caps how many
-pages it will read; the throttled rate is the only bound. A walk that stops
-before the last page is recorded as incomplete, and the surfaces reading from
-it say so.
+Read every page of each repository advisory list without a page-count cap.
+Throttle requests and report any walk that stops before its last page as
+incomplete in the views that use it.
 
 ## 10. Done page and statistics
 
-Two views, each reached from the advisory list.
+The advisory list links to separate done and statistics views.
 
 The done page lists published and closed advisories. Closure reasons can be set
 here retroactively.
 
-Each row carries a state chip colored by the ending the advisory came to: closed
-purple and published green, which is how GitHub colors them. The severity stands
-beside it, and a closed advisory carries none. On a published advisory it is
-filled the way a confirmed severity is in section 9, because publication settles
-the rating.
+Use purple state chips for closed advisories and green for published
+advisories, matching GitHub. Show severity beside the state chip only for
+published advisories, using the confirmed-severity fill from section 9.
+Offer closure-reason controls only for closed advisories.
 
-A published advisory has no closure reason, so its row carries no control for
-setting one.
+Order rows by their latest closure or publication matching the current state,
+newest first. An advisory closed, reopened, and closed again uses its latest
+closure. Show that event and its date below the title. Place unread
+advisories and those without a matching event last, in GHSA identifier order.
 
-Rows are ordered by the instant each advisory ended, newest first: a closed
-advisory by its close and a published one by its publication. The ending is the
-last event of that kind, so an advisory closed, reopened, and closed again ends
-at the close it is sitting in. The line beneath the title names that ending and
-the date of it. An advisory with no ending stands below every advisory that has
-one, in GHSA identifier order. An advisory has no ending where nothing has read
-it, and where a read of it finds no close or publication matching the state it
-is in.
+Filter rows by state, closure reason, and severity. Provide a control to clear
+every filter. Apply closure-reason filtering to closed advisories, including
+a value for unset reasons. Apply severity filtering to published advisories.
+Use the open list's filter bar and show the controls for the current view.
 
-Rows are filterable on state, on closure reason, and on severity, with a control
-that clears every filter. The reason filter is over closed advisories, and the
-value it offers for the advisories carrying no reason is what a backfill works
-from. The severity filter is over published advisories, which are the ones whose
-rating publication settled.
-Those filters stand on the same bar as the open list's, and the bar shows the
-set belonging to the view on screen.
+Show collection status from the moment collection is requested, including
+while its list walk waits for earlier queued work. Identify the list walk, then
+show the remaining advisory reads across all views sharing the queue. Update
+the count as work proceeds and clear the loading status when collection stops.
 
-While the page is collecting, the view says what the collection is doing: the
-walk, and then how many advisories the queue has still to read. That number
-counts the work of every surface the queue serves and moves as the queue does,
-so a reader can tell a collection that is working from one that has stopped.
-The view says a collection is running only while it holds one, so a collection
-put down leaves nothing on the page claiming to be loading, and it says so from
-the moment one is asked for, including while that collection's own walk waits
-behind work the queue already holds.
+Update the originating row after saving a closure reason.
 
-A closure reason written from this page shows on the row it was written from,
-which holds the advisory as the crawl read it.
+The statistics view covers all open and completed advisories.
 
-The statistics are their own view. They cover the whole corpus, open and done,
-because they describe active work as much as finished work, and they are not a
-property of the done list.
+Show counts and ratios by closure reason, state, severity, and month.
 
-Counts and ratios: advisories by closure reason, by state, by severity, and by
-month.
+Closure-reason statistics cover completed advisories. Count publication as its
+own category. Count closed advisories by their stored reason, with an explicit
+category for unset reasons. Include that category in the ratios. Other counts
+exclude missing values from their ratios. Exclude triage and draft advisories
+from closure-reason statistics.
 
-The closure reason count is over the advisories that have ended, and it counts
-how each one ended. A publication is an ending of its own and is counted as its
-own value. A close is counted under the reason it was closed for, and under the
-value for no reason where nobody has set one, which is what a backfill works
-from. That value is an ending like any other: it is counted with the rest and
-holds a share of its own, where on every other count a member holding no value
-stands outside the shares. An advisory in triage or in draft has not ended and
-is counted in none of it.
-
-A publication is named by the list page. A closure reason needs the advisory's
-own page, so a closed advisory nobody has read is counted nowhere in it: its
-reason is unknown, and reading that as no reason set would inflate the share a
-backfill works from.
+The list page establishes publication. A closure reason requires reading the
+detail page. Exclude unread closed advisories from closure-reason counts and
+ratios until their reason can be determined.
 
 Timing, reconstructed from page-observable events:
 
 - Time to first response, measured to the first comment by an org member that
-  the extension did not write. Neither the state comment nor the preserved
-  original report is a maintainer answering a reporter, so neither counts.
-  First contact made by email is not visible and is not counted.
+  the extension did not write. Exclude state and preserved-report comments.
+  Email contact is unobservable and excluded.
 - Time to accept, measured to the advisory entering draft.
 - Time to close.
 - Time to publish.
 
-Closing and publishing are two different endings and are measured separately.
-Each timing is measured to the first such event, and the done list orders by
-the last.
+Measure closure and publication separately. Timings use the first matching
+event; done-list ordering uses the last.
 
-A timing says how many advisories it could not measure and why, as a row of its
-own beside the counts: an advisory with no response, one never accepted, one
-never closed, one never published. The reason is a label and a number, not a
-sentence.
+Beside each timing, show a row counting advisories without the required event:
+response, acceptance, closure, or publication. Display each omission as a label
+and count.
 
-A metric is omitted when the event it needs is not observable. It is not
-estimated.
+Omit metrics whose required event is unobservable. Do not estimate them.
 
 The page exports to CSV.
 
-Every computation runs locally. Nothing is sent anywhere.
+Compute statistics and export CSV locally without transmitting the data.
 
 ## 11. Failure behavior
 
@@ -499,30 +426,21 @@ validate the whole page structure.
 When it cannot read something, it displays what it can, marks the result
 incomplete, and shows a banner naming what it could not read.
 
-When it cannot fully verify what it is looking at, it refuses to write and
-shows a banner. A wrong read shows a stale value that the observation time
-already qualifies. A wrong write puts a permanent claim on a real vulnerability
-report in front of the reporter, and no other maintainer can edit it out.
+Refuse writes and show a banner when the extension cannot verify the required
+data and controls.
 
 ## 12. Platform and distribution
 
-Chrome and Firefox from one codebase. The extension works from the logged-in
-`github.com` session. It does not ask for a token and does not
-store a credential. It contacts only `github.com`. It does not collect
-telemetry.
+Support Chrome and Firefox from one codebase. Use the logged-in `github.com`
+session without requesting a token or storing credentials. Contact only
+`github.com` and do not collect telemetry.
 
-The extension acts only on repositories a maintainer has listed. On any other
-repository it does nothing at all: no panel, no table, no reads, and nothing
-stored. The allowlist gates the extension, not just its writes.
+On unlisted repositories, show only the settings button on advisory pages.
+Do not read or store advisory data or fetch advisory pages.
 
-The list is empty on a fresh install and is edited in the extension's settings,
-so the extension touches no repository nobody chose. A page open while the list
-changes starts or stops without being reloaded, verified in Firefox on
-2026-08-31. Every advisory list and
-advisory detail page carries one control that opens those settings, whether or
-not the repository is listed. On a repository that is not listed that control
-is the only thing the extension does: it reads no advisory, fetches nothing,
-and stores nothing.
+The allowlist starts empty and is edited in settings. Apply allowlist changes
+to open pages without reloading. Every advisory list and detail page has one
+settings control, including repositories outside the allowlist.
 
 On a GHSA private fork's pull request diff page (`/pull/{number}/changes` or
 `/pull/{number}/files`), the extension removes the outer width limit and extra
@@ -530,47 +448,35 @@ horizontal padding. The diff viewer retains its own padding. This layout change
 uses the parent repository's allowlist entry, inferred from the fork's
 `owner/repo-ghsa-xxxx-xxxx-xxxx` name, and follows navigation and allowlist edits.
 
-The extension has no background script. Every surface is a content script, and
-nothing runs outside a page.
+The extension does not use a background script. Every view runs as a content
+script in a page.
 
-This depends on undocumented endpoints and on GitHub's DOM, and GitHub's
-changes will break it.
+The extension depends on undocumented endpoints and GitHub's DOM. Changes to
+either can break it.
 
-The extension is published on addons.mozilla.org and in the Chrome Web Store,
-and a maintainer installs it from either. It also loads from a clone, which is
-how anyone working on it runs it: the repository contents are the extension,
-and there is no build step.
+Distribute the extension through addons.mozilla.org and the Chrome Web Store.
+Also support loading a repository clone directly without a build step.
 
-The Firefox add-on id is `better-ghsa@sbk.wtf` and Firefox 140 is the floor. A
-Manifest V3 extension carries its own add-on id
-because signing requires one and addons.mozilla.org assigns none, and the id is
-fixed from the first signing because the update path is keyed by it.
+Use `better-ghsa@sbk.wtf` as the Firefox add-on ID. Manifest V3 signing
+requires an explicit ID; addons.mozilla.org does not assign one. Keep the ID
+fixed from the first signing to preserve updates. Require Firefox 140 or later.
 
-The manifest declares that the extension collects and transmits no data.
-addons.mozilla.org requires that declaration of every extension, and Firefox
-reads it from 140 and Firefox for Android from 142, which is what sets the
-floor. The declaration is what a maintainer is shown at install, so it has to
-stay true: an extension that sent data anywhere would name the categories it
-sent.
+Declare the absence of data collection and transmission in the manifest, as
+required by addons.mozilla.org. The declaration is displayed at installation
+and must match the extension's behavior. It requires Firefox 140 or later and
+Firefox for Android 142 or later.
 
-The extension never requires another maintainer to have it installed. A
-maintainer acting through GitHub's native UI must not corrupt or confuse the
-extension's state, and their actions remain visible through derived state.
+Maintainers can collaborate without all installing the extension. Preserve
+extension state when maintainers use GitHub's native UI and reflect their
+actions in derived state.
 
 ## 13. Out of scope for v1
 
-- Private fork surfaces, including CSS styling. The purpose of that styling is
-  an open question.
-- Review status of the pull requests in a private fork. The advisory page
-  carries none, so reading it costs one fetch per pull request. A set of
-  prepared patches that nobody has approved is still pending maintainer work,
-  which makes this worth revisiting. Reconsidered on 2026-08-27, when the patch
-  chips took color, and left out again: a patch nobody has reviewed reads the
-  same as one three maintainers approved, and that is the cost of not spending
-  a fetch per pull request.
-- Check status of those pull requests. A private fork does not run CI and still
-  displays an expected check state, so the value shown does not describe
-  anything that ran.
+- Review status of private-fork pull requests. The advisory page omits review
+  status; reading it would require one fetch per pull request. Patch state
+  treats approved and unreviewed pull requests alike.
+- Check status of private-fork pull requests. Private forks do not run CI,
+  although GitHub displays an expected check state.
 - Field-level merge on a write conflict.
 - A cross-repository or org-wide view.
 - A configurable track vocabulary.
