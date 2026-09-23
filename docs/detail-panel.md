@@ -67,12 +67,11 @@ advisory.
 
 Unrelated page DOM changes leave the mounted editor and its inputs in place,
 preserving focus, selection, and half-typed text. The extension still rereads the
-advisory and repairs comment warnings. A real change to advisory data, write
+advisory and repairs comment warnings. A change to advisory data, write
 metadata, preservation availability, candidate suggestions, or the embargo's
 overdue status can rebuild the panel, as can a removed or displaced panel.
-Staged edits and drafts survive those rebuilds; retaining native focus across
-them is not guaranteed. Save and discard explicitly refresh their results even
-when advisory data is unchanged.
+Rebuilds preserve staged edits and drafts but may interrupt focus. Save and
+discard refresh their results even when advisory data is unchanged.
 
 - **Triage**: a dropdown of "Not set", "evaluating", "awaiting reporter",
   "awaiting maintainer input". Acceptance and rejection are not in this list;

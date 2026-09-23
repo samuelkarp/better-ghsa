@@ -1799,7 +1799,6 @@ test('mounted editors refresh on discard and save, not background mutations', as
         let release = () => {};
         const gate = new Promise((resolve) => { release = () => resolve(undefined); });
 
-        // Keep panel.render's real rerender closure; replace only the transport.
         edit.contextFor = async (advisory, options) => {
           captured = await contextFor(advisory, {
             ...options,
@@ -1872,10 +1871,9 @@ test('mounted editors refresh on discard and save, not background mutations', as
             edit.drafts.clear();
             edit.branchDrafts.clear();
 
-            // A programmatic no-change save still uses the panel's callback.
             await edit.save(context);
           } else {
-            // Save just triage, so both outcomes are about transport, not gated values.
+            // Use a triage change to reach the transport in both save cases.
             edit.edits.clear();
             edit.drafts.clear();
             edit.branchDrafts.clear();

@@ -15,27 +15,26 @@ synthetic markup based on observed page structures. The capture helpers in
 
 ## Tracking editor refreshes
 
-The focused selection is:
+Run the tracking editor tests with:
 
 ```
 node --test --test-concurrency=1 test/panel.test.js test/edit.test.js test/dom.test.js test/content-scripts.test.js
 ```
 
-Observer-driven tests check that unrelated body and shadow-host mutations keep
-the same connected panel, input, and disclosure, including drafts and local
-control state. They also check warning repair without rebuilding, real advisory
-and write-metadata changes, candidate arrival and scoping, placement repair,
-embargo expiry, and explicit save/discard feedback. Draft-restoration tests
-deliberately change advisory data to require reconstruction rather than relying
-on a no-op render to rebuild.
+Observer tests check that unrelated mutations to the body and shadow hosts
+preserve the panel, inputs, disclosure, drafts, and local control state. They
+also cover comment warning repair, advisory and write metadata changes,
+candidate suggestions scoped to the organization or repository, panel placement,
+embargo expiry, and save and discard feedback. Draft restoration tests change
+advisory data to trigger a rebuild.
 
 These DOM tests do not establish native focus or selection behavior. Validate
 that separately in a fresh browser profile using committed fixtures, in-memory
 storage, disabled network requests, and the actual manifest scripts and observer
-loop. Check activeElement and a nonempty selection across unrelated body UI and
-closed-shadow-host insertion/removal, then verify real updates and placement
-repair. Synthetic mutations are not evidence of genuine IME behavior or a
-particular password manager's mutation records.
+loop. Check `activeElement` and a nonempty selection while changing unrelated
+body elements and inserting or removing hosts with closed shadow roots. Then
+verify advisory updates and panel placement repair. IME composition and
+password manager interactions require separate browser tests.
 
 ## The closed-advisory capture
 

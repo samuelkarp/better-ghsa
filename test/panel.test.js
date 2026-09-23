@@ -885,8 +885,8 @@ test('unrelated page mutations leave the editor mounted', async (t) => {
     await delay(dom.RENDER_DELAY_MS + 50);
     assert.strictEqual(passes, before, 'owned writing scheduled a pass');
 
-    // Linkedom reports attributes even to a child-list-only observer. Whether
-    // a pass runs or not, an attribute-only change must leave the editor alone.
+    // Linkedom reports attribute changes even when the observer requests only
+    // child-list changes.
     doc.body.setAttribute('data-unrelated', 'changed');
     await delay(dom.RENDER_DELAY_MS + 50);
     assert.ok(doc.getElementById(panel.PANEL_ID) === drawn, 'attribute-only writing replaced the panel');
@@ -939,8 +939,8 @@ test('only the remembered panel at its anchor can be reused', async (t) => {
         const sentinel = doc.getElementById(panel.PANEL_ID);
 
         if (name === 'cloned sentinel') {
-          // A sentinel-only swap is owned writing to the broad observer; the
-          // next requested pass must not mistake the clone for our controls.
+          // The observer treats replacement of the panel with its clone as an
+          // extension write. Request a pass explicitly.
           await loop();
         } else {
           await until(() => passes > 0);
@@ -1041,8 +1041,7 @@ test('the clock redraws only when the embargo becomes overdue', async () => {
 });
 
 /**
- * The captured fragment inside a full document, so body mutations and frame
- * replacement exercise the same ancestry as the browser.
+ * Wrap the fixture fragment in a full document for body and frame mutations.
  *
  * @returns {Document}
  */
@@ -1403,7 +1402,7 @@ test('preservation completion refreshes a panel reconstructed mid-flight', async
   try {
     await until(() => sent);
 
-    // A real comment update reconstructs the panel while the write is held.
+    // Change the comment while the preservation request is pending.
     const comment = doc.querySelector('.js-comment-body');
     assert.ok(comment);
     const added = doc.createElement('p');
@@ -1420,7 +1419,8 @@ test('preservation completion refreshes a panel reconstructed mid-flight', async
     assert.strictEqual((await pending).ok, true);
     assert.strictEqual(fake.posts().length, 1);
 
-    // The original press settles on detached controls; the next pass must heal.
+    // Preservation completion updates the detached controls. The next render
+    // refreshes the mounted panel.
     assert.strictEqual(rowText(drawn, 'Original report'), 'Preserved');
     assert.strictEqual(rowText(midflight, 'Original report'), preserve.ATTEMPTED_MESSAGE);
 

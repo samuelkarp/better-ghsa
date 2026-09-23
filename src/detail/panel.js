@@ -495,8 +495,7 @@ if (typeof require === 'function') {
   const loops = new WeakMap();
 
   /**
-   * The exact mounted panel and the external inputs its handlers captured.
-   * Local drafts, disclosure, and save feedback are updated in place.
+   * Retain the mounted panel and the external inputs captured by its handlers.
    *
    * @type {WeakMap<Document, { panel: Element, inputs: string }>}
    */
@@ -563,8 +562,8 @@ if (typeof require === 'function') {
       },
     });
 
-    // Include write-context metadata, not just visible labels: a handler must
-    // never keep an old sequence, holder, fingerprint, or unknown field.
+    // Changes to sequence numbers, holders, fingerprints, or unknown fields
+    // require new handlers even when the displayed values are unchanged.
     const inputs = JSON.stringify({
       advisory,
       merged: context.merged,
