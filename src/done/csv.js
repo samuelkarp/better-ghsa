@@ -10,7 +10,8 @@ if (typeof require === 'function') {
 
 /**
  * Export one row per corpus member, falling back to list data for unread
- * advisories. `detail_fetched` identifies those rows; their timings are blank.
+ * advisories. `page_loaded` identifies those rows; their timings and
+ * `severity_confirmed` are blank.
  *
  * @typedef {Record<string, string | number | null>} CsvRow
  */
@@ -36,6 +37,7 @@ if (typeof require === 'function') {
     'title',
     'state',
     'severity',
+    'severity_confirmed',
     'closure_reason',
     'reported_at',
     'month',
@@ -43,7 +45,7 @@ if (typeof require === 'function') {
     'time_to_accept_ms',
     'time_to_close_ms',
     'time_to_publish_ms',
-    'detail_fetched',
+    'page_loaded',
     'observed_at',
   ];
 
@@ -87,10 +89,20 @@ if (typeof require === 'function') {
   }
 
   /**
-   * @param {import('./corpus.js').CorpusMember} member
-   * @returns {CsvRow}
+   * @param {import('../common/parse-detail.js').ParsedDetail | null} advisory
+   * @returns {Promise<string | null>} Whether a maintainer confirmed the current
+   *   scoring, the test the severity tally applies, or null for an unread advisory.
    */
-  function rowOf(member) {
+  async function confirmedOf(advisory) {
+    if (advisory === null) return null;
+    return (await globalThis.bghsa.stats.scoringConfirmed(advisory)) ? 'yes' : 'no';
+  }
+
+  /**
+   * @param {import('./corpus.js').CorpusMember} member
+   * @returns {Promise<CsvRow>}
+   */
+  async function rowOf(member) {
     const stats = globalThis.bghsa.stats;
     const advisory = member.advisory;
     const state = advisory?.state ?? member.row.state ?? member.state;
@@ -99,6 +111,7 @@ if (typeof require === 'function') {
       title: advisory?.title ?? member.row.title,
       state: state === null ? null : state.toLowerCase(),
       severity: advisory?.severity ?? member.row.severity,
+      severity_confirmed: await confirmedOf(advisory),
       closure_reason: advisory === null ? null : stats.closureReasonOf(advisory),
       reported_at: advisory?.reportedAt ?? member.row.openedAt,
       month: stats.monthOf(advisory?.reportedAt ?? member.row.openedAt),
@@ -106,7 +119,7 @@ if (typeof require === 'function') {
       time_to_accept_ms: stats.durationOf(advisory, stats.draftAt),
       time_to_close_ms: stats.durationOf(advisory, stats.closeAt),
       time_to_publish_ms: stats.durationOf(advisory, stats.publishAt),
-      detail_fetched: advisory === null ? 'no' : 'yes',
+      page_loaded: advisory === null ? 'no' : 'yes',
       observed_at: stampOf(member.observedAt),
     };
   }
@@ -115,12 +128,12 @@ if (typeof require === 'function') {
    * Build CSV from the collected corpus in the page.
    *
    * @param {import('./corpus.js').Corpus} held
-   * @returns {string}
+   * @returns {Promise<string>}
    */
-  function toCsv(held) {
+  async function toCsv(held) {
     const lines = [line(COLUMNS)];
     for (const member of held.members) {
-      const row = rowOf(member);
+      const row = await rowOf(member);
       lines.push(line(COLUMNS.map((column) => row[column] ?? null)));
     }
     return `${lines.join(NEWLINE)}${NEWLINE}`;

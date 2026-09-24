@@ -813,7 +813,7 @@ test('a repository nothing has read says so and offers no export', async () => {
     one(doc, `#${statistics.ROOT_ID} button.bghsa-stats-export`).hasAttribute('disabled'),
     'there is nothing to export'
   );
-  assert.strictEqual(statistics.exportCsv(doc), null, 'and asking for one writes nothing');
+  assert.strictEqual(await statistics.exportCsv(doc), null, 'and asking for one writes nothing');
   assert.strictEqual(
     doc.querySelector(`#${statistics.ROOT_ID} [data-bghsa-count]`),
     null,
@@ -879,7 +879,7 @@ test('the export is the whole corpus, written here in the page', async () => {
       parts.push(...pieces);
     }
   }
-  const url = statistics.exportCsv(doc, {
+  const url = await statistics.exportCsv(doc, {
     Blob: /** @type {typeof globalThis.Blob} */ (/** @type {unknown} */ (FakeBlob)),
     createObjectURL: () => 'blob:https://github.com/statistics',
     revokeObjectURL: () => {},
@@ -890,12 +890,12 @@ test('the export is the whole corpus, written here in the page', async () => {
   assert.strictEqual(lines[0], csv.COLUMNS.join(','));
   assert.strictEqual(
     lines[1],
-    `${openId},Title ${openId},triage,high,,2026-03-02T00:00:00Z,2026-03,,,,,no,`,
+    `${openId},Title ${openId},triage,high,,,2026-03-02T00:00:00Z,2026-03,,,,,no,`,
     'the open half is in the file'
   );
   assert.ok(
     (lines[2] ?? '').startsWith(
-      `${doneId},Title ${doneId},closed,high,,2026-04-05T00:00:00Z,2026-04`
+      `${doneId},Title ${doneId},closed,high,no,,2026-04-05T00:00:00Z,2026-04`
     ),
     `the done half is in the file: ${lines[2]}`
   );
@@ -937,6 +937,7 @@ test('pressing the export writes the file', async () => {
       /** @type {unknown} */ (one(doc, `#${statistics.ROOT_ID} button.bghsa-stats-export`))
     );
     button.click();
+    await settle();
     assert.strictEqual(parts.length, 1, 'the press wrote no file');
     const lines = /** @type {string} */ (parts[0]).split('\r\n');
     assert.strictEqual(lines[0], csv.COLUMNS.join(','));
@@ -991,7 +992,11 @@ test('the numbers are not drawn under the repository the maintainer moved to', a
     null,
     "the previous repository's counts are drawn under the new page"
   );
-  assert.strictEqual(statistics.exportCsv(doc), null, 'and a file of them can still be asked for');
+  assert.strictEqual(
+    await statistics.exportCsv(doc),
+    null,
+    'and a file of them can still be asked for'
+  );
 });
 
 test('the first response shows no wait when the advisory without one is unread', async () => {

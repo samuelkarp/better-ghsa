@@ -603,7 +603,7 @@ if (typeof require === 'function') {
       exportControl.setAttribute('disabled', '');
     }
     exportControl.addEventListener('click', () => {
-      exportCsv(doc);
+      void exportCsv(doc);
     });
     header.append(exportControl);
     box.append(header);
@@ -625,16 +625,17 @@ if (typeof require === 'function') {
    *
    * @param {Document} doc
    * @param {import('../done/csv.js').DownloadOptions} [options]
-   * @returns {string | null} The download URL, or null if export is unavailable.
+   * @returns {Promise<string | null>} The download URL, or null if export is unavailable.
    */
-  function exportCsv(doc, options) {
+  async function exportCsv(doc, options) {
     const state = current(doc);
     if (state.ref === null) return null;
     const corpus = whole(state.halves);
     if (corpus.members.length === 0) return null;
     const csv = globalThis.bghsa.csv;
     const at = globalThis.bghsa.cache.now();
-    return csv.download(doc, csv.filenameFor(state.ref, at), csv.toCsv(corpus), options);
+    const name = csv.filenameFor(state.ref, at);
+    return csv.download(doc, name, await csv.toCsv(corpus), options);
   }
 
   const setHidden = globalThis.bghsa.table.setHidden;

@@ -597,6 +597,7 @@ if (typeof require === 'function') {
     yearsOf,
     NO_FINGERPRINTS,
     closureReasonOf,
+    scoringConfirmed,
     firstResponseAt,
     draftAt,
     closeAt,

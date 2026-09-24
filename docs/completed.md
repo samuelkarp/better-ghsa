@@ -269,9 +269,14 @@ closure.
 
 "Export CSV" in the statistics heading downloads the whole corpus as
 `{owner}-{repo}-advisories-{date}.csv`. Its columns are `ghsa_id`, `title`,
-`state`, `severity`, `closure_reason`, `reported_at`, `month`,
-`time_to_first_response_ms`, `time_to_accept_ms`, `time_to_close_ms`,
-`time_to_publish_ms`, `detail_fetched`, and `observed_at`. Durations use
-milliseconds; unavailable durations are blank. `time_to_first_response_ms`
+`state`, `severity`, `severity_confirmed`, `closure_reason`, `reported_at`,
+`month`, `time_to_first_response_ms`, `time_to_accept_ms`,
+`time_to_close_ms`, `time_to_publish_ms`, `page_loaded`, and `observed_at`.
+`severity_confirmed` is `yes` when a maintainer's scoring confirmation
+matches the current severity and vector, the same test "Severity" applies to
+drafts. It is `no` when the page is loaded and the scoring is unconfirmed, and
+blank when the page is not loaded. `page_loaded` is `yes` when the
+advisory's page is loaded and `no` otherwise. Durations use milliseconds;
+unavailable durations are blank. `time_to_first_response_ms`
 measures to the first response the statistics use. The browser generates the file
 locally without transmitting it.
