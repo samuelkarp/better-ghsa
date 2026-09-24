@@ -400,7 +400,7 @@ test('the four timings are named for what each measures', () => {
     [
       ['firstResponse', 'Time to first response', 'No response'],
       ['accept', 'Time to accept', 'Never accepted'],
-      ['close', 'Time to close', 'Never closed'],
+      ['close', 'Time to close', undefined],
       ['publish', 'Time to publish', 'Never published'],
     ]
   );
@@ -1001,7 +1001,7 @@ test('a corpus of one real advisory measures what its page carries', async () =>
   assert.deepStrictEqual(summary.timings.accept?.values, [3434 * 1000]);
   assert.deepStrictEqual(summary.timings.publish?.values, [10210000 * 1000]);
   assert.strictEqual(summary.timings.close?.counted, 0, 'a published advisory is not a closed one');
-  assert.strictEqual(summary.timings.close?.omitted, 1);
+  assert.strictEqual(summary.timings.close?.corpus, 0);
   // Comments were removed from the capture. Its first response is the
   // acceptance, the earliest maintainer action on its timeline.
   assert.deepStrictEqual(published.comments, []);

@@ -535,13 +535,13 @@ if (typeof require === 'function') {
 
   /**
    * @param {Document} doc
-   * @param {{ key: string, name: string, omission: string }} timing
+   * @param {{ key: string, name: string, omission?: string }} timing
    * @param {import('../done/stats.js').Timing} found
    * @returns {Element}
    */
   function buildTiming(doc, timing, found) {
     const { box, list } = timingBox(doc, timing, `${found.counted} of ${found.corpus}`, found);
-    if (found.omitted > 0) {
+    if (found.omitted > 0 && timing.omission !== undefined) {
       // Show the number of omitted durations and the event required to measure them.
       const line = buildLine(doc, timing.omission, String(found.omitted), '');
       line.classList.add('bghsa-stats-omitted');
@@ -557,13 +557,13 @@ if (typeof require === 'function') {
    * the longest current wait of an advisory still waiting for the event.
    *
    * @param {Document} doc
-   * @param {{ key: string, name: string, omission: string }} timing
+   * @param {{ key: string, name: string, omission?: string }} timing
    * @param {import('../done/stats.js').ReadTiming} found
    * @returns {Element}
    */
   function buildRead(doc, timing, found) {
     const { box, list } = timingBox(doc, timing, `${found.read} of ${found.corpus}`, found);
-    if (found.waiting !== null) {
+    if (found.waiting !== null && timing.omission !== undefined) {
       const line = buildLine(doc, timing.omission, formatDuration(found.waiting), '');
       line.classList.add('bghsa-stats-waiting');
       list.append(line);
@@ -596,7 +596,7 @@ if (typeof require === 'function') {
 
     const timings = element(doc, 'div', 'bghsa-stats-lists bghsa-stats-timings');
     for (const timing of globalThis.bghsa.stats.TIMINGS) {
-      if (timing.key === 'firstResponse' || timing.key === 'accept') {
+      if (timing.key === 'firstResponse' || timing.key === 'accept' || timing.key === 'close') {
         timings.append(buildRead(doc, timing, summary.timings[timing.key]));
         continue;
       }

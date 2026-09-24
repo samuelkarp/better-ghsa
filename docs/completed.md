@@ -216,10 +216,10 @@ Four sections measure elapsed time from the report: "Time to first response",
 "Time to accept", "Time to close", and "Time to publish". Each shows "Min",
 "Median", "Mean", and "Max".
 
-In "Time to close" and "Time to publish", unavailable durations are excluded
-from these calculations and counted in separate rows: "Never closed" and
-"Never published". They are neither estimated nor counted as zero. The sample
-size counts measured advisories out of all advisories.
+In "Time to publish", unavailable durations are excluded from these
+calculations and counted in a separate row, "Never published". They are
+neither estimated nor counted as zero. Its sample size counts measured
+advisories out of all advisories.
 
 A first response is the earlier of the earliest comment by an organization
 member and the earliest maintainer action on the timeline. The comments
@@ -246,6 +246,13 @@ count. It shows the longest current wait: among read triage advisories
 without an acceptance event, the longest time since the report. It appears
 only when there is such an advisory. Draft, published, and closed advisories
 without an acceptance event are outside this row.
+
+"Time to close" covers closed advisories only. Its sample size counts the read
+closed advisories out of all closed advisories: with 56 closed advisories, 5
+of them unread, it reads "51 of 56". "Min", "Median", "Mean", and "Max" cover
+the read closed advisories with a close on their timeline. A reporter who
+withdraws a report closes the advisory, and that close is measured like any
+other. No row appears beside the spread.
 
 Acceptance, closure, and publication use the first matching timeline event. An
 advisory that is closed, reopened, and closed again is measured to its first

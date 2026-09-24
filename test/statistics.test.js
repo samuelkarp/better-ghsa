@@ -1044,13 +1044,6 @@ test('each timing says how many it could not measure and why', async () => {
     '5 of 6',
     'the unread advisory shows only as the gap between the count and the total'
   );
-  assert.deepStrictEqual(timingLines(doc, 'close'), [
-    'Min 4d 0h',
-    'Median 6d 0h',
-    'Mean 6d 0h',
-    'Max 8d 0h',
-    'Never closed 4',
-  ]);
   assert.deepStrictEqual(timingLines(doc, 'publish'), [
     'Min 10d 0h',
     'Median 10d 0h',
@@ -1058,11 +1051,6 @@ test('each timing says how many it could not measure and why', async () => {
     'Max 10d 0h',
     'Never published 5',
   ]);
-  assert.strictEqual(
-    textOf(doc, `#${statistics.ROOT_ID} [data-bghsa-timing="close"] .bghsa-stats-meta`),
-    '2 of 6',
-    'and the header says what it measured, without the omission it now carries'
-  );
 });
 
 test('a timing that measured every advisory carries no omission row', async () => {
@@ -1095,11 +1083,6 @@ test('a timing that measured every advisory carries no omission row', async () =
     doc.querySelector(`#${statistics.ROOT_ID} [data-bghsa-timing="publish"] .bghsa-stats-omitted`),
     null,
     'nothing was left out, so there is nothing to say'
-  );
-  assert.deepStrictEqual(
-    timingLines(doc, 'close'),
-    ['Min —', 'Median —', 'Mean —', 'Max —', 'Never closed 1'],
-    'and a timing that measured nothing still says why'
   );
 });
 
@@ -1292,5 +1275,84 @@ test('the time to accept is over read advisories, and waits on triage', async ()
     timingLines(reopened.doc, 'accept'),
     ['Min 2d 0h', 'Median 2d 0h', 'Mean 2d 0h', 'Max 2d 0h'],
     'a triage advisory reopened after its acceptance is not waiting to be accepted'
+  );
+});
+
+test('the time to close is over closed advisories, with no row beside it', async () => {
+  const reported = '2026-03-02T00:00:00Z';
+  /**
+   * @param {string} who
+   * @param {string} day The day of March 2026 the advisory was closed.
+   * @returns {{ at: string, text: string }}
+   */
+  const closedOn = (who, day) => ({ at: `2026-03-${day}T00:00:00Z`, text: `${who} closed this` });
+  const ids = {
+    byMaintainer: ghsa('cls1'),
+    withdrawn: ghsa('cls2'),
+    silent: ghsa('cls3'),
+    unread: ghsa('cls4'),
+    reopened: ghsa('cls5'),
+    triageUnread: ghsa('cls6'),
+    published: ghsa('cls7'),
+    publishedUnread: ghsa('cls8'),
+  };
+  const { doc } = await repository({
+    owner: 'stats-close',
+    states: {
+      triage: [{ ghsaId: ids.reopened }, { ghsaId: ids.triageUnread }],
+      published: [{ ghsaId: ids.published }, { ghsaId: ids.publishedUnread }],
+      closed: [
+        { ghsaId: ids.byMaintainer },
+        { ghsaId: ids.withdrawn },
+        { ghsaId: ids.silent },
+        { ghsaId: ids.unread },
+      ],
+    },
+    reads: [
+      {
+        ghsaId: ids.byMaintainer,
+        state: 'Closed',
+        reportedAt: reported,
+        timeline: [closedOn('samuelkarp', '04')],
+      },
+      // The reporter withdrew it.
+      {
+        ghsaId: ids.withdrawn,
+        state: 'Closed',
+        reportedAt: reported,
+        timeline: [closedOn('prakleumas', '09')],
+      },
+      { ghsaId: ids.silent, state: 'Closed', reportedAt: reported },
+      // Closed and reopened, so outside the closed advisories.
+      {
+        ghsaId: ids.reopened,
+        state: 'Triage',
+        reportedAt: reported,
+        timeline: [closedOn('samuelkarp', '03')],
+      },
+      {
+        ghsaId: ids.published,
+        state: 'Published',
+        reportedAt: reported,
+        timeline: [closedOn('samuelkarp', '31')],
+      },
+    ],
+    crawl: ['open', 'done'],
+  });
+
+  statsToggle(doc).click();
+  await statistics.load(doc);
+
+  // Closed 2 and 7 days after the report.
+  assert.deepStrictEqual(timingLines(doc, 'close'), [
+    'Min 2d 0h',
+    'Median 4d 12h',
+    'Mean 4d 12h',
+    'Max 7d 0h',
+  ]);
+  assert.strictEqual(
+    textOf(doc, `#${statistics.ROOT_ID} [data-bghsa-timing="close"] .bghsa-stats-meta`),
+    '3 of 4',
+    'the unread closed advisory shows only as the gap between the count and the total'
   );
 });

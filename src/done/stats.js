@@ -48,7 +48,8 @@ if (typeof require === 'function') {
  * A timing whose sample size is the read advisories. `counted` holds the
  * measured advisories. `read` counts the members with detail data. `waiting`
  * is the longest time in milliseconds since the report among the read
- * advisories still waiting for the event, or null when there is none.
+ * advisories still waiting for the event, or null when there is none or the
+ * timing shows no wait.
  *
  * @typedef {Timing & { read: number, waiting: number | null }} ReadTiming
  */
@@ -65,8 +66,9 @@ if (typeof require === 'function') {
  *   reason tally covers read closed advisories; the open tally covers triage and draft
  *   advisories; the severity tally covers published advisories and drafts whose scoring
  *   a maintainer confirmed.
- * @property {{ firstResponse: ReadTiming, accept: ReadTiming } & Record<string, Timing>}
- *   timings Timings keyed by TIMINGS entries.
+ * @property {{ firstResponse: ReadTiming, accept: ReadTiming, close: ReadTiming }
+ *   & Record<string, Timing>} timings Timings keyed by TIMINGS entries. The close
+ *   timing covers closed advisories.
  * @property {Record<string, string>} uncomputed Unavailable metrics and their reasons.
  */
 
@@ -102,15 +104,14 @@ if (typeof require === 'function') {
   const PUBLISH_EVENT = /^published this\b/;
 
   /**
-   * Each timing names its missing-event condition for display beside the sample
-   * size.
+   * Each timing that shows a row beside its spread names that row.
    *
-   * @type {readonly { key: string, name: string, omission: string }[]}
+   * @type {readonly { key: string, name: string, omission?: string }[]}
    */
   const TIMINGS = [
     { key: 'firstResponse', name: 'Time to first response', omission: 'No response' },
     { key: 'accept', name: 'Time to accept', omission: 'Never accepted' },
-    { key: 'close', name: 'Time to close', omission: 'Never closed' },
+    { key: 'close', name: 'Time to close' },
     { key: 'publish', name: 'Time to publish', omission: 'Never published' },
   ];
 
@@ -454,7 +455,8 @@ if (typeof require === 'function') {
    * The first-response and acceptance timings count read advisories. The
    * first-response timing holds the longest wait, to `at`, of read open
    * advisories without a response; the acceptance timing holds the longest
-   * wait of read triage advisories without an acceptance event.
+   * wait of read triage advisories without an acceptance event. The close
+   * timing counts closed advisories and measures the read ones.
    *
    * @param {import('./corpus.js').Corpus} held
    * @param {number} at The current instant in milliseconds.
@@ -489,6 +491,7 @@ if (typeof require === 'function') {
     const drafts = [];
     /** @type {(number | null)[]} */
     const closes = [];
+    let closedRead = 0;
     /** @type {(number | null)[]} */
     const publishes = [];
 
@@ -507,7 +510,11 @@ if (typeof require === 'function') {
       if (named === PUBLISHED_STATE || named === CLOSED_STATE) outcomes.push(named);
       if (named === CLOSED_STATE) {
         if (advisory === null) unreadReasons += 1;
-        else reasons.push(closureReasonOf(advisory));
+        else {
+          reasons.push(closureReasonOf(advisory));
+          closedRead += 1;
+        }
+        closes.push(durationOf(advisory, closeAt));
       }
       if (named === PUBLISHED_STATE) severities.push(advisory?.severity ?? member.row.severity);
       if (named === DRAFT_STATE) {
@@ -519,7 +526,6 @@ if (typeof require === 'function') {
       months.push(monthOf(advisory?.reportedAt ?? member.row.openedAt));
       firstResponses.push(durationOf(advisory, firstResponseAt));
       drafts.push(durationOf(advisory, draftAt));
-      closes.push(durationOf(advisory, closeAt));
       publishes.push(durationOf(advisory, publishAt));
     }
 
@@ -527,6 +533,12 @@ if (typeof require === 'function') {
     const response = { ...timing(firstResponses, over), read, waiting };
     /** @type {ReadTiming} */
     const accept = { ...timing(drafts, over), read, waiting: acceptWaiting };
+    /** @type {ReadTiming} */
+    const close = {
+      ...timing(closes, { corpus: closes.length, unread: unreadReasons }),
+      read: closedRead,
+      waiting: null,
+    };
 
     return {
       at,
@@ -545,7 +557,7 @@ if (typeof require === 'function') {
       timings: {
         firstResponse: response,
         accept,
-        close: timing(closes, over),
+        close,
         publish: timing(publishes, over),
       },
       uncomputed: { ...UNCOMPUTED },

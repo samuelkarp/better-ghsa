@@ -452,8 +452,13 @@ report to now. The row is absent when there is no such advisory. Read draft,
 published, and closed advisories without an acceptance event are outside that
 row.
 
-Beside each other timing, show a row counting advisories without the required
-event: closure or publication. Display each omission as a label and count.
+Time to close covers closed advisories. It shows its sample size as the read
+closed advisories out of all closed advisories. Its spread covers read closed
+advisories with a close event. A reporter's withdrawal appears on the timeline
+as a close and is measured like any close. No row appears beside the spread.
+
+Beside the time to publish, show a row counting advisories without a
+publication. Display the omission as a label and count.
 
 Omit metrics whose required event is unobservable. Do not estimate them.
 
