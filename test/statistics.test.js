@@ -976,7 +976,7 @@ test('the numbers are not drawn under the repository the maintainer moved to', a
   assert.strictEqual(statistics.exportCsv(doc), null, 'and a file of them can still be asked for');
 });
 
-test('each timing says how many it could not measure and why', async () => {
+test('the first response shows no wait when the advisory without one is unread', async () => {
   const silent = ghsa('ssss');
   const acceptedOne = ghsa('tttt');
   const acceptedTwo = ghsa('uuuu');
@@ -1043,46 +1043,6 @@ test('each timing says how many it could not measure and why', async () => {
     textOf(doc, `#${statistics.ROOT_ID} [data-bghsa-timing="firstResponse"] .bghsa-stats-meta`),
     '5 of 6',
     'the unread advisory shows only as the gap between the count and the total'
-  );
-  assert.deepStrictEqual(timingLines(doc, 'publish'), [
-    'Min 10d 0h',
-    'Median 10d 0h',
-    'Mean 10d 0h',
-    'Max 10d 0h',
-    'Never published 5',
-  ]);
-});
-
-test('a timing that measured every advisory carries no omission row', async () => {
-  const published = ghsa('yyyy');
-  const { doc } = await repository({
-    owner: 'stats-omitted-none',
-    states: { published: [{ ghsaId: published }] },
-    showing: 'published',
-    reads: [
-      {
-        ghsaId: published,
-        state: 'Published',
-        reportedAt: '2026-03-02T00:00:00Z',
-        timeline: [{ at: '2026-03-04T00:00:00Z', text: 'samuelkarp published this' }],
-      },
-    ],
-    crawl: ['done'],
-  });
-
-  statsToggle(doc).click();
-  await statistics.load(doc);
-
-  assert.deepStrictEqual(timingLines(doc, 'publish'), [
-    'Min 2d 0h',
-    'Median 2d 0h',
-    'Mean 2d 0h',
-    'Max 2d 0h',
-  ]);
-  assert.strictEqual(
-    doc.querySelector(`#${statistics.ROOT_ID} [data-bghsa-timing="publish"] .bghsa-stats-omitted`),
-    null,
-    'nothing was left out, so there is nothing to say'
   );
 });
 
@@ -1354,5 +1314,123 @@ test('the time to close is over closed advisories, with no row beside it', async
     textOf(doc, `#${statistics.ROOT_ID} [data-bghsa-timing="close"] .bghsa-stats-meta`),
     '3 of 4',
     'the unread closed advisory shows only as the gap between the count and the total'
+  );
+});
+
+test('the time to publish is over published advisories, and waits on drafts', async () => {
+  const HOUR_MS = 60 * 60 * 1000;
+  const DAY_MS = 24 * HOUR_MS;
+  const now = clockAt;
+  const before = /** @param {number} ms */ (ms) => new Date(now - ms).toISOString();
+  const reported = '2026-03-02T00:00:00Z';
+  /**
+   * @param {string} day The day of March 2026 the advisory was published.
+   * @returns {{ at: string, text: string }}
+   */
+  const publishedOn = (day) => ({
+    at: `2026-03-${day}T00:00:00Z`,
+    text: 'samuelkarp published this',
+  });
+  const ids = {
+    sooner: ghsa('pub1'),
+    later: ghsa('pub2'),
+    silent: ghsa('pub3'),
+    unread: ghsa('pub4'),
+    longest: ghsa('pub5'),
+    shorter: ghsa('pub6'),
+    draftUnread: ghsa('pub7'),
+    triage: ghsa('pub8'),
+    closed: ghsa('pub9'),
+  };
+  const { doc } = await repository({
+    owner: 'stats-publish',
+    states: {
+      triage: [{ ghsaId: ids.triage }],
+      draft: [{ ghsaId: ids.longest }, { ghsaId: ids.shorter }, { ghsaId: ids.draftUnread }],
+      published: [
+        { ghsaId: ids.sooner },
+        { ghsaId: ids.later },
+        { ghsaId: ids.silent },
+        { ghsaId: ids.unread },
+      ],
+      closed: [{ ghsaId: ids.closed }],
+    },
+    reads: [
+      {
+        ghsaId: ids.sooner,
+        state: 'Published',
+        reportedAt: reported,
+        timeline: [publishedOn('06')],
+      },
+      {
+        ghsaId: ids.later,
+        state: 'Published',
+        reportedAt: reported,
+        timeline: [publishedOn('12')],
+      },
+      { ghsaId: ids.silent, state: 'Published', reportedAt: reported },
+      // The crawl moves the clock on by seconds, well inside the half hour.
+      {
+        ghsaId: ids.longest,
+        state: 'Draft',
+        reportedAt: before(12 * DAY_MS + 7 * HOUR_MS + 30 * 60 * 1000),
+      },
+      { ghsaId: ids.shorter, state: 'Draft', reportedAt: before(3 * DAY_MS) },
+      // Unpublished and waiting longer than the drafts, but not drafts.
+      { ghsaId: ids.triage, state: 'Triage', reportedAt: before(60 * DAY_MS) },
+      // The population is by state, so this event is outside it.
+      {
+        ghsaId: ids.closed,
+        state: 'Closed',
+        reportedAt: reported,
+        timeline: [publishedOn('03')],
+      },
+    ],
+    crawl: ['open', 'done'],
+  });
+
+  statsToggle(doc).click();
+  await statistics.load(doc);
+
+  // Published 4 and 10 days after the report.
+  assert.deepStrictEqual(timingLines(doc, 'publish'), [
+    'Min 4d 0h',
+    'Median 7d 0h',
+    'Mean 7d 0h',
+    'Max 10d 0h',
+    'Never published 12d 7h',
+  ]);
+  assert.strictEqual(
+    textOf(doc, `#${statistics.ROOT_ID} [data-bghsa-timing="publish"] .bghsa-stats-meta`),
+    '3 of 4',
+    'the unread published advisory shows only as the gap between the count and the total'
+  );
+
+  const none = await repository({
+    owner: 'stats-publish-none',
+    states: {
+      triage: [{ ghsaId: ghsa('pbn1') }],
+      draft: [{ ghsaId: ghsa('pbn2') }],
+      published: [{ ghsaId: ghsa('pbn3') }],
+      closed: [{ ghsaId: ghsa('pbn4') }],
+    },
+    reads: [
+      { ghsaId: ghsa('pbn1'), state: 'Triage', reportedAt: before(60 * DAY_MS) },
+      {
+        ghsaId: ghsa('pbn3'),
+        state: 'Published',
+        reportedAt: reported,
+        timeline: [publishedOn('04')],
+      },
+      { ghsaId: ghsa('pbn4'), state: 'Closed', reportedAt: before(80 * DAY_MS) },
+    ],
+    crawl: ['open', 'done'],
+  });
+  statsToggle(none.doc).click();
+  await statistics.load(none.doc);
+  assert.deepStrictEqual(
+    timingLines(none.doc, 'publish'),
+    ['Min 2d 0h', 'Median 2d 0h', 'Mean 2d 0h', 'Max 2d 0h'],
+    'the only draft is unread, so nothing is shown waiting'
   );
 });

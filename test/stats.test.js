@@ -467,7 +467,7 @@ test('time from report to close is a timing, and nothing is left uncomputed', as
   ]);
   assert.deepStrictEqual(summary.timings.close?.values, [10904 * 1000]);
   assert.strictEqual(
-    summary.timings.close?.omitted,
+    summary.timings.close?.counted,
     1,
     'the advisory with no close event contributes nothing, and not a zero'
   );
@@ -476,7 +476,6 @@ test('time from report to close is a timing, and nothing is left uncomputed', as
     0,
     'and neither of the two closed advisories was published'
   );
-  assert.strictEqual(summary.timings.publish?.omitted, 2);
   assert.deepStrictEqual(summary.uncomputed, {});
   assert.deepStrictEqual(
     stats.TIMINGS.map((entry) => entry.key),
@@ -503,7 +502,6 @@ test('an advisory the event is not observable on contributes to no timing', asyn
   const first = summary.timings.firstResponse;
   assert.deepStrictEqual(first?.values, [60 * 60 * 1000]);
   assert.strictEqual(first?.counted, 1);
-  assert.strictEqual(first?.omitted, 2, 'the silent advisory and the unread one');
   assert.strictEqual(first?.corpus, 3);
   assert.strictEqual(first?.unread, 1);
   assert.strictEqual(first?.mean, 60 * 60 * 1000, 'the mean is over what was measured');
@@ -592,7 +590,6 @@ test('a timing reports the spread of what it measured', () => {
   const held = stats.timing([300, 100, null, 200], over);
   assert.deepStrictEqual(held.values, [100, 200, 300]);
   assert.strictEqual(held.counted, 3);
-  assert.strictEqual(held.omitted, 1);
   assert.strictEqual(held.min, 100);
   assert.strictEqual(held.median, 200);
   assert.strictEqual(held.max, 300);

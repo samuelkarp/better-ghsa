@@ -515,43 +515,6 @@ if (typeof require === 'function') {
   }
 
   /**
-   * @param {Document} doc
-   * @param {{ key: string, name: string }} timing
-   * @param {string} meta The sample size.
-   * @param {import('../done/stats.js').Timing} found
-   * @returns {{ box: Element, list: Element }} The box holding the spread, and
-   *   the list to add rows to before appending it.
-   */
-  function timingBox(doc, timing, meta, found) {
-    const box = element(doc, 'div', 'Box mb-3 bghsa-stats-list');
-    box.setAttribute('data-bghsa-timing', timing.key);
-    box.append(buildHeader(doc, timing.name, meta));
-    const list = element(doc, 'ul', 'bghsa-stats-rows');
-    for (const each of SPREAD) {
-      list.append(buildLine(doc, each.name, formatDuration(found[each.key]), ''));
-    }
-    return { box, list };
-  }
-
-  /**
-   * @param {Document} doc
-   * @param {{ key: string, name: string, omission?: string }} timing
-   * @param {import('../done/stats.js').Timing} found
-   * @returns {Element}
-   */
-  function buildTiming(doc, timing, found) {
-    const { box, list } = timingBox(doc, timing, `${found.counted} of ${found.corpus}`, found);
-    if (found.omitted > 0 && timing.omission !== undefined) {
-      // Show the number of omitted durations and the event required to measure them.
-      const line = buildLine(doc, timing.omission, String(found.omitted), '');
-      line.classList.add('bghsa-stats-omitted');
-      list.append(line);
-    }
-    box.append(list);
-    return box;
-  }
-
-  /**
    * The sample size counts read advisories, and unread ones only as its
    * shortfall. The spread covers measured advisories. The omission row holds
    * the longest current wait of an advisory still waiting for the event.
@@ -561,8 +524,14 @@ if (typeof require === 'function') {
    * @param {import('../done/stats.js').ReadTiming} found
    * @returns {Element}
    */
-  function buildRead(doc, timing, found) {
-    const { box, list } = timingBox(doc, timing, `${found.read} of ${found.corpus}`, found);
+  function buildTiming(doc, timing, found) {
+    const box = element(doc, 'div', 'Box mb-3 bghsa-stats-list');
+    box.setAttribute('data-bghsa-timing', timing.key);
+    box.append(buildHeader(doc, timing.name, `${found.read} of ${found.corpus}`));
+    const list = element(doc, 'ul', 'bghsa-stats-rows');
+    for (const each of SPREAD) {
+      list.append(buildLine(doc, each.name, formatDuration(found[each.key]), ''));
+    }
     if (found.waiting !== null && timing.omission !== undefined) {
       const line = buildLine(doc, timing.omission, formatDuration(found.waiting), '');
       line.classList.add('bghsa-stats-waiting');
@@ -596,13 +565,7 @@ if (typeof require === 'function') {
 
     const timings = element(doc, 'div', 'bghsa-stats-lists bghsa-stats-timings');
     for (const timing of globalThis.bghsa.stats.TIMINGS) {
-      if (timing.key === 'firstResponse' || timing.key === 'accept' || timing.key === 'close') {
-        timings.append(buildRead(doc, timing, summary.timings[timing.key]));
-        continue;
-      }
-      const found = summary.timings[timing.key];
-      if (found === undefined) continue;
-      timings.append(buildTiming(doc, timing, found));
+      timings.append(buildTiming(doc, timing, summary.timings[timing.key]));
     }
     parts.push(timings);
 

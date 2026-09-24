@@ -35,7 +35,6 @@ if (typeof require === 'function') {
  * @typedef {object} Timing
  * @property {number[]} values Durations sorted ascending.
  * @property {number} counted
- * @property {number} omitted
  * @property {number} corpus The number of members in this sample.
  * @property {number} unread The number of members without detail data.
  * @property {number | null} min
@@ -55,6 +54,10 @@ if (typeof require === 'function') {
  */
 
 /**
+ * @typedef {'firstResponse' | 'accept' | 'close' | 'publish'} TimingKey
+ */
+
+/**
  * @typedef {object} Summary
  * @property {number} at The instant in milliseconds the summary is computed against.
  * @property {number} corpus The number of members in this sample.
@@ -66,9 +69,9 @@ if (typeof require === 'function') {
  *   reason tally covers read closed advisories; the open tally covers triage and draft
  *   advisories; the severity tally covers published advisories and drafts whose scoring
  *   a maintainer confirmed.
- * @property {{ firstResponse: ReadTiming, accept: ReadTiming, close: ReadTiming }
- *   & Record<string, Timing>} timings Timings keyed by TIMINGS entries. The close
- *   timing covers closed advisories.
+ * @property {Record<TimingKey, ReadTiming>} timings Timings keyed by TIMINGS
+ *   entries. The close timing covers closed advisories and the publish timing
+ *   published advisories.
  * @property {Record<string, string>} uncomputed Unavailable metrics and their reasons.
  */
 
@@ -106,7 +109,7 @@ if (typeof require === 'function') {
   /**
    * Each timing that shows a row beside its spread names that row.
    *
-   * @type {readonly { key: string, name: string, omission?: string }[]}
+   * @type {readonly { key: TimingKey, name: string, omission?: string }[]}
    */
   const TIMINGS = [
     { key: 'firstResponse', name: 'Time to first response', omission: 'No response' },
@@ -428,7 +431,6 @@ if (typeof require === 'function') {
     return {
       values: held,
       counted,
-      omitted: over.corpus - counted,
       corpus: over.corpus,
       unread: over.unread,
       min: counted === 0 ? null : /** @type {number} */ (held[0]),
@@ -456,7 +458,9 @@ if (typeof require === 'function') {
    * first-response timing holds the longest wait, to `at`, of read open
    * advisories without a response; the acceptance timing holds the longest
    * wait of read triage advisories without an acceptance event. The close
-   * timing counts closed advisories and measures the read ones.
+   * timing counts closed advisories and measures the read ones. The publish
+   * timing counts published advisories, measures the read ones, and holds the
+   * longest wait of read drafts.
    *
    * @param {import('./corpus.js').Corpus} held
    * @param {number} at The current instant in milliseconds.
@@ -494,6 +498,10 @@ if (typeof require === 'function') {
     let closedRead = 0;
     /** @type {(number | null)[]} */
     const publishes = [];
+    let publishedRead = 0;
+    let publishedUnread = 0;
+    /** @type {number | null} */
+    let publishWaiting = null;
 
     for (const member of held.members) {
       const advisory = member.advisory;
@@ -516,7 +524,15 @@ if (typeof require === 'function') {
         }
         closes.push(durationOf(advisory, closeAt));
       }
-      if (named === PUBLISHED_STATE) severities.push(advisory?.severity ?? member.row.severity);
+      if (named === PUBLISHED_STATE) {
+        severities.push(advisory?.severity ?? member.row.severity);
+        if (advisory === null) publishedUnread += 1;
+        else publishedRead += 1;
+        publishes.push(durationOf(advisory, publishAt));
+      }
+      if (named === DRAFT_STATE && advisory !== null) {
+        publishWaiting = longer(publishWaiting, sinceReport(advisory, at));
+      }
       if (named === DRAFT_STATE) {
         if (advisory === null) unreadSeverities += 1;
         else if (await scoringConfirmed(advisory)) {
@@ -526,7 +542,6 @@ if (typeof require === 'function') {
       months.push(monthOf(advisory?.reportedAt ?? member.row.openedAt));
       firstResponses.push(durationOf(advisory, firstResponseAt));
       drafts.push(durationOf(advisory, draftAt));
-      publishes.push(durationOf(advisory, publishAt));
     }
 
     /** @type {ReadTiming} */
@@ -538,6 +553,12 @@ if (typeof require === 'function') {
       ...timing(closes, { corpus: closes.length, unread: unreadReasons }),
       read: closedRead,
       waiting: null,
+    };
+    /** @type {ReadTiming} */
+    const publish = {
+      ...timing(publishes, { corpus: publishes.length, unread: publishedUnread }),
+      read: publishedRead,
+      waiting: publishWaiting,
     };
 
     return {
@@ -558,7 +579,7 @@ if (typeof require === 'function') {
         firstResponse: response,
         accept,
         close,
-        publish: timing(publishes, over),
+        publish,
       },
       uncomputed: { ...UNCOMPUTED },
     };

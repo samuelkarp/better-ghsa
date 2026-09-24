@@ -457,8 +457,13 @@ closed advisories out of all closed advisories. Its spread covers read closed
 advisories with a close event. A reporter's withdrawal appears on the timeline
 as a close and is measured like any close. No row appears beside the spread.
 
-Beside the time to publish, show a row counting advisories without a
-publication. Display the omission as a label and count.
+Time to publish covers published advisories. It shows its sample size as the
+read published advisories out of all published advisories. Its spread covers
+read published advisories with a publish event. Beside the spread, a
+never-published row shows the longest current wait: among read draft
+advisories, the longest time from the report to now. The row is absent when
+there is no such advisory. Read triage and closed advisories are outside that
+row.
 
 Omit metrics whose required event is unobservable. Do not estimate them.
 
