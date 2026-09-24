@@ -444,9 +444,16 @@ without a response, the longest time from the report to now. The row is absent
 when there is no such advisory. Read completed advisories without a response
 are outside that row.
 
+Time to accept shows its sample size as the read advisories out of all
+advisories. Its spread covers read advisories with an acceptance event. Beside
+the spread, a never-accepted row shows the longest current wait: among read
+triage advisories without an acceptance event, the longest time from the
+report to now. The row is absent when there is no such advisory. Read draft,
+published, and closed advisories without an acceptance event are outside that
+row.
+
 Beside each other timing, show a row counting advisories without the required
-event: acceptance, closure, or publication. Display each omission as a label
-and count.
+event: closure or publication. Display each omission as a label and count.
 
 Omit metrics whose required event is unobservable. Do not estimate them.
 

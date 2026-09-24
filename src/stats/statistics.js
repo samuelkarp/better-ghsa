@@ -553,15 +553,15 @@ if (typeof require === 'function') {
 
   /**
    * The sample size counts read advisories, and unread ones only as its
-   * shortfall. The spread covers answered advisories. The omission row holds
-   * the longest current wait of an open advisory without a response.
+   * shortfall. The spread covers measured advisories. The omission row holds
+   * the longest current wait of an advisory still waiting for the event.
    *
    * @param {Document} doc
    * @param {{ key: string, name: string, omission: string }} timing
-   * @param {import('../done/stats.js').ResponseTiming} found
+   * @param {import('../done/stats.js').ReadTiming} found
    * @returns {Element}
    */
-  function buildResponse(doc, timing, found) {
+  function buildRead(doc, timing, found) {
     const { box, list } = timingBox(doc, timing, `${found.read} of ${found.corpus}`, found);
     if (found.waiting !== null) {
       const line = buildLine(doc, timing.omission, formatDuration(found.waiting), '');
@@ -596,8 +596,8 @@ if (typeof require === 'function') {
 
     const timings = element(doc, 'div', 'bghsa-stats-lists bghsa-stats-timings');
     for (const timing of globalThis.bghsa.stats.TIMINGS) {
-      if (timing.key === 'firstResponse') {
-        timings.append(buildResponse(doc, timing, summary.timings.firstResponse));
+      if (timing.key === 'firstResponse' || timing.key === 'accept') {
+        timings.append(buildRead(doc, timing, summary.timings[timing.key]));
         continue;
       }
       const found = summary.timings[timing.key];

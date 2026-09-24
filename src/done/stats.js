@@ -45,12 +45,12 @@ if (typeof require === 'function') {
  */
 
 /**
- * The first-response timing. `counted` holds the answered advisories, those
- * with a response at or after the report time. `read` counts the members with
- * detail data. `waiting` is the longest time in milliseconds since the report
- * among read open advisories without a response, or null when there is none.
+ * A timing whose sample size is the read advisories. `counted` holds the
+ * measured advisories. `read` counts the members with detail data. `waiting`
+ * is the longest time in milliseconds since the report among the read
+ * advisories still waiting for the event, or null when there is none.
  *
- * @typedef {Timing & { read: number, waiting: number | null }} ResponseTiming
+ * @typedef {Timing & { read: number, waiting: number | null }} ReadTiming
  */
 
 /**
@@ -65,8 +65,8 @@ if (typeof require === 'function') {
  *   reason tally covers read closed advisories; the open tally covers triage and draft
  *   advisories; the severity tally covers published advisories and drafts whose scoring
  *   a maintainer confirmed.
- * @property {{ firstResponse: ResponseTiming } & Record<string, Timing>} timings Timings
- *   keyed by TIMINGS entries.
+ * @property {{ firstResponse: ReadTiming, accept: ReadTiming } & Record<string, Timing>}
+ *   timings Timings keyed by TIMINGS entries.
  * @property {Record<string, string>} uncomputed Unavailable metrics and their reasons.
  */
 
@@ -84,6 +84,8 @@ if (typeof require === 'function') {
   const CLOSED_STATE = 'closed';
 
   const DRAFT_STATE = 'draft';
+
+  const TRIAGE_STATE = 'triage';
 
   const OPEN_STATES = globalThis.bghsa.parseList.OPEN_STATES;
 
@@ -243,15 +245,35 @@ if (typeof require === 'function') {
   /**
    * @param {import('../common/parse-detail.js').ParsedDetail} advisory
    * @param {number} at The current instant in milliseconds.
+   * @returns {number | null} Milliseconds from report to `at`, or null when the
+   *   report time is missing, invalid, or after `at`.
+   */
+  function sinceReport(advisory, at) {
+    const from = instantOf(advisory.reportedAt);
+    if (from === null || from > at) return null;
+    return at - from;
+  }
+
+  /**
+   * @param {import('../common/parse-detail.js').ParsedDetail} advisory
+   * @param {number} at The current instant in milliseconds.
    * @returns {number | null} Milliseconds from report to `at` for an advisory
    *   without a response, or null when it has one or its report time is
    *   missing, invalid, or after `at`.
    */
   function waitOf(advisory, at) {
-    const from = instantOf(advisory.reportedAt);
-    if (from === null || from > at) return null;
     if (firstResponseAt(advisory) !== null) return null;
-    return at - from;
+    return sinceReport(advisory, at);
+  }
+
+  /**
+   * @param {number | null} longest
+   * @param {number | null} wait
+   * @returns {number | null} The longer of the two, where null is none.
+   */
+  function longer(longest, wait) {
+    if (wait === null) return longest;
+    return longest === null || wait > longest ? wait : longest;
   }
 
   /**
@@ -429,8 +451,10 @@ if (typeof require === 'function') {
    * maintainer confirmed. Unread drafts are outside its corpus and counted in
    * its `unread`.
    *
-   * The first-response timing also counts read advisories and holds the
-   * longest wait, to `at`, of read open advisories without a response.
+   * The first-response and acceptance timings count read advisories. The
+   * first-response timing holds the longest wait, to `at`, of read open
+   * advisories without a response; the acceptance timing holds the longest
+   * wait of read triage advisories without an acceptance event.
    *
    * @param {import('./corpus.js').Corpus} held
    * @param {number} at The current instant in milliseconds.
@@ -459,6 +483,8 @@ if (typeof require === 'function') {
     let read = 0;
     /** @type {number | null} */
     let waiting = null;
+    /** @type {number | null} */
+    let acceptWaiting = null;
     /** @type {(number | null)[]} */
     const drafts = [];
     /** @type {(number | null)[]} */
@@ -472,10 +498,10 @@ if (typeof require === 'function') {
       const named = state === null ? null : state.toLowerCase();
       if (named !== null && OPEN_STATES.includes(named)) {
         opens.push(named);
-        if (advisory !== null) {
-          const wait = waitOf(advisory, at);
-          if (wait !== null && (waiting === null || wait > waiting)) waiting = wait;
-        }
+        if (advisory !== null) waiting = longer(waiting, waitOf(advisory, at));
+      }
+      if (named === TRIAGE_STATE && advisory !== null && draftAt(advisory) === null) {
+        acceptWaiting = longer(acceptWaiting, sinceReport(advisory, at));
       }
       if (advisory !== null) read += 1;
       if (named === PUBLISHED_STATE || named === CLOSED_STATE) outcomes.push(named);
@@ -497,8 +523,10 @@ if (typeof require === 'function') {
       publishes.push(durationOf(advisory, publishAt));
     }
 
-    /** @type {ResponseTiming} */
+    /** @type {ReadTiming} */
     const response = { ...timing(firstResponses, over), read, waiting };
+    /** @type {ReadTiming} */
+    const accept = { ...timing(drafts, over), read, waiting: acceptWaiting };
 
     return {
       at,
@@ -516,7 +544,7 @@ if (typeof require === 'function') {
       },
       timings: {
         firstResponse: response,
-        accept: timing(drafts, over),
+        accept,
         close: timing(closes, over),
         publish: timing(publishes, over),
       },

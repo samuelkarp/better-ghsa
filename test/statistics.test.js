@@ -449,12 +449,12 @@ test('the statistics are over the whole corpus, open and done', async () => {
 
   assert.deepStrictEqual(
     timingLines(doc, 'accept'),
-    ['Min 2d 0h', 'Median 2d 0h', 'Mean 2d 0h', 'Max 2d 0h', 'Never accepted 4'],
+    ['Min 2d 0h', 'Median 2d 0h', 'Mean 2d 0h', 'Max 2d 0h'],
     'the open half contributes its timings'
   );
   assert.strictEqual(
     textOf(doc, `#${statistics.ROOT_ID} [data-bghsa-timing="accept"] .bghsa-stats-meta`),
-    '1 of 5'
+    '3 of 5'
   );
 });
 
@@ -1044,13 +1044,6 @@ test('each timing says how many it could not measure and why', async () => {
     '5 of 6',
     'the unread advisory shows only as the gap between the count and the total'
   );
-  assert.deepStrictEqual(timingLines(doc, 'accept'), [
-    'Min 1d 0h',
-    'Median 2d 0h',
-    'Mean 2d 0h',
-    'Max 3d 0h',
-    'Never accepted 3',
-  ]);
   assert.deepStrictEqual(timingLines(doc, 'close'), [
     'Min 4d 0h',
     'Median 6d 0h',
@@ -1073,51 +1066,42 @@ test('each timing says how many it could not measure and why', async () => {
 });
 
 test('a timing that measured every advisory carries no omission row', async () => {
-  const first = ghsa('yyyy');
-  const second = ghsa('zzzz');
-  const reported = '2026-03-02T00:00:00Z';
+  const published = ghsa('yyyy');
   const { doc } = await repository({
     owner: 'stats-omitted-none',
-    states: { draft: [{ ghsaId: first }, { ghsaId: second }] },
-    showing: 'draft',
+    states: { published: [{ ghsaId: published }] },
+    showing: 'published',
     reads: [
       {
-        ghsaId: first,
-        state: 'Draft',
-        reportedAt: reported,
-        timeline: [{ at: '2026-03-03T00:00:00Z', text: 'samuelkarp accepted this report' }],
-      },
-      {
-        ghsaId: second,
-        state: 'Draft',
-        reportedAt: reported,
-        timeline: [{ at: '2026-03-03T00:00:00Z', text: 'samuelkarp accepted this report' }],
+        ghsaId: published,
+        state: 'Published',
+        reportedAt: '2026-03-02T00:00:00Z',
+        timeline: [{ at: '2026-03-04T00:00:00Z', text: 'samuelkarp published this' }],
       },
     ],
-    crawl: ['open'],
+    crawl: ['done'],
   });
 
   statsToggle(doc).click();
   await statistics.load(doc);
 
-  assert.deepStrictEqual(timingLines(doc, 'accept'), [
-    'Min 1d 0h',
-    'Median 1d 0h',
-    'Mean 1d 0h',
-    'Max 1d 0h',
+  assert.deepStrictEqual(timingLines(doc, 'publish'), [
+    'Min 2d 0h',
+    'Median 2d 0h',
+    'Mean 2d 0h',
+    'Max 2d 0h',
   ]);
   assert.strictEqual(
-    doc.querySelector(`#${statistics.ROOT_ID} [data-bghsa-timing="accept"] .bghsa-stats-omitted`),
+    doc.querySelector(`#${statistics.ROOT_ID} [data-bghsa-timing="publish"] .bghsa-stats-omitted`),
     null,
     'nothing was left out, so there is nothing to say'
   );
   assert.deepStrictEqual(
-    timingLines(doc, 'publish'),
-    ['Min —', 'Median —', 'Mean —', 'Max —', 'Never published 2'],
+    timingLines(doc, 'close'),
+    ['Min —', 'Median —', 'Mean —', 'Max —', 'Never closed 1'],
     'and a timing that measured nothing still says why'
   );
 });
-
 
 test('the first response shows the longest wait of an open advisory without one', async () => {
   const HOUR_MS = 60 * 60 * 1000;
@@ -1175,5 +1159,138 @@ test('the first response shows the longest wait of an open advisory without one'
   assert.strictEqual(
     textOf(doc, `#${statistics.ROOT_ID} [data-bghsa-timing="firstResponse"] .bghsa-stats-meta`),
     '4 of 5'
+  );
+});
+
+test('the time to accept is over read advisories, and waits on triage', async () => {
+  const HOUR_MS = 60 * 60 * 1000;
+  const DAY_MS = 24 * HOUR_MS;
+  const now = clockAt;
+  const before = /** @param {number} ms */ (ms) => new Date(now - ms).toISOString();
+  const reported = '2026-03-02T00:00:00Z';
+  /**
+   * @param {string} day The day of March 2026 the report was accepted.
+   * @returns {{ at: string, text: string }}
+   */
+  const acceptedOn = (day) => ({
+    at: `2026-03-${day}T00:00:00Z`,
+    text: 'samuelkarp accepted this report',
+  });
+  const ids = {
+    longest: ghsa('acc1'),
+    shorter: ghsa('acc2'),
+    triageUnread: ghsa('acc3'),
+    draft: ghsa('acc4'),
+    draftUnaccepted: ghsa('acc5'),
+    published: ghsa('acc6'),
+    publishedUnaccepted: ghsa('acc7'),
+    closed: ghsa('acc8'),
+    closedUnaccepted: ghsa('acc9'),
+    closedUnread: ghsa('accx'),
+  };
+  const { doc } = await repository({
+    owner: 'stats-accept',
+    states: {
+      triage: [{ ghsaId: ids.longest }, { ghsaId: ids.shorter }, { ghsaId: ids.triageUnread }],
+      draft: [{ ghsaId: ids.draft }, { ghsaId: ids.draftUnaccepted }],
+      published: [{ ghsaId: ids.published }, { ghsaId: ids.publishedUnaccepted }],
+      closed: [
+        { ghsaId: ids.closed },
+        { ghsaId: ids.closedUnaccepted },
+        { ghsaId: ids.closedUnread },
+      ],
+    },
+    reads: [
+      // The crawl moves the clock on by seconds, well inside the half hour.
+      {
+        ghsaId: ids.longest,
+        state: 'Triage',
+        reportedAt: before(20 * DAY_MS + 5 * HOUR_MS + 30 * 60 * 1000),
+      },
+      { ghsaId: ids.shorter, state: 'Triage', reportedAt: before(7 * DAY_MS) },
+      { ghsaId: ids.draft, state: 'Draft', reportedAt: reported, timeline: [acceptedOn('03')] },
+      // Never accepted and waiting longer than the triage advisories, but not in triage.
+      { ghsaId: ids.draftUnaccepted, state: 'Draft', reportedAt: before(90 * DAY_MS) },
+      {
+        ghsaId: ids.published,
+        state: 'Published',
+        reportedAt: reported,
+        timeline: [acceptedOn('05')],
+      },
+      { ghsaId: ids.publishedUnaccepted, state: 'Published', reportedAt: before(100 * DAY_MS) },
+      { ghsaId: ids.closed, state: 'Closed', reportedAt: reported, timeline: [acceptedOn('08')] },
+      { ghsaId: ids.closedUnaccepted, state: 'Closed', reportedAt: before(200 * DAY_MS) },
+    ],
+    crawl: ['open', 'done'],
+  });
+
+  statsToggle(doc).click();
+  await statistics.load(doc);
+
+  // Accepted 1, 3, and 6 days after the report; the mean is 10/3 days.
+  assert.deepStrictEqual(timingLines(doc, 'accept'), [
+    'Min 1d 0h',
+    'Median 3d 0h',
+    'Mean 3d 8h',
+    'Max 6d 0h',
+    'Never accepted 20d 5h',
+  ]);
+  assert.strictEqual(
+    textOf(doc, `#${statistics.ROOT_ID} [data-bghsa-timing="accept"] .bghsa-stats-meta`),
+    '8 of 10',
+    'the two unread advisories show only as the gap between the count and the total'
+  );
+
+  const none = await repository({
+    owner: 'stats-accept-none',
+    states: {
+      triage: [{ ghsaId: ghsa('acn1') }],
+      draft: [{ ghsaId: ghsa('acn2') }],
+      published: [{ ghsaId: ghsa('acn3') }],
+      closed: [{ ghsaId: ghsa('acn4') }],
+    },
+    reads: [
+      { ghsaId: ghsa('acn2'), state: 'Draft', reportedAt: before(90 * DAY_MS) },
+      {
+        ghsaId: ghsa('acn3'),
+        state: 'Published',
+        reportedAt: reported,
+        timeline: [acceptedOn('03')],
+      },
+      { ghsaId: ghsa('acn4'), state: 'Closed', reportedAt: before(200 * DAY_MS) },
+    ],
+    crawl: ['open', 'done'],
+  });
+  statsToggle(none.doc).click();
+  await statistics.load(none.doc);
+  assert.deepStrictEqual(
+    timingLines(none.doc, 'accept'),
+    ['Min 1d 0h', 'Median 1d 0h', 'Mean 1d 0h', 'Max 1d 0h'],
+    'the only triage advisory is unread, so nothing is shown waiting'
+  );
+
+  const reopened = await repository({
+    owner: 'stats-accept-reopened',
+    states: { triage: [{ ghsaId: ghsa('acr1') }] },
+    reads: [
+      {
+        ghsaId: ghsa('acr1'),
+        state: 'Triage',
+        reportedAt: reported,
+        timeline: [
+          acceptedOn('04'),
+          { at: '2026-03-06T00:00:00Z', text: 'samuelkarp closed this' },
+          { at: '2026-03-07T00:00:00Z', text: 'samuelkarp reopened this' },
+        ],
+      },
+    ],
+    crawl: ['open', 'done'],
+  });
+  statsToggle(reopened.doc).click();
+  await statistics.load(reopened.doc);
+  assert.deepStrictEqual(
+    timingLines(reopened.doc, 'accept'),
+    ['Min 2d 0h', 'Median 2d 0h', 'Mean 2d 0h', 'Max 2d 0h'],
+    'a triage advisory reopened after its acceptance is not waiting to be accepted'
   );
 });

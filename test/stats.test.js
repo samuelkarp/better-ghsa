@@ -511,7 +511,6 @@ test('an advisory the event is not observable on contributes to no timing', asyn
 
   const draft = summary.timings.accept;
   assert.deepStrictEqual(draft?.values, [2 * 60 * 60 * 1000]);
-  assert.strictEqual(draft?.omitted, 2);
 });
 
 test('the first response counts read advisories and holds the longest open wait', async () => {
