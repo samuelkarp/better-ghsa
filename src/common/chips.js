@@ -12,7 +12,7 @@ if (typeof require === 'function') {
  *
  * @typedef {object} Chip
  * @property {string} text
- * @property {'attention' | 'danger' | 'done' | 'success'} [tone]
+ * @property {'attention' | 'danger' | 'done' | 'success' | 'success-muted'} [tone]
  */
 
 /**
@@ -119,6 +119,9 @@ if (typeof require === 'function') {
     '.bghsa-tone-danger { color: var(--fgColor-default, currentColor);' +
       ' background-color: var(--bgColor-danger-muted, rgba(207, 34, 46, 0.2));' +
       ' border-color: var(--borderColor-danger-emphasis, #cf222e); }',
+    '.bghsa-tone-success-muted { color: var(--fgColor-default, currentColor);' +
+      ' background-color: var(--bgColor-success-muted, rgba(74, 194, 107, 0.2));' +
+      ' border-color: var(--borderColor-success-emphasis, #1a7f37); }',
     '.bghsa-tone-done { color: var(--fgColor-onEmphasis, #ffffff);' +
       ' background-color: var(--bgColor-done-emphasis, #8250df);' +
       ' border-color: var(--bgColor-done-emphasis, #8250df); }',

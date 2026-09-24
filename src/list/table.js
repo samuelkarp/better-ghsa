@@ -446,7 +446,7 @@ if (typeof require === 'function') {
     if (row.backportTargets > 0) {
       /** @type {import('../common/chips.js').ChipSpec} */
       const backports = { text: `Backports ${row.backportsDone} of ${row.backportTargets}` };
-      if (row.backportsDone < row.backportTargets) backports.tone = 'attention';
+      backports.tone = row.backportsDone < row.backportTargets ? 'attention' : 'success-muted';
       chips.push(backports);
     }
     if (row.cve !== null) chips.push({ text: row.cve });

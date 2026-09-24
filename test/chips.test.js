@@ -342,3 +342,27 @@ test('one builder draws every chip, and each part of a chip reaches its class', 
     'the text of a filled chip is in an element the fill rule can color'
   );
 });
+
+test('the pale tones share the text, fill, and border roles of one family', () => {
+  // A pale chip keeps the page's text color on a translucent fill of its hue,
+  // outlined in that hue's emphasis color.
+  for (const [tone, hue] of [
+    ['attention', 'attention'],
+    ['danger', 'danger'],
+    ['success-muted', 'success'],
+  ]) {
+    const rule = chips.TONE_RULES.find((text) => text.startsWith(`.bghsa-tone-${tone} {`));
+    assert.ok(rule !== undefined, `no rule defines .bghsa-tone-${tone}`);
+    assert.match(rule, /[{;] color: var\(--fgColor-default, currentColor\);/, `${tone} text: ${rule}`);
+    assert.match(
+      rule,
+      new RegExp(`background-color: var\\(--bgColor-${hue}-muted, rgba\\(\\d+, \\d+, \\d+, 0\\.2\\)\\);`),
+      `${tone} fill: ${rule}`
+    );
+    assert.match(
+      rule,
+      new RegExp(`border-color: var\\(--borderColor-${hue}-emphasis, #[0-9a-f]{6}\\);`),
+      `${tone} border: ${rule}`
+    );
+  }
+});

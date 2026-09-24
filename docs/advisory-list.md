@@ -79,7 +79,8 @@ The fork lists open pull requests only. Merging deletes the fork, and closed
 pull requests are absent from its list. This chip measures patch preparation.
 
 **Backports**, when targets are set. "Backports 1 of 3" counts targets with a
-prepared pull request.
+prepared pull request. The chip is pale yellow while any target lacks one and
+pale green once every target has one. Without targets there is no chip.
 
 **CVE.** The assigned identifier, "CVE requested", or "CVE not applicable".
 

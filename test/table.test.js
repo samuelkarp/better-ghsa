@@ -242,7 +242,7 @@ test('a cached advisory read fills the triage row', async () => {
   assert.ok(
     chips ===
       'Awaiting reporter[Label--secondary bghsa-tone-attention] |' +
-        ' Backports 1 of 1[Label--secondary] |' +
+        ' Backports 1 of 1[Label--secondary bghsa-tone-success-muted] |' +
         ' High, unconfirmed[Label--orange bghsa-dim] |' +
         ' Embargo lifts 2026-09-30[Label--secondary bghsa-tone-attention]',
     `chips from the cached read: ${chips}`
@@ -444,6 +444,7 @@ test('the stylesheet carries a rule for every color the chips invent', () => {
     'bghsa-tone-danger',
     'bghsa-tone-done',
     'bghsa-tone-success',
+    'bghsa-tone-success-muted',
     'bghsa-fill',
     'bghsa-dim',
   ]) {
@@ -970,9 +971,12 @@ test('the CVE, patch, backport, and embargo chips read what the advisory holds',
 
   const complete = chipsOf({ read: true, backportTargets: 3, backportsDone: 3 });
   assert.ok(
-    complete === 'Blocked on us[danger] | Backports 3 of 3',
+    complete === 'Blocked on us[danger] | Backports 3 of 3[success-muted]',
     `every target carries an open pull request: ${complete}`
   );
+
+  const untargeted = chipsOf({ read: true, backportTargets: 0, backportsDone: 0 });
+  assert.ok(untargeted === 'Blocked on us[danger]', `no backport targets set: ${untargeted}`);
 
   const embargo = chipsOf({ read: true, embargo: true, embargoLift: '2026-09-30' });
   assert.ok(
