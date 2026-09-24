@@ -467,9 +467,11 @@ row.
 
 Omit metrics whose required event is unobservable. Do not estimate them.
 
-The page exports to CSV.
+The page exports one row per advisory to CSV, and the statistics it shows as
+versioned JSON.
 
-Compute statistics and export CSV locally without transmitting the data.
+Compute statistics and export both files locally without transmitting the
+data.
 
 ## 11. Failure behavior
 

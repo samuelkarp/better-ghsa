@@ -54,8 +54,8 @@ A toggle restores GitHub's own view. See [docs/advisory-list.md](docs/advisory-l
 
 **The completed view** lists published and closed advisories. You can record
 closure reasons, including on older advisories. The statistics view shows counts
-and response timings across open and completed advisories and offers a CSV
-export. See [docs/completed.md](docs/completed.md).
+and response timings across open and completed advisories and offers CSV and
+JSON exports. See [docs/completed.md](docs/completed.md).
 
 ## Private-fork pull request diffs
 

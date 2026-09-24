@@ -814,6 +814,11 @@ test('a repository nothing has read says so and offers no export', async () => {
     'there is nothing to export'
   );
   assert.strictEqual(await statistics.exportCsv(doc), null, 'and asking for one writes nothing');
+  assert.ok(
+    one(doc, `#${statistics.ROOT_ID} button[data-bghsa-export="json"]`).hasAttribute('disabled'),
+    'there are no statistics to export'
+  );
+  assert.strictEqual(statistics.exportJson(doc), null, 'and asking for them writes nothing');
   assert.strictEqual(
     doc.querySelector(`#${statistics.ROOT_ID} [data-bghsa-count]`),
     null,
@@ -1456,4 +1461,245 @@ test('the time to publish is over published advisories, and waits on drafts', as
     ['Min 2d 0h', 'Median 2d 0h', 'Mean 2d 0h', 'Max 2d 0h'],
     'the only draft is unread, so nothing is shown waiting'
   );
+});
+
+test('the statistics export is the summary the page shows, written here', async () => {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const ids = {
+    triage: ghsa('jsn1'),
+    draftUnread: ghsa('jsn2'),
+    published: ghsa('jsn3'),
+    fixed: ghsa('jsn4'),
+    closedUnread: ghsa('jsn5'),
+    unreasoned: ghsa('jsn6'),
+  };
+  const { doc, base } = await repository({
+    owner: 'stats-json',
+    states: {
+      triage: [{ ghsaId: ids.triage }],
+      draft: [{ ghsaId: ids.draftUnread }],
+      published: [{ ghsaId: ids.published }],
+      closed: [{ ghsaId: ids.fixed }, { ghsaId: ids.closedUnread }, { ghsaId: ids.unreasoned }],
+    },
+    reads: [
+      { ghsaId: ids.triage, state: 'Triage', reportedAt: '2026-08-01T00:00:00Z' },
+      {
+        ghsaId: ids.published,
+        state: 'Published',
+        reportedAt: '2026-07-01T00:00:00Z',
+        timeline: [
+          { at: '2026-07-02T00:00:00Z', text: 'samuelkarp accepted this report' },
+          { at: '2026-07-05T00:00:00Z', text: 'samuelkarp published this' },
+        ],
+      },
+      {
+        ghsaId: ids.fixed,
+        state: 'Closed',
+        closureReason: 'fixed',
+        reportedAt: '2026-06-01T00:00:00Z',
+        timeline: [{ at: '2026-06-11T00:00:00Z', text: 'samuelkarp closed this' }],
+      },
+      {
+        ghsaId: ids.unreasoned,
+        state: 'Closed',
+        reportedAt: '2026-06-01T00:00:00Z',
+        timeline: [{ at: '2026-06-21T00:00:00Z', text: 'samuelkarp closed this' }],
+      },
+    ],
+    crawl: ['open', 'done'],
+  });
+
+  statsToggle(doc).click();
+  const held = clockAt;
+  // The summary is taken on the first of September, so the table ends there.
+  clockAt = Date.parse('2026-09-01T00:00:00Z');
+  try {
+    await statistics.load(doc);
+  } finally {
+    clockAt = held;
+  }
+  assert.ok(
+    !one(doc, `#${statistics.ROOT_ID} button[data-bghsa-export="json"]`).hasAttribute('disabled'),
+    'there is something to export'
+  );
+
+  /** @type {{ parts: unknown[], type: unknown }[]} */
+  const blobs = [];
+  class FakeBlob {
+    /**
+     * @param {unknown[]} parts
+     * @param {{ type?: string }} [options]
+     */
+    constructor(parts, options) {
+      blobs.push({ parts, type: options?.type ?? null });
+    }
+  }
+  /** @type {{ href: string | null, download: string | null }[]} */
+  const pressed = [];
+  doc.body.addEventListener('click', (event) => {
+    const node = /** @type {Element} */ (event.target);
+    pressed.push({ href: node.getAttribute('href'), download: node.getAttribute('download') });
+  });
+  const before = asked.length;
+  const url = statistics.exportJson(doc, {
+    Blob: /** @type {typeof globalThis.Blob} */ (/** @type {unknown} */ (FakeBlob)),
+    createObjectURL: () => 'blob:https://github.com/statistics-json',
+    revokeObjectURL: () => {},
+  });
+  await settle();
+
+  assert.strictEqual(url, 'blob:https://github.com/statistics-json');
+  assert.deepStrictEqual(
+    asked.slice(before).filter((each) => each.startsWith(base)),
+    [],
+    'the export asked GitHub for something'
+  );
+  assert.strictEqual(blobs.length, 1, 'one file, made here in the page');
+  assert.strictEqual(blobs[0]?.type, 'application/json;charset=utf-8');
+  // The file name carries the summary's date, a day other than the press.
+  assert.deepStrictEqual(pressed, [
+    {
+      href: 'blob:https://github.com/statistics-json',
+      download: 'stats-json-Spoon-Knife-statistics-2026-09-01.json',
+    },
+  ]);
+  const text = /** @type {string} */ (blobs[0]?.parts[0]);
+  assert.ok(
+    text.startsWith('{\n  "schemaVersion": 1,\n'),
+    'the file opens with its schema version, indented by two spaces'
+  );
+
+  // Reports: two unread in March (their list rows), two in June, one each in
+  // July and August. Timings run from the report: acceptance after 1 day,
+  // closes after 10 and 20, publication after 4, and the triage advisory has
+  // waited the 31 days of August for a response and an acceptance.
+  assert.deepStrictEqual(JSON.parse(text), {
+    schemaVersion: 1,
+    repository: 'stats-json/Spoon-Knife',
+    generatedAt: '2026-09-01T00:00:00.000Z',
+    coverage: {
+      total: 6,
+      open: 2,
+      completed: 4,
+      notLoadedYet: 2,
+      openListFullyLoaded: true,
+      completedListFullyLoaded: true,
+      gitHubTabCounts: { triage: 1, draft: 1, published: 1, closed: 3 },
+    },
+    outcome: {
+      counted: 4,
+      total: 4,
+      rows: [
+        { label: 'Closed', count: 3, share: 0.75 },
+        { label: 'Published', count: 1, share: 0.25 },
+      ],
+    },
+    closureReason: {
+      counted: 2,
+      total: 3,
+      rows: [
+        { label: 'Fixed', count: 1, share: 0.5 },
+        { label: 'None', count: 1, share: 0.5 },
+        { label: 'Not loaded yet', count: 1, share: null },
+      ],
+    },
+    open: {
+      counted: 2,
+      total: 2,
+      rows: [
+        { label: 'Draft', count: 1, share: 0.5 },
+        { label: 'Triage', count: 1, share: 0.5 },
+      ],
+    },
+    severity: {
+      counted: 1,
+      total: 2,
+      rows: [
+        { label: 'High', count: 1, share: 1 },
+        { label: 'Not loaded yet', count: 1, share: null },
+      ],
+    },
+    reportsByMonth: {
+      counted: 6,
+      total: 6,
+      years: [{ year: 2026, months: [0, 0, 2, 0, 0, 2, 1, 1, 0, null, null, null], total: 6 }],
+    },
+    timeToFirstResponse: {
+      loaded: 4,
+      total: 6,
+      min: DAY_MS,
+      median: 10 * DAY_MS,
+      mean: (31 * DAY_MS) / 3,
+      max: 20 * DAY_MS,
+      waiting: 31 * DAY_MS,
+    },
+    timeToAccept: {
+      loaded: 4,
+      total: 6,
+      min: DAY_MS,
+      median: DAY_MS,
+      mean: DAY_MS,
+      max: DAY_MS,
+      waiting: 31 * DAY_MS,
+    },
+    timeToClose: {
+      loaded: 2,
+      total: 3,
+      min: 10 * DAY_MS,
+      median: 15 * DAY_MS,
+      mean: 15 * DAY_MS,
+      max: 20 * DAY_MS,
+    },
+    timeToPublish: {
+      loaded: 1,
+      total: 1,
+      min: 4 * DAY_MS,
+      median: 4 * DAY_MS,
+      mean: 4 * DAY_MS,
+      max: 4 * DAY_MS,
+      waiting: null,
+    },
+  });
+});
+
+test('pressing the statistics export writes the file', async () => {
+  const { doc } = await repository({
+    owner: 'stats-json-press',
+    states: { triage: [{ ghsaId: ghsa('jsp1') }] },
+    crawl: ['open', 'done'],
+  });
+
+  statsToggle(doc).click();
+  await statistics.load(doc);
+
+  /** @type {unknown[]} */
+  const parts = [];
+  class FakeBlob {
+    /** @param {unknown[]} pieces */
+    constructor(pieces) {
+      parts.push(...pieces);
+    }
+  }
+  const heldBlob = globalThis.Blob;
+  const heldMake = globalThis.URL.createObjectURL;
+  const heldDrop = globalThis.URL.revokeObjectURL;
+  globalThis.Blob = /** @type {typeof globalThis.Blob} */ (/** @type {unknown} */ (FakeBlob));
+  globalThis.URL.createObjectURL = () => 'blob:https://github.com/pressed-json';
+  globalThis.URL.revokeObjectURL = () => {};
+  try {
+    const button = /** @type {HTMLElement} */ (
+      /** @type {unknown} */ (one(doc, `#${statistics.ROOT_ID} button[data-bghsa-export="json"]`))
+    );
+    assert.strictEqual(button.textContent, 'Export statistics to JSON');
+    button.click();
+    await settle();
+    assert.strictEqual(parts.length, 1, 'the press wrote no file');
+    const written = JSON.parse(/** @type {string} */ (parts[0]));
+    assert.strictEqual(written.repository, 'stats-json-press/Spoon-Knife');
+    assert.deepStrictEqual(written.open.rows, [{ label: 'Triage', count: 1, share: 1 }]);
+  } finally {
+    globalThis.Blob = heldBlob;
+    globalThis.URL.createObjectURL = heldMake;
+    globalThis.URL.revokeObjectURL = heldDrop;
+  }
 });

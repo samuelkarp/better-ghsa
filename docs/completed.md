@@ -280,3 +280,205 @@ advisory's page is loaded and `no` otherwise. Durations use milliseconds;
 unavailable durations are blank. `time_to_first_response_ms`
 measures to the first response the statistics use. The browser generates the file
 locally without transmitting it.
+
+"Export statistics to JSON" beside it downloads the numbers the page shows as
+`{owner}-{repo}-statistics-{date}.json`, described in
+[The statistics file](#the-statistics-file).
+
+## The statistics file
+
+"Export statistics to JSON" in the statistics heading downloads the numbers the
+statistics view shows as one JSON object. The browser generates the file
+locally without transmitting it. The button is disabled while the collected
+lists do not hold any advisory of the repository.
+
+The file name is `{owner}-{repo}-statistics-{date}.json`. `{date}` is the UTC
+date of `generatedAt`. In the owner and repository, each run of characters
+outside `A` to `Z`, `a` to `z`, `0` to `9`, `.`, `_`, and `-` becomes one `-`.
+The file is UTF-8 JSON indented by two spaces, one value per line, and ends
+with a newline.
+
+These rules hold throughout the file:
+
+- A duration is a number of milliseconds. A median or mean can have a
+  fractional part.
+- A share is a fraction from 0 to 1, the percentage the page shows before
+  rounding: `0.5` is "50%".
+- Months and years are UTC.
+- An advisory is loaded when the extension has loaded its detail page.
+- A value the page shows as a dash is `null`, and so is a month the page leaves
+  blank.
+
+### Top level
+
+The keys appear in this order, and every one is always present.
+
+| Key | Type | Holds | On the page |
+| --- | --- | --- | --- |
+| `schemaVersion` | number | The version of the file's shape: which keys it holds and what each holds. The shape this page describes is `1`. | Not shown |
+| `repository` | string | The repository as `owner/repo`. | The repository whose list is open |
+| `generatedAt` | string | The instant the statistics are computed against, in ISO 8601 UTC with milliseconds, like `2026-09-01T00:00:00.000Z`. A wait that runs to the present runs to this instant, and "Reports by month" ends no earlier than its month. | Not shown |
+| `coverage` | object | How much of the repository the statistics cover. | The chips above the statistics |
+| `outcome` | object | A count box. | "Outcome" |
+| `closureReason` | object | A count box. | "Closure reason" |
+| `open` | object | A count box. | "Open" |
+| `severity` | object | A count box. | "Severity" |
+| `reportsByMonth` | object | The months table. | "Reports by month" |
+| `timeToFirstResponse` | object | A timing box. | "Time to first response" |
+| `timeToAccept` | object | A timing box. | "Time to accept" |
+| `timeToClose` | object | A timing box. | "Time to close" |
+| `timeToPublish` | object | A timing box. | "Time to publish" |
+
+### `coverage`
+
+| Key | Type | Holds | On the page |
+| --- | --- | --- | --- |
+| `total` | number | Advisories counted, open and completed. | "3 total advisories" |
+| `open` | number | Triage and draft advisories counted. | "1 open" |
+| `completed` | number | Published and closed advisories counted. | "2 completed" |
+| `notLoadedYet` | number | Advisories whose detail page has not been loaded. | "1 not loaded yet", shown only above 0 |
+| `openListFullyLoaded` | boolean | Whether the collection of the open list reached its last page for both triage and draft. | `false` shows "Open list not loaded" or "Open list partly loaded" |
+| `completedListFullyLoaded` | boolean | Whether the collection of the completed list reached its last page for both published and closed. | `false` shows "Completed list not loaded" or "Completed list partly loaded" |
+| `gitHubTabCounts` | object | GitHub's count on each state tab of the list page on screen, keyed `triage`, `draft`, `published`, and `closed`. Each count is a number, or `null` when that page does not show a count for the tab. | "4 on GitHub" shows their sum when every count is known and the sum differs from `total` |
+
+### Count boxes
+
+`outcome`, `closureReason`, `open`, and `severity` share one shape.
+
+| Key | Type | Holds | On the page |
+| --- | --- | --- | --- |
+| `counted` | number | The sample size. | The first number of the heading's "N of M" |
+| `total` | number | The advisories the box covers. | The second number of "N of M" |
+| `rows` | array | One object per row, in the order the box lists them. Empty when the box reads "Nothing counted". | The rows |
+
+Each row holds:
+
+| Key | Type | Holds | On the page |
+| --- | --- | --- | --- |
+| `label` | string | The row's text, like "Published", "Fixed", "High", "None", or "Not loaded yet". | The row's name |
+| `count` | number | The advisories in the row. | The row's count |
+| `share` | number or null | `count` divided by `counted`. `null` on the "Not loaded yet" rows of "Closure reason" and "Severity" and on the "None" row of "Severity". | The row's percentage, or the dash in its place |
+
+### `reportsByMonth`
+
+| Key | Type | Holds | On the page |
+| --- | --- | --- | --- |
+| `counted` | number | Advisories with a report time. | The first number of "N of M" |
+| `total` | number | All advisories counted. | The second number of "N of M" |
+| `years` | array | One object per table row, oldest year first. Empty when the box reads "Nothing counted". | The table rows |
+
+Each year holds:
+
+| Key | Type | Holds | On the page |
+| --- | --- | --- | --- |
+| `year` | number | The UTC year. | "Year" |
+| `months` | array | Twelve entries, January first. Each is the number of advisories reported in that UTC month, or `null` for a month after the end of the table. | "Jan" through "Dec" |
+| `total` | number | The sum of the year's months. | "Total" |
+
+### Timing boxes
+
+`timeToFirstResponse`, `timeToAccept`, `timeToClose`, and `timeToPublish`
+share one shape. `timeToClose` does not have a `waiting` key.
+
+| Key | Type | Holds | On the page |
+| --- | --- | --- | --- |
+| `loaded` | number | The loaded advisories the box covers. | The first number of "N of M" |
+| `total` | number | All advisories the box covers. | The second number of "N of M" |
+| `min` | number or null | The shortest measured duration, in milliseconds. `null` when the box measured none. | "Min" |
+| `median` | number or null | The median measured duration, in milliseconds. `null` when the box measured none. | "Median" |
+| `mean` | number or null | The mean measured duration, in milliseconds. `null` when the box measured none. | "Mean" |
+| `max` | number or null | The longest measured duration, in milliseconds. `null` when the box measured none. | "Max" |
+| `waiting` | number or null | The longest time from report to `generatedAt`, in milliseconds, among the loaded advisories still waiting for the box's event: for `timeToFirstResponse`, triage and draft advisories without a response; for `timeToAccept`, triage advisories without an acceptance event; for `timeToPublish`, drafts. `null` when none of them has a report time at or before `generatedAt`, and the box then does not show the row. | "No response", "Never accepted", or "Never published" |
+
+### Example
+
+A repository with one triage advisory, one published advisory, and one closed
+advisory whose detail page has not been loaded, exported at midnight UTC on
+September 1, 2026. The example puts each row and each `months` array on one
+line, where the file puts each value on its own line.
+
+```json
+{
+  "schemaVersion": 1,
+  "repository": "octo-org/Spoon-Knife",
+  "generatedAt": "2026-09-01T00:00:00.000Z",
+  "coverage": {
+    "total": 3,
+    "open": 1,
+    "completed": 2,
+    "notLoadedYet": 1,
+    "openListFullyLoaded": true,
+    "completedListFullyLoaded": true,
+    "gitHubTabCounts": { "triage": 1, "draft": 0, "published": 1, "closed": 1 }
+  },
+  "outcome": {
+    "counted": 2,
+    "total": 2,
+    "rows": [
+      { "label": "Closed", "count": 1, "share": 0.5 },
+      { "label": "Published", "count": 1, "share": 0.5 }
+    ]
+  },
+  "closureReason": {
+    "counted": 0,
+    "total": 1,
+    "rows": [{ "label": "Not loaded yet", "count": 1, "share": null }]
+  },
+  "open": {
+    "counted": 1,
+    "total": 1,
+    "rows": [{ "label": "Triage", "count": 1, "share": 1 }]
+  },
+  "severity": {
+    "counted": 1,
+    "total": 1,
+    "rows": [{ "label": "High", "count": 1, "share": 1 }]
+  },
+  "reportsByMonth": {
+    "counted": 3,
+    "total": 3,
+    "years": [
+      { "year": 2026, "months": [0, 0, 1, 0, 0, 0, 1, 1, 0, null, null, null], "total": 3 }
+    ]
+  },
+  "timeToFirstResponse": {
+    "loaded": 2,
+    "total": 3,
+    "min": 86400000,
+    "median": 86400000,
+    "mean": 86400000,
+    "max": 86400000,
+    "waiting": 2678400000
+  },
+  "timeToAccept": {
+    "loaded": 2,
+    "total": 3,
+    "min": 86400000,
+    "median": 86400000,
+    "mean": 86400000,
+    "max": 86400000,
+    "waiting": 2678400000
+  },
+  "timeToClose": {
+    "loaded": 0,
+    "total": 1,
+    "min": null,
+    "median": null,
+    "mean": null,
+    "max": null
+  },
+  "timeToPublish": {
+    "loaded": 1,
+    "total": 1,
+    "min": 345600000,
+    "median": 345600000,
+    "mean": 345600000,
+    "max": 345600000,
+    "waiting": null
+  }
+}
+```
+
+The published advisory was accepted a day after its report (86400000) and
+published four days after it (345600000). The triage advisory, reported on
+August 1, has waited 31 days (2678400000) for a response and an acceptance.

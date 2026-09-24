@@ -52,6 +52,10 @@ if (typeof require === 'function') {
 
   const EXPORT_LABEL = 'Export CSV';
 
+  const EXPORT_JSON_LABEL = 'Export statistics to JSON';
+
+  const JSON_TYPE = 'application/json;charset=utf-8';
+
   const EMPTY_TEXT = 'Nothing has been read on this repository';
 
   const NOTHING_TEXT = 'Nothing counted';
@@ -86,22 +90,28 @@ if (typeof require === 'function') {
    *   missingCounts?: boolean,
    *   unreadCounts?: boolean,
    *   missingOpens?: boolean,
+   *   field: string,
    * }} CountGroup
    */
 
-  /** @type {readonly CountGroup[]} */
+  /**
+   * `field` names the group in the exported statistics.
+   *
+   * @type {readonly CountGroup[]}
+   */
   const COUNT_GROUPS = [
-    { key: 'outcome', name: 'Outcome', by: 'count' },
+    { key: 'outcome', name: 'Outcome', by: 'count', field: 'outcome' },
     {
       key: 'reason',
+      field: 'closureReason',
       name: 'Closure reason',
       by: 'count',
       missingCounts: true,
       unreadCounts: true,
       missingOpens: true,
     },
-    { key: 'open', name: 'Open', by: 'count' },
-    { key: 'severity', name: 'Severity', by: 'level', unreadCounts: true },
+    { key: 'open', name: 'Open', by: 'count', field: 'open' },
+    { key: 'severity', name: 'Severity', by: 'level', unreadCounts: true, field: 'severity' },
   ];
 
   const MONTHS_NAME = 'Reports by month';
@@ -141,6 +151,7 @@ if (typeof require === 'function') {
    * list together.
    */
   const STYLE_TEXT = [
+    '.bghsa-stats-exports { display: flex; gap: 8px; }',
     '.bghsa-stats-over { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }',
     '.bghsa-stats-lists { columns: 20rem; column-gap: 16px; }',
     '.bghsa-stats-list { break-inside: avoid; }',
@@ -402,6 +413,59 @@ if (typeof require === 'function') {
   }
 
   /**
+   * One row of a count group. `share` is null where the row shows no
+   * percentage.
+   *
+   * @typedef {object} TallyRow
+   * @property {'value' | 'missing' | 'unread'} kind
+   * @property {string} label
+   * @property {number} count
+   * @property {number | null} share
+   */
+
+  /**
+   * A count group's sample size and rows, in display order.
+   *
+   * @param {CountGroup} group
+   * @param {import('../done/stats.js').Tally} tally
+   * @returns {{ counted: number, total: number, rows: TallyRow[] }}
+   */
+  function tallyRowsOf(group, tally) {
+    // Include missing values in the denominator only when the group counts
+    // them as outcomes.
+    const over = group.missingCounts === true ? tally.counted + tally.missing : tally.counted;
+    const unread = group.unreadCounts === true ? tally.unread : 0;
+    const rank = globalThis.bghsa.order.severityRank;
+    const entries = Object.entries(tally.counts).sort(
+      (left, right) =>
+        (group.by === 'level' ? rank(right[0]) - rank(left[0]) : 0) ||
+        right[1] - left[1] ||
+        left[0].localeCompare(right[0])
+    );
+    /** @type {TallyRow[]} */
+    const rows = entries.map(([value, count]) => ({
+      kind: 'value',
+      label: globalThis.bghsa.chips.sentenceCase(value),
+      count,
+      share: count / over,
+    }));
+    if (tally.missing > 0) {
+      // Display missing values alongside the sample size.
+      rows.push({
+        kind: 'missing',
+        label: 'None',
+        count: tally.missing,
+        share: group.missingCounts === true ? tally.missing / over : null,
+      });
+    }
+    if (unread > 0) {
+      // Unread members have no percentage because their values are unknown.
+      rows.push({ kind: 'unread', label: UNREAD_TEXT, count: unread, share: null });
+    }
+    return { counted: over, total: tally.corpus + unread, rows };
+  }
+
+  /**
    * @param {Document} doc
    * @param {CountGroup} group
    * @param {import('../done/stats.js').Tally} tally
@@ -410,56 +474,28 @@ if (typeof require === 'function') {
   function buildTally(doc, group, tally) {
     const box = element(doc, 'div', 'Box mb-3 bghsa-stats-list');
     box.setAttribute('data-bghsa-count', group.key);
-    // Include missing values in the denominator only when the group counts
-    // them as outcomes.
-    const over = group.missingCounts === true ? tally.counted + tally.missing : tally.counted;
-    const unread = group.unreadCounts === true ? tally.unread : 0;
-    box.append(buildHeader(doc, group.name, `${over} of ${tally.corpus + unread}`));
+    const shown = tallyRowsOf(group, tally);
+    box.append(buildHeader(doc, group.name, `${shown.counted} of ${shown.total}`));
 
     const list = element(doc, 'ul', 'bghsa-stats-rows');
-    const rank = globalThis.bghsa.order.severityRank;
-    const entries = Object.entries(tally.counts).sort(
-      (left, right) =>
-        (group.by === 'level' ? rank(right[0]) - rank(left[0]) : 0) ||
-        right[1] - left[1] ||
-        left[0].localeCompare(right[0])
-    );
-    for (const [value, count] of entries) {
-      list.append(
-        buildLine(
-          doc,
-          globalThis.bghsa.chips.sentenceCase(value),
-          String(count),
-          formatRatio(count / over)
-        )
-      );
-    }
-    if (tally.missing > 0) {
-      // Display missing values alongside the sample size.
-      const line = buildLine(
-        doc,
-        'None',
-        String(tally.missing),
-        group.missingCounts === true ? formatRatio(tally.missing / over) : '—'
-      );
-      line.classList.add('bghsa-stats-missing');
-      if (group.missingOpens === true) {
-        const open = element(doc, 'button', 'btn-link bghsa-stats-open', 'None');
-        open.setAttribute('type', 'button');
-        open.addEventListener('click', () => {
-          globalThis.bghsa.view.showUnreasoned(doc);
-        });
-        line.querySelector('.bghsa-stats-value')?.replaceChildren(open);
+    for (const row of shown.rows) {
+      const ratio = row.share === null ? '—' : formatRatio(row.share);
+      const line = buildLine(doc, row.label, String(row.count), ratio);
+      if (row.kind === 'missing') {
+        line.classList.add('bghsa-stats-missing');
+        if (group.missingOpens === true) {
+          const open = element(doc, 'button', 'btn-link bghsa-stats-open', 'None');
+          open.setAttribute('type', 'button');
+          open.addEventListener('click', () => {
+            globalThis.bghsa.view.showUnreasoned(doc);
+          });
+          line.querySelector('.bghsa-stats-value')?.replaceChildren(open);
+        }
       }
+      if (row.kind === 'unread') line.classList.add('bghsa-stats-unread');
       list.append(line);
     }
-    if (unread > 0) {
-      // Unread members have no percentage because their values are unknown.
-      const line = buildLine(doc, UNREAD_TEXT, String(unread), '—');
-      line.classList.add('bghsa-stats-unread');
-      list.append(line);
-    }
-    if (entries.length === 0 && tally.missing === 0 && unread === 0) {
+    if (shown.rows.length === 0) {
       list.append(element(doc, 'li', 'Box-row bghsa-stats-empty', NOTHING_TEXT));
     }
     box.append(list);
@@ -605,7 +641,23 @@ if (typeof require === 'function') {
     exportControl.addEventListener('click', () => {
       void exportCsv(doc);
     });
-    header.append(exportControl);
+    const jsonControl = element(
+      doc,
+      'button',
+      'btn btn-sm bghsa-stats-export',
+      EXPORT_JSON_LABEL
+    );
+    jsonControl.setAttribute('type', 'button');
+    jsonControl.setAttribute('data-bghsa-export', 'json');
+    if (state.ref === null || corpus.members.length === 0) {
+      jsonControl.setAttribute('disabled', '');
+    }
+    jsonControl.addEventListener('click', () => {
+      exportJson(doc);
+    });
+    const exports = element(doc, 'div', 'bghsa-stats-exports');
+    exports.append(exportControl, jsonControl);
+    header.append(exports);
     box.append(header);
 
     if (state.ref === null || state.summary === null || corpus.members.length === 0) {
@@ -636,6 +688,88 @@ if (typeof require === 'function') {
     const at = globalThis.bghsa.cache.now();
     const name = csv.filenameFor(state.ref, at);
     return csv.download(doc, name, await csv.toCsv(corpus), options);
+  }
+
+  /** The version of the exported statistics' shape, the file's first key. */
+  const SCHEMA_VERSION = 1;
+
+  /**
+   * The statistics the page shows, by box. Durations are milliseconds, shares
+   * fractions, and an absent value null.
+   *
+   * @param {{ owner: string, repo: string }} ref
+   * @param {readonly Half[]} halves
+   * @param {import('../done/stats.js').Summary} summary
+   * @returns {Record<string, unknown>}
+   */
+  function statisticsOf(ref, halves, summary) {
+    const open = halves.find((half) => half.key === 'open');
+    const done = halves.find((half) => half.key === 'done');
+    /** @type {Record<string, unknown>} */
+    const out = {
+      schemaVersion: SCHEMA_VERSION,
+      repository: `${ref.owner}/${ref.repo}`,
+      generatedAt: new Date(summary.at).toISOString(),
+      coverage: {
+        total: summary.corpus,
+        open: open?.corpus.members.length ?? 0,
+        completed: done?.corpus.members.length ?? 0,
+        notLoadedYet: summary.unread,
+        openListFullyLoaded: open?.corpus.complete ?? false,
+        completedListFullyLoaded: done?.corpus.complete ?? false,
+        gitHubTabCounts: { ...summary.expected },
+      },
+    };
+    for (const group of COUNT_GROUPS) {
+      const tally = summary.counts[group.key];
+      if (tally === undefined) continue;
+      const shown = tallyRowsOf(group, tally);
+      out[group.field] = {
+        counted: shown.counted,
+        total: shown.total,
+        rows: shown.rows.map((row) => ({ label: row.label, count: row.count, share: row.share })),
+      };
+    }
+    const months = summary.counts.month;
+    out.reportsByMonth = {
+      counted: months?.counted ?? 0,
+      total: months?.corpus ?? 0,
+      years: globalThis.bghsa.stats.yearsOf(months?.counts ?? {}, summary.at),
+    };
+    for (const timing of globalThis.bghsa.stats.TIMINGS) {
+      const found = summary.timings[timing.key];
+      /** @type {Record<string, number | null>} */
+      const box = {
+        loaded: found.read,
+        total: found.corpus,
+        min: found.min,
+        median: found.median,
+        mean: found.mean,
+        max: found.max,
+      };
+      if (timing.omission !== undefined) box.waiting = found.waiting;
+      out[`timeTo${timing.key.charAt(0).toUpperCase()}${timing.key.slice(1)}`] = box;
+    }
+    return out;
+  }
+
+  /**
+   * Download the statistics the page shows as JSON, generated locally from
+   * the summary the view draws. The file name carries the summary's UTC date.
+   *
+   * @param {Document} doc
+   * @param {import('../done/csv.js').DownloadOptions} [options]
+   * @returns {string | null} The download URL, or null if export is unavailable.
+   */
+  function exportJson(doc, options) {
+    const state = current(doc);
+    if (state.ref === null || state.summary === null) return null;
+    if (whole(state.halves).members.length === 0) return null;
+    const csv = globalThis.bghsa.csv;
+    const shown = statisticsOf(state.ref, state.halves, state.summary);
+    const text = `${JSON.stringify(shown, null, 2)}\n`;
+    const name = csv.filenameFor(state.ref, state.summary.at, 'statistics', 'json');
+    return csv.download(doc, name, text, { ...options, type: JSON_TYPE });
   }
 
   const setHidden = globalThis.bghsa.table.setHidden;
@@ -745,6 +879,8 @@ if (typeof require === 'function') {
     read,
     reading,
     exportCsv,
+    statisticsOf,
+    exportJson,
     ensureStyle,
     draw,
     load,

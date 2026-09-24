@@ -18,6 +18,7 @@ if (typeof require === 'function') {
 
 /**
  * @typedef {object} DownloadOptions
+ * @property {string} [type] The file's media type, MIME when absent.
  * @property {typeof globalThis.Blob} [Blob]
  * @property {(blob: Blob) => string} [createObjectURL]
  * @property {(url: string) => void} [revokeObjectURL]
@@ -142,12 +143,14 @@ if (typeof require === 'function') {
   /**
    * @param {{ owner: string, repo: string }} ref
    * @param {number} at
+   * @param {string} [what] The file's contents, named between repository and date.
+   * @param {string} [extension]
    * @returns {string} A filename containing the repository and UTC date.
    */
-  function filenameFor(ref, at) {
+  function filenameFor(ref, at, what = 'advisories', extension = 'csv') {
     const day = new Date(at).toISOString().slice(0, 10);
     const name = `${ref.owner}-${ref.repo}`.replace(/[^A-Za-z0-9._-]+/g, '-');
-    return `${name}-advisories-${day}.csv`;
+    return `${name}-${what}-${day}.${extension}`;
   }
 
   /**
@@ -170,7 +173,7 @@ if (typeof require === 'function') {
     // Check for a download host before allocating a blob URL.
     const host = doc.body ?? doc.documentElement;
     if (host === null) return null;
-    const url = make(new BlobType([text], { type: MIME }));
+    const url = make(new BlobType([text], { type: options.type ?? MIME }));
     const anchor = doc.createElement('a');
     anchor.setAttribute('href', url);
     anchor.setAttribute('download', name);
