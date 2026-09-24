@@ -121,7 +121,22 @@ if (typeof require === 'function') {
    */
   const COUNT_ORDER = ['open', 'outcome', 'reason', 'severity'];
 
-  const MONTHS_NAME = 'Reports by month';
+  /**
+   * The tables of years by months, in page order. `tally` names the summary's
+   * month tally, `hook` the table on the page, and `field` the table in the
+   * exported statistics.
+   *
+   * @type {readonly { tally: string, name: string, hook: string, field: string }[]}
+   */
+  const MONTH_TABLES = [
+    { tally: 'month', name: 'Reports by month', hook: 'reports', field: 'reportsByMonth' },
+    {
+      tally: 'publishedMonth',
+      name: 'Published advisories by month',
+      hook: 'published',
+      field: 'publishedByMonth',
+    },
+  ];
 
   const YEAR_HEADER = 'Year';
 
@@ -541,19 +556,21 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Count reports in a grid of years by months, through the later of the
-   * current month and the latest report month. A footer row sums each column.
+   * Count a month tally in a grid of years by months, through the later of
+   * the current month and the latest counted month. A footer row sums each
+   * column.
    *
    * @param {Document} doc
+   * @param {typeof MONTH_TABLES[number]} table
    * @param {import('../done/stats.js').Tally | undefined} tally The month tally.
    * @param {number} at The instant the summary is computed against.
    * @returns {Element}
    */
-  function buildMonths(doc, tally, at) {
+  function buildMonths(doc, table, tally, at) {
     const box = element(doc, 'div', 'Box mb-3 bghsa-stats-months');
-    box.setAttribute('data-bghsa-months', '1');
+    box.setAttribute('data-bghsa-months', table.hook);
     const counted = tally?.counted ?? 0;
-    box.append(buildHeader(doc, MONTHS_NAME, `${counted} of ${tally?.corpus ?? 0}`));
+    box.append(buildHeader(doc, table.name, `${counted} of ${tally?.corpus ?? 0}`));
     const rows = globalThis.bghsa.stats.yearsOf(tally?.counts ?? {}, at);
     if (rows.length === 0) {
       box.append(element(doc, 'div', 'Box-body bghsa-stats-empty', NOTHING_TEXT));
@@ -637,7 +654,9 @@ if (typeof require === 'function') {
     /** @type {Element[]} */
     const parts = [];
 
-    parts.push(buildMonths(doc, summary.counts.month, summary.at));
+    for (const table of MONTH_TABLES) {
+      parts.push(buildMonths(doc, table, summary.counts[table.tally], summary.at));
+    }
 
     const counts = element(doc, 'div', 'bghsa-stats-lists bghsa-stats-counts');
     for (const key of COUNT_ORDER) {
@@ -779,15 +798,17 @@ if (typeof require === 'function') {
         rows: shown.rows.map((row) => ({ label: row.label, count: row.count, share: row.share })),
       };
     }
-    const months = summary.counts.month;
-    const years = globalThis.bghsa.stats.yearsOf(months?.counts ?? {}, summary.at);
-    const sums = globalThis.bghsa.stats.monthTotalsOf(years);
-    out.reportsByMonth = {
-      counted: months?.counted ?? 0,
-      total: months?.corpus ?? 0,
-      years,
-      monthTotals: sums.months,
-    };
+    for (const table of MONTH_TABLES) {
+      const months = summary.counts[table.tally];
+      const years = globalThis.bghsa.stats.yearsOf(months?.counts ?? {}, summary.at);
+      const sums = globalThis.bghsa.stats.monthTotalsOf(years);
+      out[table.field] = {
+        counted: months?.counted ?? 0,
+        total: months?.corpus ?? 0,
+        years,
+        monthTotals: sums.months,
+      };
+    }
     for (const timing of globalThis.bghsa.stats.TIMINGS) {
       const found = summary.timings[timing.key];
       /** @type {Record<string, number | null>} */

@@ -477,7 +477,7 @@ test('the statistics are over the whole corpus, open and done', async () => {
  */
 function monthCells(doc) {
   return Array.from(
-    doc.querySelectorAll(`#${statistics.ROOT_ID} [data-bghsa-months] tr`)
+    doc.querySelectorAll(`#${statistics.ROOT_ID} [data-bghsa-months="reports"] tr`)
   ).map((row) => Array.from(row.children).map((cell) => (cell.textContent ?? '').trim()));
 }
 
@@ -509,7 +509,7 @@ test('reports are counted by month in a table of years', async () => {
   await statistics.load(doc);
 
   assert.deepStrictEqual(
-    textsOf(doc, `#${statistics.ROOT_ID} [data-bghsa-months] .Box-header > *`),
+    textsOf(doc, `#${statistics.ROOT_ID} [data-bghsa-months="reports"] .Box-header > *`),
     ['Reports by month', '4 of 5'],
     'the advisory without a report time is outside the table and inside the total'
   );
@@ -525,19 +525,19 @@ test('reports are counted by month in a table of years', async () => {
     ['Total', '1', '0', '2', '0', '0', '0', '0', '1', '0', '0', '0', '0', '4'],
   ]);
   assert.deepStrictEqual(
-    Array.from(doc.querySelectorAll(`#${statistics.ROOT_ID} [data-bghsa-months] th`)).map(
+    Array.from(doc.querySelectorAll(`#${statistics.ROOT_ID} [data-bghsa-months="reports"] th`)).map(
       (cell) => cell.getAttribute('scope')
     ),
     [...Array(14).fill('col'), 'row', 'row', 'row', 'row'],
     'the headers name their columns, and the years and the total name their rows'
   );
   assert.deepStrictEqual(
-    textsOf(doc, `#${statistics.ROOT_ID} [data-bghsa-months] tfoot th`),
+    textsOf(doc, `#${statistics.ROOT_ID} [data-bghsa-months="reports"] tfoot th`),
     ['Total'],
     'the totals row is the footer'
   );
 
-  const months = one(doc, `#${statistics.ROOT_ID} [data-bghsa-months]`);
+  const months = one(doc, `#${statistics.ROOT_ID} [data-bghsa-months="reports"]`);
   assert.ok(months.parentElement === one(doc, `#${statistics.ROOT_ID}`), 'on its own row');
 });
 
@@ -659,9 +659,16 @@ test('the statistics put the months first, then the counts, then the timings', a
     [
       'Box mb-3 bghsa-stats-head',
       'Box mb-3 bghsa-stats-months',
+      'Box mb-3 bghsa-stats-months',
       'bghsa-stats-lists bghsa-stats-counts',
       'bghsa-stats-lists bghsa-stats-timings',
     ]
+  );
+  assert.deepStrictEqual(
+    Array.from(root.querySelectorAll('[data-bghsa-months]'), (box) =>
+      box.getAttribute('data-bghsa-months')
+    ),
+    ['reports', 'published']
   );
   const timings = one(root, '.bghsa-stats-timings');
   assert.deepStrictEqual(
@@ -790,7 +797,7 @@ test('the table of years runs to the instant its summary was taken at', async ()
   }
 
   assert.deepStrictEqual(
-    textsOf(doc, `#${statistics.ROOT_ID} [data-bghsa-months] tbody th`),
+    textsOf(doc, `#${statistics.ROOT_ID} [data-bghsa-months="reports"] tbody th`),
     ['2026'],
     'a later clock added a year the summary never reached'
   );
@@ -806,14 +813,93 @@ test('reports without a time leave the table empty', async () => {
   await statistics.load(doc);
 
   assert.deepStrictEqual(
-    textsOf(doc, `#${statistics.ROOT_ID} [data-bghsa-months] .Box-header > *`),
+    textsOf(doc, `#${statistics.ROOT_ID} [data-bghsa-months="reports"] .Box-header > *`),
     ['Reports by month', '0 of 1']
   );
   assert.strictEqual(
-    textOf(doc, `#${statistics.ROOT_ID} [data-bghsa-months] .Box-body`),
+    textOf(doc, `#${statistics.ROOT_ID} [data-bghsa-months="reports"] .Box-body`),
     'Nothing counted'
   );
-  assert.strictEqual(doc.querySelector(`#${statistics.ROOT_ID} [data-bghsa-months] table`), null);
+  assert.strictEqual(doc.querySelector(`#${statistics.ROOT_ID} [data-bghsa-months="reports"] table`), null);
+  const published = `#${statistics.ROOT_ID} [data-bghsa-months="published"]`;
+  assert.deepStrictEqual(
+    textsOf(doc, `${published} .Box-header > *`),
+    ['Published advisories by month', '0 of 0']
+  );
+  assert.strictEqual(
+    textOf(doc, `${published} .Box-body`),
+    'Nothing counted',
+    'a repository with nothing published has an empty table of publications'
+  );
+});
+
+test('published advisories are counted by the month of their first publication', async () => {
+  const twice = ghsa('qaaa');
+  const once = ghsa('qbbb');
+  const unread = ghsa('qccc');
+  const silent = ghsa('qddd');
+  const closedId = ghsa('qeee');
+  const { doc } = await repository({
+    owner: 'stats-published-months',
+    states: {
+      published: [{ ghsaId: twice }, { ghsaId: once }, { ghsaId: unread }, { ghsaId: silent }],
+      closed: [{ ghsaId: closedId }],
+    },
+    reads: [
+      {
+        ghsaId: twice,
+        state: 'Published',
+        reportedAt: '2024-11-01T00:00:00Z',
+        timeline: [
+          { at: '2025-02-01T00:00:00Z', text: 'samuelkarp published this' },
+          { at: '2024-11-10T00:00:00Z', text: 'samuelkarp published this' },
+        ],
+      },
+      {
+        ghsaId: once,
+        state: 'Published',
+        reportedAt: '2026-03-01T00:00:00Z',
+        timeline: [{ at: '2026-03-15T00:00:00Z', text: 'samuelkarp published this' }],
+      },
+      { ghsaId: silent, state: 'Published', reportedAt: '2026-01-01T00:00:00Z' },
+      {
+        ghsaId: closedId,
+        state: 'Closed',
+        reportedAt: '2025-06-01T00:00:00Z',
+        timeline: [{ at: '2025-06-02T00:00:00Z', text: 'samuelkarp published this' }],
+      },
+    ],
+    crawl: ['open', 'done'],
+  });
+
+  statsToggle(doc).click();
+  await statistics.load(doc);
+
+  const box = `#${statistics.ROOT_ID} [data-bghsa-months="published"]`;
+  assert.deepStrictEqual(
+    textsOf(doc, `${box} .Box-header > *`),
+    ['Published advisories by month', '2 of 4'],
+    'the unread one and the one without a publication are in the total alone'
+  );
+  // The clock reads August 2026, so September to December are blank. The
+  // closed advisory's publication counts nowhere, and the advisory published
+  // twice counts in November 2024 alone.
+  assert.deepStrictEqual(
+    Array.from(doc.querySelectorAll(`${box} tr`)).map((row) =>
+      Array.from(row.children).map((cell) => (cell.textContent ?? '').trim())
+    ),
+    [
+      [
+        ...['Year', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
+        ...['Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Total'],
+      ],
+      ['2024', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '1'],
+      ['2025', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0'],
+      ['2026', '0', '0', '1', '0', '0', '0', '0', '0', '', '', '', '', '1'],
+      ['Total', '0', '0', '1', '0', '0', '0', '0', '0', '0', '0', '1', '0', '2'],
+    ]
+  );
+  assert.deepStrictEqual(textsOf(doc, `${box} tfoot th`), ['Total'], 'the totals row is the footer');
 });
 
 test('closure reasons count a close with no reason and list the unread apart', async () => {
@@ -1982,6 +2068,12 @@ test('the statistics export is the summary the page shows, written here', async 
       total: 6,
       years: [{ year: 2026, months: [0, 0, 2, 0, 0, 2, 1, 1, 0, null, null, null], total: 6 }],
       monthTotals: [0, 0, 2, 0, 0, 2, 1, 1, 0, 0, 0, 0],
+    },
+    publishedByMonth: {
+      counted: 1,
+      total: 1,
+      years: [{ year: 2026, months: [0, 0, 0, 0, 0, 0, 1, 0, 0, null, null, null], total: 1 }],
+      monthTotals: [0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
     },
     timeToFirstResponse: {
       loaded: 4,

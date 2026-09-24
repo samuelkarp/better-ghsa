@@ -165,8 +165,9 @@ on an earlier one. "4 on GitHub" shows the sum of GitHub's tab counts when it
 differs from the total. "Loading..." appears while the list walk and the
 reads run; the numbers can change as results arrive.
 
-Below the chips, "Reports by month" spans the full width of the view. The four
-count boxes follow, then the four timing boxes. The width of the view sets their
+Below the chips, "Reports by month" and then "Published advisories by month"
+span the full width of the view. The four count boxes follow, then the four
+timing boxes. The width of the view sets their
 columns. Widths are in rem, the page's base text size, 16 pixels by default:
 
 - 60rem and wider: the counts take three columns, "Open" above "Outcome", then
@@ -182,8 +183,8 @@ response", "Time to accept", "Time to close", and "Time to publish".
 
 ### Reports by month
 
-"Reports by month" is a table across the full width of the view, above the
-counts. Its columns are "Year", "Jan" through "Dec", and "Total". The table ends
+"Reports by month" is a table across the full width of the view, at the top of
+the statistics. Its columns are "Year", "Jan" through "Dec", and "Total". The table ends
 at the later of the current UTC month and the month of the latest report, so a
 report dated ahead of the browser's clock counts. Each row is a year, from the
 year of the earliest report to the year the table ends, oldest first. A cell
@@ -198,6 +199,25 @@ last cell sums the whole table and equals the sample size's first number.
 
 The sample size counts advisories with a report time out of all advisories.
 With no report time at all, the table reads "Nothing counted".
+
+### Published advisories by month
+
+"Published advisories by month" is a table across the full width of the view,
+directly below "Reports by month", with the same columns and the same "Total"
+row. A cell counts published advisories first published in that UTC month: the
+month of the earliest publication on the advisory's timeline, the event "Time
+to publish" measures to. An advisory published in November 2024 and published
+again in February 2025 counts in November 2024 alone. Triage, draft, and closed
+advisories are outside the table.
+
+The table runs from the year of the earliest publication to the later of the
+current UTC month and the month of the latest publication. Months without a
+publication show 0, and months after the end of the table are blank.
+
+The sample size counts the published advisories whose page is loaded and shows
+a publication, out of all published advisories: with 4 published advisories, 1
+of them not loaded yet and 1 whose page shows no publication, it reads "2 of
+4". With no publication counted, the table reads "Nothing counted".
 
 ### Counts
 
@@ -340,13 +360,14 @@ The keys appear in this order, and every one is always present.
 | --- | --- | --- | --- |
 | `schemaVersion` | number | The version of the file's shape: which keys it holds and what each holds. The shape this page describes is `1`. | Not shown |
 | `repository` | string | The repository as `owner/repo`. | The repository whose list is open |
-| `generatedAt` | string | The instant the statistics are computed against, in ISO 8601 UTC with milliseconds, like `2026-09-01T00:00:00.000Z`. A wait that runs to the present runs to this instant, and "Reports by month" ends no earlier than its month. | Not shown |
+| `generatedAt` | string | The instant the statistics are computed against, in ISO 8601 UTC with milliseconds, like `2026-09-01T00:00:00.000Z`. A wait that runs to the present runs to this instant, and "Reports by month" and "Published advisories by month" end no earlier than its month. | Not shown |
 | `coverage` | object | How much of the repository the statistics cover. | The chips above the statistics |
 | `outcome` | object | A count box. | "Outcome" |
 | `closureReason` | object | A count box. | "Closure reason" |
 | `open` | object | A count box. | "Open" |
 | `severity` | object | A count box. | "Severity" |
-| `reportsByMonth` | object | The months table. | "Reports by month" |
+| `reportsByMonth` | object | A months table. | "Reports by month" |
+| `publishedByMonth` | object | A months table. | "Published advisories by month" |
 | `timeToFirstResponse` | object | A timing box. | "Time to first response" |
 | `timeToAccept` | object | A timing box. | "Time to accept" |
 | `timeToClose` | object | A timing box. | "Time to close" |
@@ -382,12 +403,14 @@ Each row holds:
 | `count` | number | The advisories in the row. | The row's count |
 | `share` | number or null | `count` divided by `counted`. `null` on the "Not loaded yet" rows of "Closure reason" and "Severity" and on the "None" row of "Severity". | The row's percentage, or the dash in its place |
 
-### `reportsByMonth`
+### Months tables
+
+`reportsByMonth` and `publishedByMonth` share one shape.
 
 | Key | Type | Holds | On the page |
 | --- | --- | --- | --- |
-| `counted` | number | Advisories with a report time. | The first number of "N of M" |
-| `total` | number | All advisories counted. | The second number of "N of M" |
+| `counted` | number | For `reportsByMonth`, advisories with a report time. For `publishedByMonth`, published advisories whose page is loaded and shows a publication. | The first number of "N of M" |
+| `total` | number | For `reportsByMonth`, all advisories counted. For `publishedByMonth`, all published advisories. | The second number of "N of M" |
 | `years` | array | One object per table row, oldest year first. Empty when the box reads "Nothing counted". | The table rows |
 | `monthTotals` | array | Twelve numbers, January first. Each is the sum of that month across `years`, a `null` month adding nothing. Twelve zeros when the box reads "Nothing counted". | The "Total" row, "Jan" through "Dec" |
 
@@ -396,7 +419,7 @@ Each year holds:
 | Key | Type | Holds | On the page |
 | --- | --- | --- | --- |
 | `year` | number | The UTC year. | "Year" |
-| `months` | array | Twelve entries, January first. Each is the number of advisories reported in that UTC month, or `null` for a month after the end of the table. | "Jan" through "Dec" |
+| `months` | array | Twelve entries, January first. Each is the number of advisories reported (`reportsByMonth`) or first published (`publishedByMonth`) in that UTC month, or `null` for a month after the end of the table. | "Jan" through "Dec" |
 | `total` | number | The sum of the year's months. | "Total" |
 
 ### Timing boxes
@@ -466,6 +489,14 @@ September 1, 2026. The example puts each row, each `months` array, and
     ],
     "monthTotals": [0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0]
   },
+  "publishedByMonth": {
+    "counted": 1,
+    "total": 1,
+    "years": [
+      { "year": 2026, "months": [0, 0, 0, 0, 0, 0, 1, 0, 0, null, null, null], "total": 1 }
+    ],
+    "monthTotals": [0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0]
+  },
   "timeToFirstResponse": {
     "loaded": 2,
     "total": 3,
@@ -504,6 +535,6 @@ September 1, 2026. The example puts each row, each `months` array, and
 }
 ```
 
-The published advisory was accepted a day after its report (86400000) and
-published four days after it (345600000). The triage advisory, reported on
+The published advisory, reported on July 1, was accepted a day after its report
+(86400000) and published four days after it (345600000), in July. The triage advisory, reported on
 August 1, has waited 31 days (2678400000) for a response and an acceptance.

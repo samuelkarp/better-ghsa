@@ -399,7 +399,8 @@ The statistics view covers all open and completed advisories. It uses the page
 load's list walk and the reads of the other views, and sends no requests.
 
 Show counts and ratios by outcome, closure reason, open state, and severity.
-Show report counts by month in a table of years.
+Show report counts by month in a table of years, and publication counts by
+month in a second one.
 
 Outcome statistics count completed advisories as published or closed.
 Closure-reason statistics cover closed advisories. Count them by their stored
@@ -436,6 +437,13 @@ zero included; later months are blank. A last row totals each month across
 the years and the whole table. It spans the full width of the
 view, above the counts and the timings, and shows its sample size as the
 advisories with a report time out of all advisories.
+
+The publication-month table counts published advisories by the UTC month of
+their first publication event, the event time to publish measures to. It
+spans the full width of the view directly below the report-month table, with
+the same columns, the same range rule over publication months, and the same
+totals row. It shows its sample size as the published advisories whose detail
+page is read and shows a publication event, out of all published advisories.
 
 Timing, reconstructed from page-observable events:
 

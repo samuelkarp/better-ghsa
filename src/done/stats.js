@@ -65,10 +65,12 @@ if (typeof require === 'function') {
  * @property {boolean} complete Whether every selected state crawl reached its last page.
  * @property {Record<string, number | null>} expected Counts from GitHub's state tabs.
  * @property {Record<string, Tally>} counts Tallies by outcome, reason, open state,
- *   severity, and month. The outcome tally covers published and closed advisories; the
- *   reason tally covers read closed advisories; the open tally covers triage and draft
- *   advisories; the severity tally covers published advisories and drafts whose scoring
- *   a maintainer confirmed.
+ *   severity, report month, and publication month. The outcome tally covers published
+ *   and closed advisories; the reason tally covers read closed advisories; the open
+ *   tally covers triage and draft advisories; the severity tally covers published
+ *   advisories and drafts whose scoring a maintainer confirmed; the publication-month
+ *   tally covers published advisories, counting the read ones with a publication event
+ *   in the UTC month of their first publication.
  * @property {Record<TimingKey, ReadTiming>} timings Timings keyed by TIMINGS
  *   entries. The close timing covers closed advisories and the publish timing
  *   published advisories.
@@ -473,6 +475,11 @@ if (typeof require === 'function') {
    * maintainer confirmed. Unread drafts are outside its corpus and counted in
    * its `unread`.
    *
+   * The publication-month tally covers published advisories and counts each
+   * read one in the UTC month of its first publication event, the event the
+   * publish timing measures to. A published advisory unread or without that
+   * event is missing from the tally.
+   *
    * The first-response and acceptance timings count read advisories. The
    * first-response timing holds the longest wait, to `at`, of read open
    * advisories without a response; the acceptance timing holds the longest
@@ -503,6 +510,8 @@ if (typeof require === 'function') {
     let unreadSeverities = 0;
     /** @type {(string | null)[]} */
     const months = [];
+    /** @type {(string | null)[]} */
+    const publishedMonths = [];
     /** @type {(number | null)[]} */
     const firstResponses = [];
     let read = 0;
@@ -548,6 +557,10 @@ if (typeof require === 'function') {
         if (advisory === null) publishedUnread += 1;
         else publishedRead += 1;
         publishes.push(durationOf(advisory, publishAt));
+        const published = advisory === null ? null : publishAt(advisory);
+        publishedMonths.push(
+          published === null ? null : new Date(published).toISOString().slice(0, 7)
+        );
       }
       if (named === DRAFT_STATE && advisory !== null) {
         publishWaiting = longer(publishWaiting, sinceReport(advisory, at));
@@ -593,6 +606,10 @@ if (typeof require === 'function') {
         open: tally(opens, { corpus: opens.length, unread: 0 }),
         severity: tally(severities, { corpus: severities.length, unread: unreadSeverities }),
         month: tally(months, over),
+        publishedMonth: tally(publishedMonths, {
+          corpus: publishedMonths.length,
+          unread: publishedUnread,
+        }),
       },
       timings: {
         firstResponse: response,
