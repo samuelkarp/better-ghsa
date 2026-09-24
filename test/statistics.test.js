@@ -419,7 +419,7 @@ test('the statistics are over the whole corpus, open and done', async () => {
 
   assert.deepStrictEqual(
     over(doc),
-    ['5 total advisories', '3 open', '2 done', '2 unread'],
+    ['5 total advisories', '3 open', '2 completed', '2 not loaded yet'],
     'the corpus is both halves, and both are walked to their last page'
   );
 
@@ -612,7 +612,7 @@ test('closure reasons count a close with no reason and list the unread apart', a
   assert.deepStrictEqual(countLines(doc, 'reason'), [
     'Duplicate 1 50%',
     'None 1 50%',
-    'Unread 1 —',
+    'Not loaded yet 1 —',
   ]);
   assert.strictEqual(
     textOf(doc, `#${statistics.ROOT_ID} [data-bghsa-count="reason"] .bghsa-stats-meta`),
@@ -663,7 +663,7 @@ test('severities run by level over publications and confirmed drafts', async () 
     'Low 3 27%',
     'Extreme 4 36%',
     'None 1 —',
-    'Unread 1 —',
+    'Not loaded yet 1 —',
   ]);
   assert.strictEqual(
     textOf(doc, `#${statistics.ROOT_ID} [data-bghsa-count="severity"] .bghsa-stats-meta`),
@@ -745,14 +745,14 @@ test('a half nothing has crawled says what its numbers are over', async () => {
   assert.deepStrictEqual(over(doc), [
     '4 total advisories',
     '2 open',
-    'Open not crawled',
-    '2 done',
-    '4 unread',
+    'Open list not loaded',
+    '2 completed',
+    '4 not loaded yet',
   ]);
   assert.deepStrictEqual(countLines(doc, 'open'), ['Triage 2 100%']);
   assert.deepStrictEqual(
     countLines(doc, 'reason'),
-    ['Unread 1 —'],
+    ['Not loaded yet 1 —'],
     'a closure nobody read leaves only the unread row'
   );
   assert.strictEqual(
@@ -774,12 +774,30 @@ test('a half nothing has crawled says what its numbers are over', async () => {
   assert.deepStrictEqual(over(other.doc), [
     '3 total advisories',
     '3 open',
-    '0 done',
-    'Done not crawled',
-    '3 unread',
+    '0 completed',
+    'Completed list not loaded',
+    '3 not loaded yet',
     '4 on GitHub',
   ]);
   assert.deepStrictEqual(countLines(other.doc, 'open'), ['Triage 2 67%', 'Draft 1 33%']);
+});
+
+test('a half whose crawl stopped short says its list is partly loaded', async () => {
+  const { doc, base } = await repository({
+    owner: 'stats-partly',
+    states: { published: [{ ghsaId: ghsa('plaa') }], closed: [{ ghsaId: ghsa('plbb') }] },
+  });
+  // The closed list fails, so the walk of the completed half stops short.
+  delete pages[`${base}?state=closed`];
+  await view.collect(doc, { ...QUEUE_OPTIONS, href: `https://github.com${base}?state=triage` });
+
+  statsToggle(doc).click();
+  await statistics.load(doc);
+
+  assert.ok(
+    over(doc).includes('Completed list partly loaded'),
+    `the chips say nothing of the stopped walk: ${over(doc).join(', ')}`
+  );
 });
 
 test('a repository nothing has read says so and offers no export', async () => {
@@ -831,7 +849,7 @@ test('the statistics view asks GitHub for nothing of its own', async () => {
   );
   assert.deepStrictEqual(
     over(doc),
-    ['3 total advisories', '1 open', '2 done', '3 unread'],
+    ['3 total advisories', '1 open', '2 completed', '3 not loaded yet'],
     'and it still drew the whole corpus, so the count above is not over nothing'
   );
 });
@@ -938,11 +956,11 @@ test('the statistics say a crawl is filling the corpus they are over', async () 
   });
   statsToggle(doc).click();
   await statistics.load(doc);
-  assert.ok(!over(doc).includes(statistics.READING_TEXT), 'nothing is running');
+  assert.ok(!over(doc).includes('Loading...'), 'nothing is running');
 
   view.setState(doc, { reading: true });
   statistics.draw(doc);
-  assert.ok(over(doc).includes(statistics.READING_TEXT), 'and the numbers do not say so');
+  assert.ok(over(doc).includes('Loading...'), 'and the numbers do not say so');
   view.setState(doc, { reading: false });
 });
 
@@ -954,7 +972,7 @@ test('the numbers are not drawn under the repository the maintainer moved to', a
   });
   statsToggle(doc).click();
   await statistics.load(doc);
-  assert.deepStrictEqual(over(doc), ['2 total advisories', '1 open', '1 done', '2 unread']);
+  assert.deepStrictEqual(over(doc), ['2 total advisories', '1 open', '1 completed', '2 not loaded yet']);
   assert.strictEqual(statistics.current(doc).ref?.owner, ref.owner);
 
   const other = { owner: 'stats-moved-to', repo: 'Fork-Knife' };

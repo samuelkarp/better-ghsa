@@ -399,16 +399,16 @@ over open advisories.
 Severity statistics cover published advisories and drafts whose scoring a
 maintainer has confirmed at its current value, the confirmation behind the
 filled severity chip of section 9. Exclude triage and closed advisories,
-unconfirmed drafts, and drafts whose scoring has changed since its
-confirmation. Order severities by level: critical, high, moderate, low, any
-other level, then unset. Judging a draft's confirmation requires reading its
-detail page. Exclude unread drafts from severity ratios and show their count
-beside the severities.
+unconfirmed drafts, and drafts whose scoring has changed since its confirmation.
+Order severities by level: critical, high, moderate, low, any other level, then
+unset. Judging a draft's confirmation requires reading its detail page. Exclude
+drafts not loaded yet from severity ratios and show their count beside the
+severities.
 
 The list page establishes publication and closure. A closure reason requires
-reading the detail page. Exclude unread closed advisories from closure-reason
-ratios until their reason can be determined, and show their count beside the
-closure reasons.
+reading the detail page. Exclude closed advisories not loaded yet from
+closure-reason ratios until their reason can be determined, and show their count
+beside the closure reasons.
 
 The unset-reason category of the closure-reason statistics links to the done
 page filtered to closed advisories with an unset reason.
@@ -437,12 +437,12 @@ Measure closure and publication separately. Timings use the first matching
 event; done-list ordering uses the last.
 
 Time to first response shows its sample size as the read advisories out of all
-advisories; unread advisories appear only as that difference. Its spread covers
-read advisories with a response at or after the report time. Beside the spread,
-a no-response row shows the longest current wait: among read open advisories
-without a response, the longest time from the report to now. The row is absent
-when there is no such advisory. Read completed advisories without a response
-are outside that row.
+advisories; advisories not loaded yet appear only as that difference. Its spread
+covers read advisories with a response at or after the report time. Beside the
+spread, a no-response row shows the longest current wait: among read open
+advisories without a response, the longest time from the report to now. The row
+is absent when there is no such advisory. Read completed advisories without a
+response are outside that row.
 
 Time to accept shows its sample size as the read advisories out of all
 advisories. Its spread covers read advisories with an acceptance event. Beside

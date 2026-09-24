@@ -56,9 +56,9 @@ if (typeof require === 'function') {
 
   const NOTHING_TEXT = 'Nothing counted';
 
-  const READING_TEXT = 'Reading';
+  const READING_TEXT = globalThis.bghsa.view.LOADING_TEXT;
 
-  const UNREAD_TEXT = 'Unread';
+  const UNREAD_TEXT = 'Not loaded yet';
 
   /**
    * Statistics combine open and completed advisories already collected by the
@@ -68,7 +68,7 @@ if (typeof require === 'function') {
    */
   const HALVES = [
     { key: 'open', name: 'Open', states: globalThis.bghsa.parseList.OPEN_STATES },
-    { key: 'done', name: 'Done', states: globalThis.bghsa.corpus.DONE_STATES },
+    { key: 'done', name: 'Completed', states: globalThis.bghsa.corpus.DONE_STATES },
   ];
 
   /**
@@ -359,11 +359,11 @@ if (typeof require === 'function') {
       node.setAttribute('data-bghsa-half', half.key);
       box.append(node);
       if (half.corpus.complete) continue;
-      const walked = half.walked ? 'partly crawled' : 'not crawled';
+      const walked = half.walked ? 'list partly loaded' : 'list not loaded';
       box.append(chips.buildChip(doc, { text: `${half.name} ${walked}` }));
     }
     if (corpus.unread.length > 0) {
-      box.append(chips.buildChip(doc, { text: `${corpus.unread.length} unread` }));
+      box.append(chips.buildChip(doc, { text: `${corpus.unread.length} not loaded yet` }));
     }
     const total = expectedTotal(corpus.expected);
     if (total !== null && total !== corpus.members.length) {
@@ -737,7 +737,6 @@ if (typeof require === 'function') {
     SHOW_STATS,
     SHOW_OPEN,
     EMPTY_TEXT,
-    READING_TEXT,
     STYLE_TEXT,
     stateOf,
     current,

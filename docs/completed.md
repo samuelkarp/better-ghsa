@@ -151,10 +151,13 @@ or data.
 A repository without collected data shows "Nothing has been read on this
 repository".
 
-Chips above the statistics show the total and the open and completed counts.
-They identify unread advisories, incomplete or unstarted crawls, and GitHub's
-tab counts. "Reading" appears during collection; the numbers can change as
-results arrive.
+Chips above the statistics show the total and the open and completed counts, as
+"3 open" and "2 completed". "5 not loaded yet" counts advisories whose detail
+page has not been read. "Open list not loaded" and "Completed list partly
+loaded" name a group whose list crawl has not started or has not finished. "4 on
+GitHub" shows the sum of GitHub's tab counts when it differs from the total.
+"Loading..." appears during collection; the numbers can change as results
+arrive.
 
 ### Counts
 
@@ -162,16 +165,17 @@ Four sections show "Outcome", "Closure reason", "Open", and "Severity". Each
 reports its sample size as "N of M". Rows show a value, its count, and its
 percentage of the sample. Missing values appear as "None" with a count.
 
-"Outcome" counts completed advisories as "Published" or "Closed". The list
-page supplies both, so unread advisories are counted. Open advisories are
+"Outcome" counts completed advisories as "Published" or "Closed". The list page
+supplies both, so advisories not loaded yet are counted. Open advisories are
 excluded from this section.
 
 "Closure reason" counts closed advisories: each stored closure reason, and
 "None" for fetched closed advisories without a reason. All these rows have
-percentages, including "None". "Unread" counts closed advisories whose detail
-page has not been read, without a percentage, and appears only when there are
-any. The sample size counts fetched closed advisories out of all closed
-advisories: with 56 closed advisories, 5 of them unread, it reads "51 of 56".
+percentages, including "None". "Not loaded yet" counts closed advisories whose
+detail page has not been read, without a percentage, and appears only when
+there are any. The sample size counts fetched closed advisories out of all
+closed advisories: with 56 closed advisories, 5 of them not loaded yet, it
+reads "51 of 56".
 
 "None" in "Closure reason" is a link. Pressing it opens the completed view
 with "State: Closed" and "Closure reason: None" selected.
@@ -184,11 +188,11 @@ has confirmed, the drafts with a filled severity chip in the open list. Triage
 and closed advisories are excluded, and so are drafts whose severity is
 unconfirmed or has changed since its confirmation. Rows run by level:
 "Critical", "High", "Moderate", "Low", any other level, then "None" for
-advisories without a severity. "Unread" counts drafts whose detail page has not
-been read, without a percentage, and appears only when there are any. The
-sample size counts advisories with a severity out of all of these: with 10
-published advisories, 1 of them without a severity, 3 confirmed drafts, and 1
-unread draft, it reads "12 of 14".
+advisories without a severity. "Not loaded yet" counts drafts whose detail
+page has not been read, without a percentage, and appears only when there are
+any. The sample size counts advisories with a severity out of all of these:
+with 10 published advisories, 1 of them without a severity, 3 confirmed
+drafts, and 1 draft not loaded yet, it reads "12 of 14".
 
 The other sections calculate percentages over supplied values. Their "None"
 rows show a count without a percentage.
@@ -196,16 +200,16 @@ rows show a count without a percentage.
 ### Reports by month
 
 "Reports by month" is a table across the full width of the view, below the
-counts. Its columns are "Year", "Jan" through "Dec", and "Total". The table
-ends at the later of the current UTC month and the month of the latest report,
-so a report dated ahead of the browser's clock counts. Each row is a year,
-from the year of the earliest report to the year the table ends, oldest first.
-A cell counts open and completed advisories reported in that month, read in
-UTC: a report at 23:30 on December 31 in New York (UTC-5) counts in January.
-An advisory whose detail read supplies no report time, because it is unread
-or its page shows none, uses the time its list row shows. Months without
-reports show 0, months after the end of the table are blank, and "Total" sums
-the row. A year without reports between two with them appears with all zeros.
+counts. Its columns are "Year", "Jan" through "Dec", and "Total". The table ends
+at the later of the current UTC month and the month of the latest report, so a
+report dated ahead of the browser's clock counts. Each row is a year, from the
+year of the earliest report to the year the table ends, oldest first. A cell
+counts open and completed advisories reported in that month, read in UTC: a
+report at 23:30 on December 31 in New York (UTC-5) counts in January. An
+advisory whose detail read supplies no report time, because it is not loaded yet
+or its page shows none, uses the time its list row shows. Months without reports
+show 0, months after the end of the table are blank, and "Total" sums the row. A
+year without reports between two with them appears with all zeros.
 
 The sample size counts advisories with a report time out of all advisories.
 With no report time at all, the table reads "Nothing counted".
@@ -227,13 +231,13 @@ collaborator is not a response. Email responses are outside this measurement.
 Advisories a maintainer filed are included.
 
 "Time to first response" reports its sample size as the read advisories out of
-all advisories, so unread advisories show only as the difference: with 52
-advisories, 5 of them unread, it reads "47 of 52". "Min", "Median", "Mean", and
-"Max" cover the read advisories with a response at or after the report time.
-"No response" shows no count. It shows the longest current wait: among read
-triage and draft advisories without a response, the longest time since the
-report. It appears only when there is such an advisory. Completed advisories
-without a response are outside this row.
+all advisories, so advisories not loaded yet show only as the difference: with
+52 advisories, 5 of them not loaded yet, it reads "47 of 52". "Min", "Median",
+"Mean", and "Max" cover the read advisories with a response at or after the
+report time. "No response" shows no count. It shows the longest current wait:
+among read triage and draft advisories without a response, the longest time
+since the report. It appears only when there is such an advisory. Completed
+advisories without a response are outside this row.
 
 "Time to accept" also reports its sample size as the read advisories out of
 all advisories. "Min", "Median", "Mean", and "Max" cover the read advisories
@@ -244,9 +248,9 @@ only when there is such an advisory. Draft, published, and closed advisories
 without an acceptance event are outside this row.
 
 "Time to close" covers closed advisories only. Its sample size counts the read
-closed advisories out of all closed advisories: with 56 closed advisories, 5
-of them unread, it reads "51 of 56". "Min", "Median", "Mean", and "Max" cover
-the read closed advisories with a close on their timeline. A reporter who
+closed advisories out of all closed advisories: with 56 closed advisories, 5 of
+them not loaded yet, it reads "51 of 56". "Min", "Median", "Mean", and "Max"
+cover the read closed advisories with a close on their timeline. A reporter who
 withdraws a report closes the advisory, and that close is measured like any
 other. No row appears beside the spread.
 
