@@ -95,7 +95,8 @@ if (typeof require === 'function') {
    */
 
   /**
-   * `field` names the group in the exported statistics.
+   * `field` names the group in the exported statistics, which lists the
+   * groups in this order.
    *
    * @type {readonly CountGroup[]}
    */
@@ -113,6 +114,12 @@ if (typeof require === 'function') {
     { key: 'open', name: 'Open', by: 'count', field: 'open' },
     { key: 'severity', name: 'Severity', by: 'level', unreadCounts: true, field: 'severity' },
   ];
+
+  /**
+   * The count boxes in page order, the order they stack in on a narrow view.
+   * The stylesheet places each box by its key.
+   */
+  const COUNT_ORDER = ['open', 'outcome', 'reason', 'severity'];
 
   const MONTHS_NAME = 'Reports by month';
 
@@ -147,14 +154,40 @@ if (typeof require === 'function') {
   ];
 
   /**
-   * Use width-based columns to pack variable-height lists while keeping each
-   * list together.
+   * The view's own width picks the layout of the boxes. Below 36rem every box
+   * stacks in one column. From 36rem the counts take two columns, Open,
+   * Outcome, and Severity down the first and Closure reason in the second,
+   * and the timings two by two. From 60rem the counts take three columns,
+   * Open over Outcome, then Closure reason, then Severity, and the timings
+   * four across. A box keeps its own height. A last row of `1fr` takes up
+   * the height a box spanning every row adds beyond the boxes stacked beside
+   * it, so the stacked boxes keep their own heights too.
    */
   const STYLE_TEXT = [
+    '.bghsa-stats-root { container-type: inline-size; container-name: bghsa-stats; }',
+    // The export buttons wrap below the title on a narrow view.
+    '.bghsa-stats-header { flex-wrap: wrap; gap: 8px; }',
     '.bghsa-stats-exports { display: flex; gap: 8px; }',
     '.bghsa-stats-over { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }',
-    '.bghsa-stats-lists { columns: 20rem; column-gap: 16px; }',
-    '.bghsa-stats-list { break-inside: avoid; }',
+    '.bghsa-stats-lists { display: grid; grid-template-columns: minmax(0, 1fr);' +
+      ' column-gap: 16px; align-items: start; }',
+    '.bghsa-stats-counts { grid-template-areas: "open" "outcome" "reason" "severity"; }',
+    ...COUNT_ORDER.map(
+      (key) => `.bghsa-stats-counts > [data-bghsa-count="${key}"] { grid-area: ${key}; }`
+    ),
+    '@container bghsa-stats (min-width: 36rem) {',
+    '  .bghsa-stats-counts { grid-template-columns: repeat(2, minmax(0, 1fr));' +
+      ' grid-template-rows: auto auto auto 1fr;' +
+      ' grid-template-areas: "open reason" "outcome reason" "severity reason" ". reason"; }',
+    '  .bghsa-stats-timings { grid-template-columns: repeat(2, minmax(0, 1fr)); }',
+    '}',
+    '@container bghsa-stats (min-width: 60rem) {',
+    '  .bghsa-stats-counts { grid-template-columns: repeat(3, minmax(0, 1fr));' +
+      ' grid-template-rows: auto auto 1fr;' +
+      ' grid-template-areas: "open reason severity" "outcome reason severity"' +
+      ' ". reason severity"; }',
+    '  .bghsa-stats-timings { grid-template-columns: repeat(4, minmax(0, 1fr)); }',
+    '}',
     '.bghsa-stats-title { gap: 0 8px; }',
     '.bghsa-stats-line { display: flex; align-items: baseline; gap: 4px 12px; }',
     '.bghsa-stats-value { flex: 1 1 auto; }',
@@ -477,7 +510,7 @@ if (typeof require === 'function') {
    * @returns {Element}
    */
   function buildTally(doc, group, tally) {
-    const box = element(doc, 'div', 'Box mb-3 bghsa-stats-list');
+    const box = element(doc, 'div', 'Box mb-3');
     box.setAttribute('data-bghsa-count', group.key);
     const shown = tallyRowsOf(group, tally);
     box.append(buildHeader(doc, group.name, `${shown.counted} of ${shown.total}`));
@@ -576,7 +609,7 @@ if (typeof require === 'function') {
    * @returns {Element}
    */
   function buildTiming(doc, timing, found) {
-    const box = element(doc, 'div', 'Box mb-3 bghsa-stats-list');
+    const box = element(doc, 'div', 'Box mb-3');
     box.setAttribute('data-bghsa-timing', timing.key);
     box.append(buildHeader(doc, timing.name, `${found.read} of ${found.corpus}`));
     const list = element(doc, 'ul', 'bghsa-stats-rows');
@@ -604,15 +637,16 @@ if (typeof require === 'function') {
     /** @type {Element[]} */
     const parts = [];
 
+    parts.push(buildMonths(doc, summary.counts.month, summary.at));
+
     const counts = element(doc, 'div', 'bghsa-stats-lists bghsa-stats-counts');
-    for (const group of COUNT_GROUPS) {
-      const tally = summary.counts[group.key];
-      if (tally === undefined) continue;
+    for (const key of COUNT_ORDER) {
+      const group = COUNT_GROUPS.find((each) => each.key === key);
+      const tally = summary.counts[key];
+      if (group === undefined || tally === undefined) continue;
       counts.append(buildTally(doc, group, tally));
     }
     parts.push(counts);
-
-    parts.push(buildMonths(doc, summary.counts.month, summary.at));
 
     const timings = element(doc, 'div', 'bghsa-stats-lists bghsa-stats-timings');
     for (const timing of globalThis.bghsa.stats.TIMINGS) {

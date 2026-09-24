@@ -16,6 +16,8 @@ toggles:
 - "Show GitHub's view" restores GitHub's rows. Its toggle then reads "Show
   Better GHSA", and the other two toggles are hidden.
 
+The toggles sit at the right end of the toolbar in every view.
+
 "Show open" returns to the extension's table of open advisories. One view is
 visible at a time.
 
@@ -163,6 +165,40 @@ on an earlier one. "4 on GitHub" shows the sum of GitHub's tab counts when it
 differs from the total. "Loading..." appears while the list walk and the
 reads run; the numbers can change as results arrive.
 
+Below the chips, "Reports by month" spans the full width of the view. The four
+count boxes follow, then the four timing boxes. The width of the view sets their
+columns. Widths are in rem, the page's base text size, 16 pixels by default:
+
+- 60rem and wider: the counts take three columns, "Open" above "Outcome", then
+  "Closure reason", then "Severity". The timings sit four across.
+- From 36rem up to 60rem: the counts take two columns, "Open", "Outcome", and
+  "Severity" down the first and "Closure reason" in the second. The timings
+  sit two by two.
+- Narrower than 36rem: every box stacks in one column, "Open", "Outcome",
+  "Closure reason", and "Severity", then the timings.
+
+Each box is as tall as its own rows. The timing boxes run "Time to first
+response", "Time to accept", "Time to close", and "Time to publish".
+
+### Reports by month
+
+"Reports by month" is a table across the full width of the view, above the
+counts. Its columns are "Year", "Jan" through "Dec", and "Total". The table ends
+at the later of the current UTC month and the month of the latest report, so a
+report dated ahead of the browser's clock counts. Each row is a year, from the
+year of the earliest report to the year the table ends, oldest first. A cell
+counts open and completed advisories reported in that month, read in UTC: a
+report at 23:30 on December 31 in New York (UTC-5) counts in January. An
+advisory whose detail read supplies no report time, because it is not loaded yet
+or its page shows none, uses the time its list row shows. Months without reports
+show 0, months after the end of the table are blank, and "Total" sums the row. A
+year without reports between two with them appears with all zeros. A last row,
+"Total", sums each month across the years, a blank month adding nothing. Its
+last cell sums the whole table and equals the sample size's first number.
+
+The sample size counts advisories with a report time out of all advisories.
+With no report time at all, the table reads "Nothing counted".
+
 ### Counts
 
 Four sections show "Outcome", "Closure reason", "Open", and "Severity". Each
@@ -200,25 +236,6 @@ drafts, and 1 draft not loaded yet, it reads "12 of 14".
 
 The other sections calculate percentages over supplied values. Their "None"
 rows show a count without a percentage.
-
-### Reports by month
-
-"Reports by month" is a table across the full width of the view, below the
-counts. Its columns are "Year", "Jan" through "Dec", and "Total". The table ends
-at the later of the current UTC month and the month of the latest report, so a
-report dated ahead of the browser's clock counts. Each row is a year, from the
-year of the earliest report to the year the table ends, oldest first. A cell
-counts open and completed advisories reported in that month, read in UTC: a
-report at 23:30 on December 31 in New York (UTC-5) counts in January. An
-advisory whose detail read supplies no report time, because it is not loaded yet
-or its page shows none, uses the time its list row shows. Months without reports
-show 0, months after the end of the table are blank, and "Total" sums the row. A
-year without reports between two with them appears with all zeros. A last row,
-"Total", sums each month across the years, a blank month adding nothing. Its
-last cell sums the whole table and equals the sample size's first number.
-
-The sample size counts advisories with a report time out of all advisories.
-With no report time at all, the table reads "Nothing counted".
 
 ### Timings
 

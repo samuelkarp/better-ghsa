@@ -434,7 +434,7 @@ row per year, from the year of the earliest report to the year it ends, and a
 column per month and a total. Every month through its end shows its count,
 zero included; later months are blank. A last row totals each month across
 the years and the whole table. It spans the full width of the
-view, below the counts and above the timings, and shows its sample size as the
+view, above the counts and the timings, and shows its sample size as the
 advisories with a report time out of all advisories.
 
 Timing, reconstructed from page-observable events:

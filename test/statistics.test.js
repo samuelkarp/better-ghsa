@@ -448,8 +448,8 @@ test('the statistics are over the whole corpus, open and done', async () => {
     Array.from(doc.querySelectorAll(`#${statistics.ROOT_ID} [data-bghsa-count]`)).map((box) =>
       box.getAttribute('data-bghsa-count')
     ),
-    ['outcome', 'reason', 'open', 'severity'],
-    'the outcome comes first, ahead of the closure reason'
+    ['open', 'outcome', 'reason', 'severity'],
+    'the boxes run Open, Outcome, Closure reason, Severity, the order they stack in'
   );
   assert.deepStrictEqual(countLines(doc, 'outcome'), ['Closed 1 50%', 'Published 1 50%']);
   assert.strictEqual(
@@ -539,10 +539,233 @@ test('reports are counted by month in a table of years', async () => {
 
   const months = one(doc, `#${statistics.ROOT_ID} [data-bghsa-months]`);
   assert.ok(months.parentElement === one(doc, `#${statistics.ROOT_ID}`), 'on its own row');
+});
+
+/**
+ * Parse a stylesheet into its rules in source order. A rule inside a
+ * `@container <name> (min-width: <n>rem)` block carries that query.
+ *
+ * @param {string} text
+ * @returns {{ query: { name: string, min: number } | null, selector: string,
+ *   declarations: Map<string, string> }[]}
+ */
+function rulesOf(text) {
+  /** @type {ReturnType<typeof rulesOf>} */
+  const rules = [];
+  /** @type {{ name: string, min: number } | null} */
+  let query = null;
+  const tokens =
+    /@container\s+([\w-]+)\s*\(min-width:\s*([\d.]+)rem\)\s*\{|([^{}]+)\{([^{}]*)\}|\}/g;
+  for (const found of text.matchAll(tokens)) {
+    if (found[1] !== undefined) {
+      query = { name: found[1], min: Number(found[2]) };
+    } else if (found[3] !== undefined) {
+      /** @type {Map<string, string>} */
+      const declarations = new Map();
+      for (const part of (found[4] ?? '').split(';')) {
+        const colon = part.indexOf(':');
+        if (colon > 0) declarations.set(part.slice(0, colon).trim(), part.slice(colon + 1).trim());
+      }
+      rules.push({ query, selector: found[3].trim().replace(/\s+/g, ' '), declarations });
+    } else {
+      query = null;
+    }
+  }
+  return rules;
+}
+
+/**
+ * The declarations an element's own class rules give it at one width of the
+ * view: the rules outside any container query, then each query the width
+ * meets, in source order.
+ *
+ * @param {string} text The stylesheet.
+ * @param {Element} element
+ * @param {number} [rem] The width of the view.
+ * @returns {Map<string, string>}
+ */
+function styleOf(text, element, rem = 0) {
+  /** @type {Map<string, string>} */
+  const style = new Map();
+  for (const rule of rulesOf(text)) {
+    if (rule.query !== null && rule.query.min > rem) continue;
+    if (!/^(\.[\w-]+)+$/.test(rule.selector)) continue;
+    const classes = rule.selector.split('.').slice(1);
+    if (!classes.every((name) => element.classList.contains(name))) continue;
+    for (const [property, value] of rule.declarations) style.set(property, value);
+  }
+  return style;
+}
+
+/**
+ * The tracks a track list names, with `repeat(n, ...)` written out n times.
+ *
+ * @param {string | undefined} list
+ * @returns {string[]}
+ */
+function tracksOf(list) {
+  /** @type {string[]} */
+  const tracks = [];
+  const token = /repeat\((\d+),((?:[^()]|\([^()]*\))*)\)|\S+\([^()]*\)|[^\s()]+/g;
+  for (const found of (list ?? '').matchAll(token)) {
+    if (found[1] === undefined) tracks.push(found[0].replace(/\s+/g, ' '));
+    else for (let n = 0; n < Number(found[1]); n += 1) tracks.push(...tracksOf(found[2]));
+  }
+  return tracks;
+}
+
+/**
+ * The named areas of a `grid-template-areas` value down each column, left to
+ * right.
+ *
+ * @param {string | undefined} template
+ * @returns {string[][]}
+ */
+function areasDown(template) {
+  const grid = Array.from((template ?? '').matchAll(/"([^"]*)"/g), (row) =>
+    (row[1] ?? '').trim().split(/\s+/)
+  );
+  /** @type {string[][]} */
+  const columns = [];
+  for (let column = 0; column < (grid[0]?.length ?? 0); column += 1) {
+    /** @type {string[]} */
+    const down = [];
+    for (const row of grid) {
+      const name = row[column] ?? '.';
+      if (name !== '.' && !down.includes(name)) down.push(name);
+    }
+    columns.push(down);
+  }
+  return columns;
+}
+
+test('the statistics put the months first, then the counts, then the timings', async () => {
+  const { doc } = await repository({
+    owner: 'stats-layout',
+    states: {
+      triage: [{ ghsaId: ghsa('laaa') }],
+      published: [{ ghsaId: ghsa('lbbb') }],
+      closed: [{ ghsaId: ghsa('lccc') }],
+    },
+    crawl: ['open', 'done'],
+  });
+
+  statsToggle(doc).click();
+  await statistics.load(doc);
+
+  const root = one(doc, `#${statistics.ROOT_ID}`);
+  assert.deepStrictEqual(
+    Array.from(root.children).map((part) => part.className),
+    [
+      'Box mb-3 bghsa-stats-head',
+      'Box mb-3 bghsa-stats-months',
+      'bghsa-stats-lists bghsa-stats-counts',
+      'bghsa-stats-lists bghsa-stats-timings',
+    ]
+  );
+  const timings = one(root, '.bghsa-stats-timings');
+  assert.deepStrictEqual(
+    Array.from(timings.children).map((box) => box.getAttribute('data-bghsa-timing')),
+    ['firstResponse', 'accept', 'close', 'publish']
+  );
+
+  // Each count box takes the grid area its key names.
+  const counts = one(root, '.bghsa-stats-counts');
+  const rules = rulesOf(statistics.STYLE_TEXT);
+  for (const box of Array.from(counts.children)) {
+    const key = box.getAttribute('data-bghsa-count');
+    const placed = rules.find(
+      (rule) => rule.selector === `.bghsa-stats-counts > [data-bghsa-count="${key}"]`
+    );
+    assert.strictEqual(
+      placed?.declarations.get('grid-area'),
+      key,
+      `the ${key} box has no place in the grid`
+    );
+  }
+  const container = styleOf(statistics.STYLE_TEXT, root);
+  assert.strictEqual(
+    container.get('container-type'),
+    'inline-size',
+    'the layout does not follow the width of the view'
+  );
+  const queried = new Set(rules.flatMap((rule) => (rule.query === null ? [] : [rule.query.name])));
+  assert.deepStrictEqual(
+    [...queried],
+    [container.get('container-name')],
+    'the queries name another container'
+  );
+
+  const header = one(root, '.bghsa-stats-head > .Box-header');
+  const heading = styleOf(statistics.STYLE_TEXT, header);
   assert.ok(
-    months.previousElementSibling === one(doc, `#${statistics.ROOT_ID} .bghsa-stats-counts`) &&
-      months.nextElementSibling === one(doc, `#${statistics.ROOT_ID} .bghsa-stats-timings`),
-    'between the counts and the timings'
+    header.classList.contains('d-flex') &&
+      heading.get('flex-wrap') === 'wrap' &&
+      heading.has('gap'),
+    'the export buttons overflow a narrow header'
+  );
+
+  /**
+   * @param {number} rem
+   */
+  const layoutAt = (rem) => {
+    const count = styleOf(statistics.STYLE_TEXT, counts, rem);
+    const timing = styleOf(statistics.STYLE_TEXT, timings, rem);
+    for (const style of [count, timing]) {
+      assert.strictEqual(style.get('display'), 'grid', `the boxes are not a grid at ${rem}rem`);
+      assert.strictEqual(style.get('align-items'), 'start', `a box is stretched at ${rem}rem`);
+    }
+    return {
+      counts: areasDown(count.get('grid-template-areas')),
+      rows: tracksOf(count.get('grid-template-rows')),
+      timings: tracksOf(timing.get('grid-template-columns')).length,
+    };
+  };
+  assert.deepStrictEqual(layoutAt(30), {
+    counts: [['open', 'outcome', 'reason', 'severity']],
+    rows: [],
+    timings: 1,
+  });
+  assert.deepStrictEqual(layoutAt(40), {
+    counts: [['open', 'outcome', 'severity'], ['reason']],
+    rows: ['auto', 'auto', 'auto', '1fr'],
+    timings: 2,
+  });
+  assert.deepStrictEqual(layoutAt(70), {
+    counts: [['open', 'outcome'], ['reason'], ['severity']],
+    rows: ['auto', 'auto', '1fr'],
+    timings: 4,
+  });
+});
+
+test('the view toggles end the bar in the statistics as in the other views', async () => {
+  const { doc } = await repository({
+    owner: 'stats-toggles',
+    states: { triage: [{ ghsaId: ghsa('taaa') }] },
+  });
+  const bar = one(doc, `#${table.ROOT_ID} .bghsa-list-bar`);
+  const group = one(bar, '.bghsa-list-toggles');
+
+  statsToggle(doc).click();
+  await statistics.load(doc);
+
+  assert.ok(
+    one(doc, `#${table.ROOT_ID} .bghsa-stats-toggle`).parentElement === group &&
+      group.parentElement === bar &&
+      bar.lastElementChild === group,
+    'the statistics moved the toggles off the bar they share with the other views'
+  );
+  assert.deepStrictEqual(
+    Array.from(bar.children)
+      .filter((part) => !part.classList.contains(table.HIDDEN_CLASS))
+      .map((part) => part.className),
+    ['BtnGroup bghsa-list-toggles'],
+    'the toggles are alone on the bar, where justifying the bar puts them on the left'
+  );
+  assert.strictEqual(
+    styleOf(table.STYLE_TEXT, group).get('margin-left'),
+    'auto',
+    'nothing holds the toggles to the right'
   );
 });
 

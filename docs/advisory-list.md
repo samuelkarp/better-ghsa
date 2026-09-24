@@ -17,6 +17,8 @@ Above the table:
 - "Show completed" and "Show statistics" open the other two views. Both toggles
   are hidden in GitHub's view.
 
+The toggles sit at the right end of the bar in every view.
+
 The page opens on the extension's table. Reloading resets the selected view,
 sort order, and filters.
 

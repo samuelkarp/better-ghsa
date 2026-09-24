@@ -164,6 +164,8 @@ if (typeof require === 'function') {
     '.bghsa-list-chips { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }',
     '.bghsa-list-status { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }',
     '.bghsa-list-owners { display: flex; flex-wrap: wrap; gap: 2px; align-items: center; }',
+    // The toggles end the bar in every view, whichever controls beside them are hidden.
+    '.bghsa-list-toggles { margin-left: auto; }',
     // Use the page foreground color to support both themes.
     '.bghsa-list-observed { color: var(--fgColor-muted, currentColor); white-space: nowrap; }',
     '.bghsa-list-meta { color: var(--fgColor-muted, currentColor); }',
