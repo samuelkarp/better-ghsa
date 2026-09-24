@@ -958,9 +958,9 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Collect done advisories when this view is first requested. Share the
-   * repository queue from table.queueFor to enforce one request rate across
-   * the open and completed views.
+   * Collect done advisories from the page-load walk when this view is
+   * requested. Share the repository queue from table.queueFor to enforce one
+   * request rate across the open and completed views.
    *
    * @param {Document} doc
    * @param {CollectOptions} [options]
@@ -1018,8 +1018,8 @@ if (typeof require === 'function') {
       .collect({
         ref,
         queue,
+        walk: (watcher) => table.walk(doc, parsed, options, watcher),
         parsed,
-        href: options.href ?? globalThis.location?.href,
         storage: options.storage,
         now: options.now,
         onFailure: (_state, url) => {

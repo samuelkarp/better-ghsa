@@ -548,6 +548,8 @@ test('the done view is reached from a toggle beside the one for GitHub', async (
   );
 
   assert.deepStrictEqual(asked.slice(before), [
+    `${base}?state=triage`,
+    `${base}?state=draft`,
     `${base}?state=published`,
     `${base}?state=closed`,
     detailUrl(published[0] ?? ''),
@@ -2267,9 +2269,10 @@ test('an advisory nothing has read takes no reason and says why', async () => {
   view.notes.clear();
 });
 
-test('a second visit to the done view spends no request on the corpus', async () => {
+test('the done view walks the lists once per page load and rereads nothing fresh', async () => {
   const published = [ghsa('kkkk'), ghsa('llll')];
   const closed = [ghsa('mmmm')];
+  const added = ghsa('nnnn');
   const base = `/${REF.owner}/${REF.repo}/security/advisories`;
   pages[`${base}?state=published`] = listHtml({
     state: 'published',
@@ -2281,7 +2284,7 @@ test('a second visit to the done view spends no request on the corpus', async ()
     ids: closed,
     counts: { published: 2, closed: 1 },
   });
-  for (const id of published) {
+  for (const id of [...published, added]) {
     pages[detailUrl(id)] = detailHtml({
       ghsaId: id,
       state: 'Published',
@@ -2295,25 +2298,45 @@ test('a second visit to the done view spends no request on the corpus', async ()
       reportedAt: '2026-04-05T00:00:00Z',
     });
   }
+  // Open lists that read, so that no walk is left unfinished to resume.
+  pages[`${base}?state=triage`] = listHtml({ state: 'triage', ids: [], counts: {} });
+  pages[`${base}?state=draft`] = listHtml({ state: 'draft', ids: [], counts: {} });
+  const lists = ['triage', 'draft', 'published', 'closed'].map((state) => `${base}?state=${state}`);
 
   await cache.clear();
 
   const first = await page();
   const before = asked.length;
   await view.collect(first);
-  assert.strictEqual(
-    asked.length - before,
-    published.length + closed.length + 2,
-    'the first visit reads both list pages and every advisory they name'
+  assert.deepStrictEqual(
+    asked.slice(before),
+    [...lists, ...published.map(detailUrl), ...closed.map(detailUrl)],
+    'the first visit walks every list and reads every advisory they name'
   );
 
   clockAt += 60 * MINUTE;
+  pages[`${base}?state=published`] = listHtml({
+    state: 'published',
+    ids: [added, ...published],
+    counts: { published: 3, closed: 1 },
+  });
+  const again = asked.length;
+  doneToggle(first).click();
+  await view.collect(first);
+  assert.deepStrictEqual(asked.slice(again), [], 'a second visit in the same page load asked');
+
   const second = await page();
   const at = asked.length;
   const held = await view.collect(second);
-  assert.strictEqual(asked.length - at, 0, `the second visit asked for ${asked.slice(at)}`);
-  assert.strictEqual(held?.members.length, 3, 'and it still drew the whole corpus');
-  assert.deepStrictEqual(held?.unread, [], 'every row backed by a read, from the cache alone');
+  assert.deepStrictEqual(
+    asked.slice(at),
+    [...lists, detailUrl(added)],
+    'the next page load did not walk the lists again, or reread an advisory still fresh'
+  );
+  assert.strictEqual(held?.members.length, 4, 'and it drew the whole corpus');
+  assert.deepStrictEqual(held?.unread, [], 'every row backed by a read');
+  delete pages[`${base}?state=triage`];
+  delete pages[`${base}?state=draft`];
 });
 
 test("a corpus is not drawn under the repository the maintainer moved to", async () => {
@@ -2611,7 +2634,7 @@ test('a collection spends no request on a repository the page has left', async (
 
   assert.deepStrictEqual(
     asked.slice(before).filter((url) => url.startsWith(mine)),
-    [listUrl(REF, 'published')],
+    [listUrl(REF, 'triage'), listUrl(REF, 'draft'), listUrl(REF, 'published')],
     'the collection carried on reading a repository nobody was looking at'
   );
   assert.strictEqual(

@@ -29,7 +29,7 @@ if (typeof require === 'function') {
  * @property {number} failures How many times in a row reading {@link next}
  *   failed. A successful read resets it to zero.
  * @property {boolean} stalled Whether repeated failures abandoned this walk.
- *   It remains incomplete and restarts from page one when due.
+ *   It remains incomplete and restarts from page one on the next page load.
  * @property {number} abandonedAt The abandonment time, or zero if active.
  */
 
@@ -48,7 +48,8 @@ if (typeof require === 'function') {
  * @property {number} fetched Pages read over the network.
  * @property {number} failed Pages this pass could not read.
  * @property {boolean} complete Whether every state's walk has reached its last
- *   page.
+ *   page during this page load.
+ * @property {number} since When this page load began, epoch milliseconds.
  */
 
 /**
@@ -62,6 +63,10 @@ if (typeof require === 'function') {
  * @property {import('./cache.js').CacheStorage | null} [storage]
  * @property {() => number} [now]
  * @property {readonly string[]} [states] The states to walk. Defaults to triage and draft.
+ * @property {number} [since] When this page load began, epoch milliseconds. A
+ *   walk that completed or was abandoned at or after it is not walked again,
+ *   and an unfinished walk that started before it starts over from page one.
+ *   Defaults to the time the crawl starts.
  * @property {(html: string) => import('./parse-list.js').ParsedList | null} [parse]
  * @property {(list: CrawledList) => void} [onPage] Called after fetched or
  *   visible rows are added.
@@ -71,8 +76,8 @@ if (typeof require === 'function') {
 (() => {
   /**
    * After repeated failures, abandon the stored page and restart from page one
-   * when the state is due for refresh. An abandoned walk stays incomplete and
-   * preserves existing rows.
+   * on the next page load. An abandoned walk stays incomplete and preserves
+   * existing rows.
    */
   const MAX_FAILURES = 3;
 
@@ -298,22 +303,35 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Use the state's cache refresh threshold for completed or abandoned walks.
+   * Walk each list once per page load. A list gains entries whenever an
+   * advisory changes state, so a walk that completed on an earlier page load
+   * says nothing about what the list holds now.
    *
    * @param {CrawledList} list
    * @param {string} state
-   * @param {number} at
+   * @param {number} since When this page load began, epoch milliseconds.
    * @returns {boolean} Whether to start or resume the walk. Unstarted and
-   *   interrupted walks are immediately due.
+   *   interrupted walks are due. Completed and abandoned walks are due when
+   *   they ended before this page load.
    */
-  function isDue(list, state, at) {
-    const threshold = globalThis.bghsa.cache.staleAfter(state);
-    // Abandoned walks wait for the refresh threshold before restarting.
+  function isDue(list, state, since) {
     const walk = walkOf(list, state);
-    if (walk.stalled) return at - walk.abandonedAt >= threshold;
+    if (walk.stalled) return walk.abandonedAt < since;
     if (!walk.started) return true;
     if (!walk.complete) return true;
-    return at - walk.completedAt >= threshold;
+    return walk.completedAt < since;
+  }
+
+  /**
+   * @param {CrawledList} list
+   * @param {string} state
+   * @param {number} since When this page load began, epoch milliseconds.
+   * @returns {boolean} Whether the state's walk reached its last page during
+   *   this page load.
+   */
+  function walkedSince(list, state, since) {
+    const walk = walkOf(list, state);
+    return walk.complete && walk.completedAt >= since;
   }
 
   /**
@@ -339,20 +357,25 @@ if (typeof require === 'function') {
   /**
    * @param {CrawledList} list
    * @param {string} state
-   * @returns {boolean} Whether the walk has started and is neither complete nor stalled.
+   * @param {number} since When this page load began, epoch milliseconds.
+   * @returns {boolean} Whether the walk started during this page load and is
+   *   neither complete nor stalled. A walk an earlier page load left part way
+   *   starts over from page one, because the pages it read then can have
+   *   changed since.
    */
-  function inProgress(list, state) {
+  function resumable(list, state, since) {
     const walk = walkOf(list, state);
-    return walk.started && !walk.complete && !walk.stalled;
+    return walk.started && !walk.complete && !walk.stalled && walk.startedAt >= since;
   }
 
   /**
    * Use the visible page's rows immediately. Start a due walk from a visible
-   * first page, but preserve the position of any walk already in progress.
+   * first page, but preserve the position of a walk this page load has in
+   * progress.
    *
    * @param {CrawledList} list
    * @param {import('./parse-list.js').ParsedList} parsed
-   * @param {{ ref: { owner: string, repo: string }, at: number, page: number | null, states: readonly string[] }} where
+   * @param {{ ref: { owner: string, repo: string }, at: number, since: number, page: number | null, states: readonly string[] }} where
    * @returns {void}
    */
   function seed(list, parsed, where) {
@@ -363,8 +386,8 @@ if (typeof require === 'function') {
       selected !== null &&
       where.states.includes(selected) &&
       where.page === 1 &&
-      !inProgress(list, selected) &&
-      isDue(list, selected, at)
+      !resumable(list, selected, where.since) &&
+      isDue(list, selected, where.since)
     ) {
       const next = advisoriesPath(parsed.next?.href, where.ref);
       list.walks[selected] = {
@@ -407,6 +430,7 @@ if (typeof require === 'function') {
     const storage = options.storage ?? null;
     const clock = options.now ?? (() => globalThis.bghsa.cache.now());
     const states = options.states ?? globalThis.bghsa.parseList.OPEN_STATES;
+    const since = options.since ?? clock();
     const parse =
       options.parse ??
       ((html) =>
@@ -451,6 +475,7 @@ if (typeof require === 'function') {
       seed(list, options.parsed, {
         ref,
         at: clock(),
+        since,
         page: pageOf(options.href),
         states,
       });
@@ -464,9 +489,8 @@ if (typeof require === 'function') {
 
     for (const state of states) {
       if (stopped) break;
-      if (!isDue(list, state, clock())) continue;
-      const held = walkOf(list, state);
-      if (!held.started || held.complete || held.stalled) {
+      if (!isDue(list, state, since)) continue;
+      if (!resumable(list, state, since)) {
         list.walks[state] = {
           next: listUrl(ref, state),
           started: true,
@@ -500,7 +524,7 @@ if (typeof require === 'function') {
           break;
         }
         if (answer.body === null) {
-          // Retry this page on the next load unless it reaches MAX_FAILURES.
+          // The next crawl retries this page unless it reaches MAX_FAILURES.
           failed += 1;
           noteFailure(list, state, clock());
           await persist();
@@ -546,7 +570,8 @@ if (typeof require === 'function') {
       ids: idsIn(list, states),
       fetched,
       failed,
-      complete: states.every((state) => walkOf(list, state).complete),
+      complete: states.every((state) => walkedSince(list, state, since)),
+      since,
     };
   }
 
@@ -557,6 +582,8 @@ if (typeof require === 'function') {
     listFrom,
     walkOf,
     isDue,
+    walkedSince,
+    idsIn,
     seed,
     crawl,
   };

@@ -13,7 +13,6 @@ const { fakeStorage } = require('../test-support/storage.js');
 const REF = { owner: 'git-utensils', repo: 'Spoon-Knife' };
 
 const MINUTE = 60 * 1000;
-const DAY = 24 * 60 * MINUTE;
 
 /**
  * @param {string} suffix
@@ -130,6 +129,7 @@ function options(extra) {
 
 const TRIAGE_URL = `/${REF.owner}/${REF.repo}/security/advisories?state=triage`;
 const DRAFT_URL = `/${REF.owner}/${REF.repo}/security/advisories?state=draft`;
+const PUBLISHED_URL = `/${REF.owner}/${REF.repo}/security/advisories?state=published`;
 
 test('a walk follows rel="next" through every page of a state', async () => {
   const storage = fakeStorage();
@@ -226,7 +226,9 @@ test('landing on page one keeps a walk that is part way through', async () => {
   const three = listHtml({ state: 'triage', ids: [ghsa('cccc')] });
 
   const before = fakeQueue({ [TRIAGE_URL]: one, [second]: two });
-  await crawls.crawl(options({ queue: before, storage, now: () => 0, states: ['triage'] }));
+  await crawls.crawl(
+    options({ queue: before, storage, now: () => 0, since: 0, states: ['triage'] })
+  );
   assert.deepStrictEqual(before.urls, [TRIAGE_URL, second, third]);
 
   const after = fakeQueue({ [TRIAGE_URL]: one, [second]: two, [third]: three });
@@ -235,6 +237,7 @@ test('landing on page one keeps a walk that is part way through', async () => {
       queue: after,
       storage,
       now: () => MINUTE,
+      since: 0,
       states: ['triage'],
       parsed: parse(one),
       href: TRIAGE_URL,
@@ -268,14 +271,14 @@ test('a crawl a navigation interrupted resumes and repeats no page', async () =>
 
   const first = fakeQueue({ [TRIAGE_URL]: /** @type {string} */ (pages[TRIAGE_URL]) });
   const interrupted = await crawls.crawl(
-    options({ queue: first, storage, now: () => 0, states: ['triage'] })
+    options({ queue: first, storage, now: () => 0, since: 0, states: ['triage'] })
   );
   assert.deepStrictEqual(first.urls, [TRIAGE_URL, `${TRIAGE_URL}&page=2`]);
   assert.ok(!interrupted.complete, 'an interrupted walk reported itself finished');
 
   const second = fakeQueue(pages);
   const resumed = await crawls.crawl(
-    options({ queue: second, storage, now: () => MINUTE, states: ['triage'] })
+    options({ queue: second, storage, now: () => MINUTE, since: 0, states: ['triage'] })
   );
 
   assert.deepStrictEqual(second.urls, [`${TRIAGE_URL}&page=2`, `${TRIAGE_URL}&page=3`]);
@@ -283,24 +286,89 @@ test('a crawl a navigation interrupted resumes and repeats no page', async () =>
   assert.ok(resumed.complete, 'the resumed walk did not finish');
 });
 
-test('a crawl that finished four minutes ago walks nothing', async () => {
+test('a walk an earlier page load left part way starts over from page one', async () => {
   const storage = fakeStorage();
+  const second = `${TRIAGE_URL}&page=2`;
+  const first = fakeQueue({
+    [TRIAGE_URL]: listHtml({ state: 'triage', ids: [ghsa('aaaa')], next: second }),
+  });
+  await crawls.crawl(
+    options({ queue: first, storage, now: () => 0, since: 0, states: ['triage'] })
+  );
+  assert.deepStrictEqual(first.urls, [TRIAGE_URL, second]);
+
+  // An advisory entered triage after the earlier page load read page one.
+  const later = fakeQueue({
+    [TRIAGE_URL]: listHtml({ state: 'triage', ids: [ghsa('dddd'), ghsa('aaaa')], next: second }),
+    [second]: listHtml({ state: 'triage', ids: [ghsa('bbbb')] }),
+  });
+  const found = await crawls.crawl(
+    options({ queue: later, storage, now: () => MINUTE, since: MINUTE, states: ['triage'] })
+  );
+
+  assert.deepStrictEqual(
+    later.urls,
+    [TRIAGE_URL, second],
+    'the walk resumed where the earlier page load left it'
+  );
+  assert.deepStrictEqual(found.ids.sort(), [ghsa('aaaa'), ghsa('bbbb'), ghsa('dddd')].sort());
+  assert.ok(found.complete, 'the walk that started over did not finish');
+});
+
+test('a visible page one restarts a walk an earlier page load left part way', async () => {
+  const storage = fakeStorage();
+  const second = `${TRIAGE_URL}&page=2`;
+  const one = listHtml({ state: 'triage', ids: [ghsa('aaaa')], next: second });
+  const two = listHtml({ state: 'triage', ids: [ghsa('bbbb')] });
+  const before = stoppedQueue({ [TRIAGE_URL]: one });
+  await crawls.crawl(
+    options({ queue: before, storage, now: () => 0, since: 0, states: ['triage'] })
+  );
+  assert.deepStrictEqual(before.urls, [TRIAGE_URL, second]);
+
+  const later = fakeQueue({ [TRIAGE_URL]: one, [second]: two });
+  const found = await crawls.crawl(
+    options({
+      queue: later,
+      storage,
+      now: () => MINUTE,
+      since: MINUTE,
+      states: ['triage'],
+      parsed: parse(one),
+      href: TRIAGE_URL,
+    })
+  );
+
+  assert.deepStrictEqual(later.urls, [second], 'the page being looked at was requested');
+  assert.deepStrictEqual(found.ids.sort(), [ghsa('aaaa'), ghsa('bbbb')].sort());
+  assert.ok(found.complete, 'the restarted walk did not finish');
+});
+
+test('a list is walked once per page load, however recently it was walked', async () => {
+  const storage = fakeStorage();
+  const states = ['published'];
   const pages = {
-    [TRIAGE_URL]: listHtml({ state: 'triage', ids: [ghsa('aaaa')] }),
-    [DRAFT_URL]: listHtml({ state: 'draft', ids: [ghsa('bbbb')] }),
+    [PUBLISHED_URL]: listHtml({ state: 'published', ids: [ghsa('aaaa')] }),
   };
   const first = fakeQueue(pages);
-  await crawls.crawl(options({ queue: first, storage, now: () => 0 }));
-  assert.ok(first.urls.length === 2, `${first.urls.length} pages were read`);
+  await crawls.crawl(options({ queue: first, storage, now: () => 0, since: 0, states }));
+  assert.deepStrictEqual(first.urls, [PUBLISHED_URL]);
 
-  const soon = fakeQueue(pages);
-  const held = await crawls.crawl(options({ queue: soon, storage, now: () => 4 * MINUTE }));
-  assert.deepStrictEqual(soon.urls, [], 'a crawl inside the staleness threshold spent requests');
-  assert.deepStrictEqual(held.ids.sort(), [ghsa('aaaa'), ghsa('bbbb')].sort());
+  const same = fakeQueue(pages);
+  const held = await crawls.crawl(
+    options({ queue: same, storage, now: () => MINUTE, since: 0, states })
+  );
+  assert.deepStrictEqual(same.urls, [], 'a second crawl in the same page load spent requests');
+  assert.deepStrictEqual(held.ids, [ghsa('aaaa')]);
+  assert.ok(held.complete, 'the walk of this page load was not reported complete');
 
-  const later = fakeQueue(pages);
-  await crawls.crawl(options({ queue: later, storage, now: () => 6 * MINUTE }));
-  assert.ok(later.urls.length === 2, `${later.urls.length} pages were read after the threshold`);
+  pages[PUBLISHED_URL] = listHtml({ state: 'published', ids: [ghsa('aaaa'), ghsa('bbbb')] });
+  const next = fakeQueue(pages);
+  const found = await crawls.crawl(
+    options({ queue: next, storage, now: () => 2 * MINUTE, since: 2 * MINUTE, states })
+  );
+  assert.deepStrictEqual(next.urls, [PUBLISHED_URL], 'the next page load did not walk the list');
+  assert.deepStrictEqual(found.ids.sort(), [ghsa('aaaa'), ghsa('bbbb')].sort());
 });
 
 test('an advisory that left a state is dropped when that state is walked again', async () => {
@@ -351,7 +419,7 @@ test('a walk that cannot get past a page gives up and starts over', async () => 
   for (const at of [0, MINUTE, 2 * MINUTE]) {
     const queue = fakeQueue({ [TRIAGE_URL]: wedged });
     const result = await crawls.crawl(
-      options({ queue, storage, now: () => at, states: ['triage'] })
+      options({ queue, storage, now: () => at, since: 0, states: ['triage'] })
     );
     attempts.push(queue.urls);
     assert.ok(!result.complete, `the walk at ${at} reported itself finished`);
@@ -359,16 +427,18 @@ test('a walk that cannot get past a page gives up and starts over', async () => 
   assert.deepStrictEqual(attempts, [[TRIAGE_URL, second], [second], [second]]);
 
   const quiet = fakeQueue({ [TRIAGE_URL]: wedged });
-  await crawls.crawl(options({ queue: quiet, storage, now: () => 3 * MINUTE, states: ['triage'] }));
-  assert.deepStrictEqual(quiet.urls, [], 'a walk that gave up spent a request straight away');
+  await crawls.crawl(
+    options({ queue: quiet, storage, now: () => 3 * MINUTE, since: 0, states: ['triage'] })
+  );
+  assert.deepStrictEqual(quiet.urls, [], 'a walk that gave up spent a request in the same page load');
 
   const shrunk = listHtml({ state: 'triage', ids: [ghsa('aaaa')] });
   const again = fakeQueue({ [TRIAGE_URL]: shrunk });
   const done = await crawls.crawl(
-    options({ queue: again, storage, now: () => 8 * MINUTE, states: ['triage'] })
+    options({ queue: again, storage, now: () => 3 * MINUTE, since: 3 * MINUTE, states: ['triage'] })
   );
 
-  assert.deepStrictEqual(again.urls, [TRIAGE_URL], 'the walk did not start over');
+  assert.deepStrictEqual(again.urls, [TRIAGE_URL], 'the next page load did not start the walk over');
   assert.ok(done.complete, 'the walk that started over did not finish');
   assert.deepStrictEqual(done.ids, [ghsa('aaaa')], 'an advisory that left the state was kept');
 });
@@ -379,7 +449,9 @@ test('a walk a stop interrupts keeps the page it had reached', async () => {
   const first = listHtml({ state: 'triage', ids: [ghsa('aaaa'), ghsa('bbbb')], next: second });
 
   const opened = stoppedQueue({ [TRIAGE_URL]: first });
-  await crawls.crawl(options({ queue: opened, storage, now: () => 0, states: ['triage'] }));
+  await crawls.crawl(
+    options({ queue: opened, storage, now: () => 0, since: 0, states: ['triage'] })
+  );
   assert.deepStrictEqual(opened.urls, [TRIAGE_URL, second]);
 
   // Stopping before a request is sent does not count as a failed attempt.
@@ -388,7 +460,7 @@ test('a walk a stop interrupts keeps the page it had reached', async () => {
   for (const at of [MINUTE, 2 * MINUTE]) {
     const queue = stoppedQueue({});
     const result = await crawls.crawl(
-      options({ queue, storage, now: () => at, states: ['triage'] })
+      options({ queue, storage, now: () => at, since: 0, states: ['triage'] })
     );
     attempts.push(queue.urls);
     const walk = crawls.walkOf(result.list, 'triage');
@@ -400,7 +472,7 @@ test('a walk a stop interrupts keeps the page it had reached', async () => {
 
   const resumed = stoppedQueue({ [second]: listHtml({ state: 'triage', ids: [ghsa('bbbb')] }) });
   const done = await crawls.crawl(
-    options({ queue: resumed, storage, now: () => 3 * MINUTE, states: ['triage'] })
+    options({ queue: resumed, storage, now: () => 3 * MINUTE, since: 0, states: ['triage'] })
   );
 
   assert.deepStrictEqual(resumed.urls, [second], 'the resumed walk did not ask for its own page');
@@ -520,35 +592,3 @@ test('a crawl record of another shape crawls from the start', async () => {
   assert.deepStrictEqual(crawls.listFrom(null), { walks: {}, rows: {} });
   assert.deepStrictEqual(crawls.listFrom(12), { walks: {}, rows: {} });
 });
-
-test("a walk of a done state waits out that state's threshold", () => {
-  /**
-   * @param {string} state
-   * @param {number} completedAt
-   * @returns {import('../src/common/crawl.js').CrawledList}
-   */
-  const walked = (state, completedAt) => ({
-    rows: {},
-    walks: {
-      [state]: {
-        next: null,
-        started: true,
-        complete: true,
-        startedAt: 0,
-        completedAt,
-        pages: 1,
-        failures: 0,
-        stalled: false,
-        abandonedAt: 0,
-      },
-    },
-  });
-
-  assert.ok(!crawls.isDue(walked('published', 0), 'published', 60 * MINUTE), 'an hour on');
-  assert.ok(!crawls.isDue(walked('published', 0), 'published', 30 * DAY - 1), 'a millisecond short');
-  assert.ok(crawls.isDue(walked('published', 0), 'published', 30 * DAY), 'at thirty days');
-  assert.ok(!crawls.isDue(walked('closed', 0), 'closed', 60 * MINUTE), 'closed an hour on');
-  assert.ok(crawls.isDue(walked('closed', 0), 'closed', 7 * DAY), 'closed at seven days');
-  assert.ok(crawls.isDue(walked('triage', 0), 'triage', 5 * MINUTE), 'triage at five minutes');
-});
-

@@ -48,8 +48,9 @@ All shared state lives in the advisory it describes. The extension does not
 operate a server or a database.
 
 The browser cache can be reconstructed from the advisories, which remain
-authoritative. Refresh entries according to advisory state and display stale
-entries during refresh. Evict entries for deleted advisories. A settings
+authoritative. Refresh advisory entries according to advisory state and
+display stale entries during refresh. Refresh advisory lists once per page
+load (section 9). Evict entries for deleted advisories. A settings
 control clears cached data immediately while preserving the repository list.
 
 Removing a repository from the allowlist clears its cached advisories, lists,
@@ -353,6 +354,18 @@ Read every page of each repository advisory list without a page-count cap.
 Throttle requests and report any walk that stops before its last page as
 incomplete in the views that use it.
 
+Walk the triage, draft, published, and closed lists once per page load,
+whichever view is showing. The open table, the done page, and the statistics
+view all use that walk. A list gains entries whenever an advisory changes
+state, so the time since a list was last walked says nothing about what it
+holds. A page load begins when a page shows a repository's advisory list and
+lasts while the page moves between that list's tabs and the repository's
+advisories. Moving to another repository or to any other page ends it, and so
+does reloading the page. Within a page load, finish a walk that stopped part
+way and walk no finished list again. A walk an earlier page load left part way
+starts over from its first page. A list page that fails three times in a row
+abandons its walk until the next page load.
+
 ## 10. Done page and statistics
 
 The advisory list links to separate done and statistics views.
@@ -376,13 +389,14 @@ a value for unset reasons. Apply severity filtering to published advisories.
 Use the open list's filter bar and show the controls for the current view.
 
 Show collection status from the moment collection is requested, including
-while its list walk waits for earlier queued work. Identify the list walk, then
+while the page load's list walk is still running. Identify the list walk, then
 show the remaining advisory reads across all views sharing the queue. Update
 the count as work proceeds and clear the loading status when collection stops.
 
 Update the originating row after saving a closure reason.
 
-The statistics view covers all open and completed advisories.
+The statistics view covers all open and completed advisories. It uses the page
+load's list walk and the reads of the other views, and sends no requests.
 
 Show counts and ratios by outcome, closure reason, open state, and severity.
 Show report counts by month in a table of years.

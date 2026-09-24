@@ -29,6 +29,13 @@ const pages = {};
 const asked = [];
 
 /**
+ * Run each path's callback once, when its request is received.
+ *
+ * @type {Record<string, () => Promise<void>>}
+ */
+const during = {};
+
+/**
  * @type {import('../src/list/table.js').RefreshOptions}
  */
 const QUEUE_OPTIONS = {
@@ -39,6 +46,11 @@ const QUEUE_OPTIONS = {
   },
   fetch: async (url) => {
     asked.push(url);
+    const act = during[url];
+    if (act !== undefined) {
+      delete during[url];
+      await act();
+    }
     const body = pages[url];
     if (body === undefined) return { status: 404, text: async () => '' };
     return { status: 200, text: async () => body };
@@ -731,7 +743,7 @@ test('the closure reason None opens the completed list on those advisories', asy
   );
 });
 
-test('a half nothing has crawled says what its numbers are over', async () => {
+test('a half no walk has reached says what its numbers are over', async () => {
   const showing = [ghsa('gggg'), ghsa('hhhh')];
   const { doc } = await repository({
     owner: 'stats-half',
@@ -746,13 +758,11 @@ test('a half nothing has crawled says what its numbers are over', async () => {
   statsToggle(doc).click();
   await statistics.load(doc);
 
-  assert.deepStrictEqual(over(doc), [
-    '4 total advisories',
-    '2 open',
-    'Open list not loaded',
-    '2 completed',
-    '4 not loaded yet',
-  ]);
+  assert.deepStrictEqual(
+    over(doc),
+    ['4 total advisories', '2 open', '2 completed', '4 not loaded yet'],
+    'the walk the completed view joined left a list unwalked'
+  );
   assert.deepStrictEqual(countLines(doc, 'open'), ['Triage 2 100%']);
   assert.deepStrictEqual(
     countLines(doc, 'reason'),
@@ -771,19 +781,140 @@ test('a half nothing has crawled says what its numbers are over', async () => {
       draft: [{ ghsaId: ghsa('kkkk') }],
       published: [{ ghsaId: ghsa('llll') }],
     },
-    crawl: ['open'],
   });
   statsToggle(other.doc).click();
   await statistics.load(other.doc);
   assert.deepStrictEqual(over(other.doc), [
-    '3 total advisories',
-    '3 open',
+    '2 total advisories',
+    '2 open',
+    'Open list not loaded',
     '0 completed',
     'Completed list not loaded',
-    '3 not loaded yet',
+    '2 not loaded yet',
     '4 on GitHub',
   ]);
-  assert.deepStrictEqual(countLines(other.doc, 'open'), ['Triage 2 67%', 'Draft 1 33%']);
+  assert.deepStrictEqual(countLines(other.doc, 'open'), ['Triage 2 100%']);
+});
+
+test('the statistics view shown first gets every list walked on each page load', async () => {
+  const setup = {
+    owner: 'stats-first',
+    states: {
+      triage: [{ ghsaId: ghsa('sfaa') }],
+      draft: [{ ghsaId: ghsa('sfbb') }],
+      published: [{ ghsaId: ghsa('sfcc') }],
+      closed: [{ ghsaId: ghsa('sfdd') }],
+    },
+  };
+  /**
+   * Show the statistics view, then run the render pass that starts the list
+   * surface's refresh, and wait for that refresh.
+   *
+   * @returns {Promise<{ doc: Document, base: string, before: string[], walking: string[] }>}
+   */
+  const load = async () => {
+    const { doc, base } = await repository(setup);
+    statsToggle(doc).click();
+    await statistics.load(doc);
+    const before = over(doc);
+    /** @type {string[]} */
+    let walking = [];
+    during[`${base}?state=closed`] = async () => {
+      await statistics.load(doc);
+      walking = over(doc);
+    };
+    const href = `https://github.com${base}?state=triage`;
+    await table.passFor(doc, { ...QUEUE_OPTIONS, href })();
+    await table.refresh(doc, { ...QUEUE_OPTIONS, href });
+    await statistics.load(doc);
+    return { doc, base, before, walking };
+  };
+
+  const first = await load();
+  const lists = () => asked.filter((url) => url.startsWith(`${first.base}?`));
+  assert.deepStrictEqual(
+    lists(),
+    [`${first.base}?state=draft`, `${first.base}?state=published`, `${first.base}?state=closed`],
+    'the page load did not walk the lists past the triage page it shows'
+  );
+  assert.deepStrictEqual(first.before, [
+    '1 total advisory',
+    '1 open',
+    'Open list not loaded',
+    '0 completed',
+    'Completed list not loaded',
+    '1 not loaded yet',
+    '4 on GitHub',
+  ]);
+  assert.ok(
+    first.walking.includes('Completed list partly loaded') && first.walking.includes('Loading...'),
+    `the chips while the closed list was read: ${JSON.stringify(first.walking)}`
+  );
+  assert.deepStrictEqual(
+    over(first.doc).slice(0, 3),
+    ['4 total advisories', '2 open', '2 completed'],
+    'the finished walk left a list out'
+  );
+
+  clockAt += 60 * 1000;
+  const second = await load();
+  assert.ok(
+    second.before.includes('Open list partly loaded') &&
+      second.before.includes('Completed list partly loaded'),
+    `lists walked on an earlier page load read as loaded: ${JSON.stringify(second.before)}`
+  );
+  assert.deepStrictEqual(
+    lists().slice(3),
+    [`${first.base}?state=draft`, `${first.base}?state=published`, `${first.base}?state=closed`],
+    'the next page load did not walk the lists again'
+  );
+});
+
+test('a load that finishes after a later one began draws nothing', async () => {
+  const { doc, ref, base } = await repository({
+    owner: 'stats-order',
+    states: { triage: [{ ghsaId: ghsa('soaa') }], published: [{ ghsaId: ghsa('sobb') }] },
+  });
+  statsToggle(doc).click();
+  await statistics.load(doc);
+  const before = over(doc);
+
+  // Hold the older load's read of the lists until a newer load has drawn.
+  const storage = /** @type {import('../test-support/storage.js').FakeStorage} */ (
+    cache.storageOf()
+  );
+  const get = storage.get;
+  const key = cache.listKey(ref);
+  /** @type {() => void} */
+  let release = () => {};
+  const holding = new Promise((resolve) => {
+    release = () => resolve(undefined);
+  });
+  let held = false;
+  storage.get = (keys) => {
+    const asked = get(keys);
+    if (held || !(Array.isArray(keys) ? keys : [keys]).includes(key)) return asked;
+    held = true;
+    storage.get = get;
+    return holding.then(() => asked);
+  };
+  try {
+    const older = statistics.load(doc);
+    await settle();
+    assert.ok(held, 'the older load never read the lists');
+
+    await table.refresh(doc, { ...QUEUE_OPTIONS, href: `https://github.com${base}?state=triage` });
+    await statistics.load(doc);
+    const newer = over(doc);
+    assert.notDeepStrictEqual(newer, before, 'the walk changed nothing the chips show');
+
+    release();
+    await older;
+    assert.deepStrictEqual(over(doc), newer, 'the older load drew over the newer one');
+  } finally {
+    release();
+    storage.get = get;
+  }
 });
 
 test('a half whose crawl stopped short says its list is partly loaded', async () => {

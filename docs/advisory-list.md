@@ -142,21 +142,33 @@ The table reads "No matches" when filters exclude every row.
 ## Reading and refreshing
 
 The table initially displays cached data and the list markup already on the
-page. A refresh then crawls the triage and draft lists and reads advisory pages,
-stalest first. Each read updates its row in place.
+page. At the start of each page load, a refresh walks the triage, draft,
+published, and closed lists, then reads the open advisories' pages, stalest
+first. Each read updates its row in place. The walk runs whichever view is
+showing, and the completed and statistics views use what it finds.
 
-The advisory list and completed view share one request queue per repository
-within a tab. The statistics view currently reads available data without
-issuing requests. Background advisory reads are throttled to one request per
-second within each queue. Requests from separate tabs can occur closer together.
+The list walk, the table's reads, and the completed view's reads share one
+request queue per repository within a tab. The statistics view issues no
+requests. Background requests are throttled to one per second within each
+queue. Requests from separate tabs can occur closer together.
 
-The heading shows "Loading..." during the list crawl and "Loading (12 left)..."
+The heading shows "Loading..." during the list walk and "Loading (12 left)..."
 during advisory reads. The progress chip disappears when the refresh finishes.
 
-Triage and draft advisories are refreshed when their observations are more
-than five minutes old. Refreshes start at least five minutes apart within a
-tab. A new refresh waits until the current one finishes. Leaving the repository
-stops the refresh after its current request. Returning resumes it.
+Each list is walked once per page load. A page load starts when a page shows
+the repository's advisory list. Moving between the list's tabs and the
+repository's advisories keeps it. Moving to another repository or to any other
+page ends it, and coming back to the list starts a new one, as does reloading
+the page. Within a page load, later refreshes walk no finished list again.
+They finish a list walk that stopped part way, and a list page that fails
+three times in a row abandons its walk until the next page load. A list walk
+an earlier page load left part way starts over from its first page.
+
+Triage and draft advisories are reread when their observations are more than
+five minutes old. Within a page load, refreshes start at least five minutes
+apart, and a new page load refreshes at once. A new refresh waits until the
+current one finishes. Leaving the list stops the refresh after its current
+request. Coming back from an advisory resumes it.
 
 Failed reads leave existing cached data visible. Advisories without cached data
 remain marked "Not read". The list omits failure banners.

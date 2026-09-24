@@ -65,8 +65,8 @@ if (typeof require === 'function') {
   const UNREAD_TEXT = 'Not loaded yet';
 
   /**
-   * Statistics combine open and completed advisories already collected by the
-   * list and done views (REQUIREMENTS.md section 10).
+   * Statistics combine open and completed advisories from the page-load walk
+   * and the reads of the list and done views (REQUIREMENTS.md section 10).
    *
    * @type {readonly { key: string, name: string, states: readonly string[] }[]}
    */
@@ -264,7 +264,8 @@ if (typeof require === 'function') {
 
   /**
    * Combine cached crawls and detail reads with rows from the visible list page.
-   * An uncrawled repository can still contribute its visible rows.
+   * An uncrawled repository can still contribute its visible rows. A group is
+   * complete once each of its lists is walked to the end during this page load.
    *
    * @param {Document} doc
    * @returns {Promise<Held>} The corpus groups, with a null repository outside advisory
@@ -278,12 +279,14 @@ if (typeof require === 'function') {
     }
     const ref = { owner: parsed.owner, repo: parsed.repo };
     const at = globalThis.bghsa.cache.now();
+    const since = globalThis.bghsa.table.loadedAt(doc, ref, at);
     const entry = await globalThis.bghsa.cache.getList(ref, { at });
     const list = crawl.listFrom(entry === null ? null : entry.record);
     // Omit a page number to add visible rows without marking a crawl as started.
     crawl.seed(list, parsed, {
       ref,
       at,
+      since,
       page: null,
       states: Object.keys(globalThis.bghsa.parseList.STATES),
     });
@@ -299,7 +302,7 @@ if (typeof require === 'function') {
           states: half.states,
           at,
           expected: globalThis.bghsa.corpus.expectedOf(parsed, half.states),
-          complete: half.states.every((state) => crawl.walkOf(list, state).complete),
+          complete: half.states.every((state) => crawl.walkedSince(list, state, since)),
         }),
         walked: half.states.some((state) => crawl.walkOf(list, state).started),
       });
@@ -819,11 +822,24 @@ if (typeof require === 'function') {
   }
 
   /**
+   * The number of loads each document has started.
+   *
+   * @type {WeakMap<Document, number>}
+   */
+  const turns = new WeakMap();
+
+  /**
+   * Read and draw the statistics. The load started last wins, so a read that
+   * finishes after a later one began is discarded.
+   *
    * @param {Document} doc
    * @returns {Promise<Element | null>}
    */
   async function load(doc) {
+    const turn = (turns.get(doc) ?? 0) + 1;
+    turns.set(doc, turn);
     const found = await read(doc);
+    if (turns.get(doc) !== turn) return doc.getElementById(ROOT_ID);
     // Ignore results for a repository the document has left.
     const table = globalThis.bghsa.table;
     const here = refOf(doc);
@@ -862,7 +878,7 @@ if (typeof require === 'function') {
 
   /**
    * Hide extension toggles in GitHub's native view. Refresh visible statistics
-   * from the other views' latest crawl data.
+   * from the latest walk and read data.
    *
    * @param {Document} doc
    * @param {string} mode

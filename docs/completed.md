@@ -53,11 +53,11 @@ observation time in the last two cells.
 Before the first page arrives, the list reads "Loading...". A completed search
 without results reads "Not found".
 
-The heading also shows a progress chip: "Loading..." during the list crawl and
+The heading also shows a progress chip: "Loading..." during the list walk and
 "Loading (37 left)..." during advisory reads. The count comes from the queue
 shared with the open list and includes both views' pending advisories.
-Collection waits for requests already queued by the open list. Completed rows
-arrive as this view's list pages are read.
+Collection joins the list walk of the page load. Completed rows arrive as the
+published and closed list pages are read.
 
 The count updates after each successful read. Failed reads are reflected in
 the next update. The progress chip disappears when collection finishes or
@@ -125,8 +125,10 @@ been read.
 
 ## Reading and refreshing
 
-Opening this view crawls the published and closed lists, then reads advisory
-pages as needed based on cache freshness. Requests use the queue shared with
+This view takes the published and closed advisories from the list walk that
+runs once per page load (see the advisory list page), then reads advisory
+pages as needed based on cache freshness. Opening the view again within the
+page load walks no finished list. Requests use the queue shared with
 the open list in the same tab. Background advisory reads are throttled to one
 request per second within each queue.
 Requests from separate tabs can occur closer together. Rows initially use
@@ -143,8 +145,9 @@ the heading.
 
 ## The statistics view
 
-Statistics cover both open and completed advisories. The view uses data already
-collected by the extension, with coverage limited to what has been read.
+Statistics cover both open and completed advisories. The view uses the list
+walk that runs once per page load and the advisory pages the other views have
+read, with coverage limited to what has been read.
 Calculations run locally in the page. The statistics view sends no requests
 or data.
 
@@ -153,11 +156,12 @@ repository".
 
 Chips above the statistics show the total and the open and completed counts, as
 "3 open" and "2 completed". "5 not loaded yet" counts advisories whose detail
-page has not been read. "Open list not loaded" and "Completed list partly
-loaded" name a group whose list crawl has not started or has not finished. "4 on
-GitHub" shows the sum of GitHub's tab counts when it differs from the total.
-"Loading..." appears during collection; the numbers can change as results
-arrive.
+page has not been read. "Open list not loaded" names a group no list walk
+has started on. "Completed list partly loaded" names a group whose lists have
+not all been walked to the end during this page load, including lists walked
+on an earlier one. "4 on GitHub" shows the sum of GitHub's tab counts when it
+differs from the total. "Loading..." appears while the list walk and the
+reads run; the numbers can change as results arrive.
 
 ### Counts
 

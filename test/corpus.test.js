@@ -7,6 +7,7 @@ const { parseHTML, DOMParser } = require('linkedom');
 const cache = require('../src/common/cache.js');
 const parseList = require('../src/common/parse-list.js');
 const queues = require('../src/common/fetch.js');
+const crawl = require('../src/common/crawl.js');
 const corpus = require('../src/done/corpus.js');
 
 const { fakeStorage } = require('../test-support/storage.js');
@@ -145,7 +146,23 @@ function harness(pages) {
    * @returns {ReturnType<typeof corpus.collect>} The corpus, using the queue clock.
    */
   const collect = (extra = {}) =>
-    corpus.collect({ ref: REF, queue, storage, now: clock.now, ...extra });
+    corpus.collect({
+      ref: REF,
+      queue,
+      storage,
+      now: clock.now,
+      walk: (watcher) =>
+        crawl.crawl({
+          ref: REF,
+          queue,
+          storage,
+          now: clock.now,
+          states: corpus.DONE_STATES,
+          parse: (html) => parse(html),
+          ...watcher,
+        }),
+      ...extra,
+    });
 
   return { clock, storage, queue, urls, collect };
 }
@@ -274,7 +291,7 @@ test("the corpus carries GitHub's own count of each done state", async () => {
   });
   const { collect } = harness(pages);
   const parsed = parse(/** @type {string} */ (pages[PUBLISHED_URL]));
-  const collected = await collect({ parsed, href: PUBLISHED_URL });
+  const collected = await collect({ parsed });
   assert.deepStrictEqual(collected.corpus.expected, { published: 41, closed: 12 });
 });
 
@@ -349,6 +366,54 @@ test('a walk that did not reach its last page says the corpus is partial', async
     [first]
   );
   assert.ok(!collected.corpus.members.some((member) => member.ghsaId === second));
+});
+
+test('a corpus is complete only when this page load walked both done lists', async () => {
+  const id = ghsa('aaaa');
+  const pages = {
+    [PUBLISHED_URL]: listHtml({ state: 'published', ids: [id] }),
+    [CLOSED_URL]: listHtml({ state: 'closed', ids: [] }),
+    [detailUrl(id)]: detailHtml({
+      ghsaId: id,
+      state: 'Published',
+      reportedAt: '2026-03-02T00:00:00Z',
+    }),
+  };
+  const { clock, storage, collect } = harness(pages);
+  const first = await collect();
+  assert.strictEqual(first.corpus.complete, true, 'the first page load walked both lists');
+
+  // A later page load whose walk stops on the draft list, before the done lists.
+  await clock.wait(60 * 1000);
+  const stopped = {
+    page: async () => ({
+      body: null,
+      status: null,
+      reason: 'The queue was stopped.',
+      stopped: true,
+    }),
+  };
+  const later = await collect({
+    walk: (watcher) =>
+      crawl.crawl({
+        ref: REF,
+        queue: stopped,
+        storage,
+        now: clock.now,
+        states: ['draft', ...corpus.DONE_STATES],
+        parse: (html) => parse(html),
+        ...watcher,
+      }),
+  });
+  assert.strictEqual(
+    later.corpus.complete,
+    false,
+    'lists walked on an earlier page load read as walked on this one'
+  );
+  assert.deepStrictEqual(
+    later.corpus.members.map((member) => member.ghsaId),
+    [id]
+  );
 });
 
 test('a corpus drawn inside the walk says a collection is filling it', async () => {

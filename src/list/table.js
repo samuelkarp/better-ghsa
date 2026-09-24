@@ -1573,6 +1573,7 @@ if (typeof require === 'function') {
     let running = false;
     let again = false;
     return async function pass() {
+      visit(doc, globalThis.location?.pathname);
       if (running) {
         again = true;
         return;
@@ -1681,7 +1682,184 @@ if (typeof require === 'function') {
   const running = new WeakMap();
 
   /**
-   * Crawl both open states, then refresh advisory data through the shared
+   * The lists the page-load walk reads, in the order it reads them. The open
+   * table, the completed view, and the statistics view all read what it finds.
+   *
+   * @type {readonly string[]}
+   */
+  const WALK_STATES = Object.keys(globalThis.bghsa.parseList.STATES);
+
+  /**
+   * The page load of each document: the repository whose advisory list it
+   * shows, by repository key, and when it first showed that list. Moving
+   * between the repository's advisory list and its advisory pages keeps the
+   * page load, and showing any other page ends it. The page-load walk walks
+   * each list once after the page load begins.
+   *
+   * @type {WeakMap<Document, { key: string, at: number }>}
+   */
+  const loads = new WeakMap();
+
+  /**
+   * The advisory pages each document's location was in at its last render
+   * pass: a repository key, or null for a page outside every repository's
+   * advisory pages.
+   *
+   * @type {WeakMap<Document, string | null>}
+   */
+  const areas = new WeakMap();
+
+  /**
+   * @param {Document} doc
+   * @param {{ owner: string, repo: string }} ref
+   * @param {number} at The time to record when this call begins the page load.
+   * @returns {number} When this document's page load began, epoch
+   *   milliseconds.
+   */
+  function loadedAt(doc, ref, at) {
+    const key = refKey(ref);
+    const held = loads.get(doc);
+    if (held !== undefined && held.key === key) return held.at;
+    loads.set(doc, { key, at });
+    return at;
+  }
+
+  /**
+   * End the page load when the document's location leaves the advisory pages
+   * of the repository it was in, and stop the work of that page load. The
+   * next list the document shows begins a new page load and refreshes at once.
+   *
+   * @param {Document} doc
+   * @param {unknown} pathname The location's path.
+   * @returns {void}
+   */
+  function visit(doc, pathname) {
+    const here =
+      typeof pathname === 'string' ? globalThis.bghsa.content.locate(pathname) : null;
+    const area = here === null ? null : refKey(here);
+    const was = areas.get(doc);
+    areas.set(doc, area);
+    if (was === undefined || was === area) return;
+    loads.delete(doc);
+    refreshed.delete(doc);
+    depart(doc, area);
+  }
+
+  /**
+   * @typedef {object} WalkWatcher
+   * @property {(list: import('../common/crawl.js').CrawledList) => void} [onPage]
+   *   Called after each list page adds rows.
+   * @property {(state: string, url: string, reason: unknown) => void} [onFailure]
+   *   Called for each list page the walk could not read.
+   */
+
+  /**
+   * The walk in progress for each document. A walk is stopped once the
+   * document leaves its repository's list, which stops its queue.
+   *
+   * @type {WeakMap<
+   *   Document,
+   *   {
+   *     key: string,
+   *     stopped: boolean,
+   *     started: Promise<import('../common/crawl.js').CrawlResult>,
+   *     watchers: Set<WalkWatcher>,
+   *   }
+   * >}
+   */
+  const walks = new WeakMap();
+
+  /**
+   * The last walk of each repository, by repository key, settled either way.
+   * Each walk saves its own copy of the repository's lists, so a walk starts
+   * after the one before it settles.
+   *
+   * @type {Map<string, Promise<unknown>>}
+   */
+  const walked = new Map();
+
+  /**
+   * Walk all four lists once for this page load through the shared queue. A
+   * call during a walk joins it, unless the document left the walk's list,
+   * which stopped it. Any other call walks only a list whose walk has not
+   * finished during this page load.
+   *
+   * @param {Document} doc
+   * @param {import('../common/parse-list.js').ParsedList} parsed The page's list,
+   *   naming the repository.
+   * @param {RefreshOptions} [options]
+   * @param {WalkWatcher} [watcher] Receives the pages and failures of the walk.
+   * @returns {Promise<import('../common/crawl.js').CrawlResult>}
+   */
+  function walk(doc, parsed, options = {}, watcher = {}) {
+    const ref = {
+      owner: /** @type {string} */ (parsed.owner),
+      repo: /** @type {string} */ (parsed.repo),
+    };
+    const key = refKey(ref);
+    const since = loadedAt(doc, ref, options.now?.() ?? globalThis.bghsa.cache.now());
+    let held = walks.get(doc);
+    if (held === undefined || held.key !== key || held.stopped) {
+      const { queue } = queueFor(ref, options);
+      const pass = passFor(doc, options);
+      /** @type {Set<WalkWatcher>} */
+      const watchers = new Set();
+      const before = walked.get(key) ?? Promise.resolve();
+      const started = before
+        .then(() =>
+          globalThis.bghsa.crawl.crawl({
+            ref,
+            queue,
+            parsed,
+            href: options.href ?? globalThis.location?.href,
+            storage: options.storage,
+            now: options.now,
+            states: WALK_STATES,
+            since,
+            onPage: (list) => {
+              // Redraw the table to include advisories discovered by this page.
+              void pass();
+              for (const each of [...watchers]) {
+                try {
+                  each.onPage?.(list);
+                } catch {
+                  // Continue notifying the remaining watchers if one fails.
+                }
+              }
+            },
+            onFailure: (state, url, reason) => {
+              for (const each of [...watchers]) {
+                try {
+                  each.onFailure?.(state, url, reason);
+                } catch {
+                  // Continue notifying the remaining watchers if one fails.
+                }
+              }
+            },
+          })
+        )
+        .finally(() => {
+          if (walks.get(doc)?.started === started) walks.delete(doc);
+        });
+      walked.set(
+        key,
+        started.then(
+          () => {},
+          () => {}
+        )
+      );
+      held = { key, stopped: false, started, watchers };
+      walks.set(doc, held);
+    }
+    const { started, watchers } = held;
+    watchers.add(watcher);
+    return started.finally(() => {
+      watchers.delete(watcher);
+    });
+  }
+
+  /**
+   * Walk the lists, then refresh open advisory data through the shared
    * queue. Concurrent calls for this document and repository share the
    * active refresh.
    *
@@ -1719,7 +1897,7 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Load saved queue progress before adding advisories discovered by the crawl.
+   * Load saved queue progress before adding open advisories the walk found.
    *
    * @param {Document} doc
    * @param {import('../common/parse-list.js').ParsedList} parsed
@@ -1746,19 +1924,12 @@ if (typeof require === 'function') {
     try {
       setProgress(doc, { phase: 'walking', left: 0 });
       await queue.load();
-      const crawled = await globalThis.bghsa.crawl.crawl({
-        ref,
-        queue,
-        parsed,
-        href: options.href ?? globalThis.location?.href,
-        storage: options.storage,
-        now: options.now,
-        // Redraw the table to include advisories discovered by this crawl page.
-        onPage: () => {
-          void pass();
-        },
-      });
-      const { queued } = await queue.add(crawled.ids);
+      const crawled = await walk(doc, parsed, options);
+      const open = globalThis.bghsa.crawl.idsIn(
+        crawled.list,
+        globalThis.bghsa.parseList.OPEN_STATES
+      );
+      const { queued } = await queue.add(open);
       setProgress(doc, { phase: 'reading', left: queued.length });
       const read = await queue.run();
       await Promise.all(updates);
@@ -1792,9 +1963,36 @@ if (typeof require === 'function') {
   }
 
   /**
+   * Stop the work this document holds for any repository but the one it now
+   * shows: each surface's, the refresh's, and the walk's.
+   *
+   * @param {Document} doc
+   * @param {string | null} key The repository the document shows, or null
+   *   outside an identified list.
+   * @returns {void}
+   */
+  function depart(doc, key) {
+    for (const surface of [...surfaces]) {
+      if (surface.left === undefined) continue;
+      try {
+        surface.left(doc, key);
+      } catch {
+        // Continue stopping the remaining surfaces if one fails.
+      }
+    }
+    const left = running.get(doc);
+    if (left !== undefined && left.key !== key) leave(doc, left);
+    const walking = walks.get(doc);
+    // Leaving stopped the walk's queue, so a return starts or resumes a walk.
+    if (walking !== undefined && walking.key !== key) walking.stopped = true;
+  }
+
+  /**
    * Check refresh eligibility after each render to handle soft navigation.
    * Stop work for the previous repository and allow one active refresh for
    * the current repository. Throttle new refreshes with the cache threshold.
+   * A refresh after the first rereads stale advisories and continues a list
+   * walk that has not finished, and walks no list again.
    *
    * @param {Document} doc
    * @param {RefreshOptions} [options]
@@ -1807,16 +2005,7 @@ if (typeof require === 'function') {
         ? null
         : refKey({ owner: parsed.owner, repo: parsed.repo });
     // Notify each surface on every pass so it can stop work for other repositories.
-    for (const surface of [...surfaces]) {
-      if (surface.left === undefined) continue;
-      try {
-        surface.left(doc, key);
-      } catch {
-        // Continue stopping the remaining surfaces if one fails.
-      }
-    }
-    const left = running.get(doc);
-    if (left !== undefined && left.key !== key) leave(doc, left);
+    depart(doc, key);
     if (parsed === null || key === null) return;
     if (doc.getElementById(ROOT_ID) === null) return;
     if (running.get(doc)?.key === key) return;
@@ -1872,16 +2061,10 @@ if (typeof require === 'function') {
   function stop(doc = globalThis.document) {
     attached.get(doc)?.disconnect();
     attached.delete(doc);
-    for (const surface of [...surfaces]) {
-      if (surface.left === undefined) continue;
-      try {
-        surface.left(doc, null);
-      } catch {
-        // Continue stopping the remaining surfaces if one fails.
-      }
-    }
-    const held = running.get(doc);
-    if (held !== undefined) leave(doc, held);
+    depart(doc, null);
+    loads.delete(doc);
+    refreshed.delete(doc);
+    areas.delete(doc);
     const container = doc.querySelector('#advisories');
     if (container !== null) for (const node of nativeControls(container)) setHidden(node, false);
     for (const node of doc.querySelectorAll(ownedSelector())) node.remove();
@@ -1954,6 +2137,9 @@ if (typeof require === 'function') {
     applyEntry,
     refKey,
     queueFor,
+    loadedAt,
+    visit,
+    walk,
     refresh,
     ensureRefresh,
     renderLoop,

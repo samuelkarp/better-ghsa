@@ -49,15 +49,19 @@ if (typeof require === 'function') {
  *   run: () => Promise<import('../common/fetch.js').QueueSummary>,
  *   load: () => Promise<unknown>,
  * }} queue The shared repository queue for list and detail requests.
+ * @property {(watcher: {
+ *   onPage: (list: import('../common/crawl.js').CrawledList) => void,
+ *   onFailure: (state: string, url: string, reason: unknown) => void,
+ * }) => Promise<import('../common/crawl.js').CrawlResult>} walk Joins or starts the
+ *   page-load walk of the lists, which reports its pages and failures to the watcher.
  * @property {import('../common/parse-list.js').ParsedList | null} [parsed] The parsed
  *   current list page.
- * @property {string} [href] The URL of that page.
  * @property {import('../common/cache.js').CacheStorage | null} [storage]
  * @property {() => number} [now]
- * @property {(html: string) => import('../common/parse-list.js').ParsedList | null} [parse]
  * @property {(corpus: Corpus) => void} [onPage] Receives the updated corpus as each list
  *   page arrives.
- * @property {(state: string, url: string, reason: unknown) => void} [onFailure]
+ * @property {(state: string, url: string, reason: unknown) => void} [onFailure] Receives
+ *   each published or closed list page the walk could not read.
  */
 
 (() => {
@@ -148,8 +152,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Collect published and closed advisories. List and detail requests share
-   * the caller's rate-limited queue.
+   * Collect published and closed advisories from the page-load walk, then
+   * read them. List and detail requests share the caller's rate-limited queue.
    *
    * @param {CorpusOptions} options
    * @returns {Promise<{
@@ -182,16 +186,10 @@ if (typeof require === 'function') {
     // Restore saved progress before adding work to avoid repeating completed reads.
     await options.queue.load();
 
-    const crawled = await globalThis.bghsa.crawl.crawl({
-      ref,
-      queue: options.queue,
-      parsed: options.parsed,
-      href: options.href,
-      storage: options.storage,
-      now: options.now,
-      states: DONE_STATES,
-      parse: options.parse,
-      onFailure: options.onFailure,
+    const crawled = await options.walk({
+      onFailure: (state, url, reason) => {
+        if (DONE_STATES.includes(state)) options.onFailure?.(state, url, reason);
+      },
       onPage: (list) => {
         if (options.onPage === undefined) return;
         // Display each list page as it arrives.
@@ -199,10 +197,14 @@ if (typeof require === 'function') {
       },
     });
 
-    await options.queue.add(crawled.ids);
+    const crawl = globalThis.bghsa.crawl;
+    await options.queue.add(crawl.idsIn(crawled.list, DONE_STATES));
     const read = await options.queue.run();
+    const complete = DONE_STATES.every((state) =>
+      crawl.walkedSince(crawled.list, state, crawled.since)
+    );
 
-    return { corpus: await assemble(crawled.list, crawled.complete, false), crawled, read };
+    return { corpus: await assemble(crawled.list, complete, false), crawled, read };
   }
 
   const exported = { DONE_STATES, expectedOf, membersOf, collect };
