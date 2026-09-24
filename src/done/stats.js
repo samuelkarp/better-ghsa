@@ -192,6 +192,25 @@ if (typeof require === 'function') {
   }
 
   /**
+   * Sum a table of years down its columns. A blank month adds nothing.
+   *
+   * @param {readonly YearRow[]} rows
+   * @returns {{ months: number[], total: number }} Twelve month sums, January
+   *   first, and the sum of every row's total.
+   */
+  function monthTotalsOf(rows) {
+    const months = Array(12).fill(0);
+    let total = 0;
+    for (const row of rows) {
+      row.months.forEach((count, month) => {
+        months[month] += count ?? 0;
+      });
+      total += row.total;
+    }
+    return { months, total };
+  }
+
+  /**
    * Read closure reasons from state comments. Count unknown stored values as
    * written.
    *
@@ -595,6 +614,7 @@ if (typeof require === 'function') {
     UNCOMPUTED,
     monthOf,
     yearsOf,
+    monthTotalsOf,
     NO_FINGERPRINTS,
     closureReasonOf,
     scoringConfirmed,

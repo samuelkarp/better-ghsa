@@ -510,13 +510,19 @@ test('reports are counted by month in a table of years', async () => {
     ['2024', '0', '0', '2', '0', '0', '0', '0', '0', '0', '0', '0', '0', '2'],
     ['2025', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0'],
     ['2026', '1', '0', '0', '0', '0', '0', '0', '1', '', '', '', '', '2'],
+    ['Total', '1', '0', '2', '0', '0', '0', '0', '1', '0', '0', '0', '0', '4'],
   ]);
   assert.deepStrictEqual(
     Array.from(doc.querySelectorAll(`#${statistics.ROOT_ID} [data-bghsa-months] th`)).map(
       (cell) => cell.getAttribute('scope')
     ),
-    [...Array(14).fill('col'), 'row', 'row', 'row'],
-    'the headers name their columns and the years name their rows'
+    [...Array(14).fill('col'), 'row', 'row', 'row', 'row'],
+    'the headers name their columns, and the years and the total name their rows'
+  );
+  assert.deepStrictEqual(
+    textsOf(doc, `#${statistics.ROOT_ID} [data-bghsa-months] tfoot th`),
+    ['Total'],
+    'the totals row is the footer'
   );
 
   const months = one(doc, `#${statistics.ROOT_ID} [data-bghsa-months]`);
@@ -549,9 +555,7 @@ test('the table of years runs to the instant its summary was taken at', async ()
   }
 
   assert.deepStrictEqual(
-    monthCells(doc)
-      .slice(1)
-      .map((row) => row[0]),
+    textsOf(doc, `#${statistics.ROOT_ID} [data-bghsa-months] tbody th`),
     ['2026'],
     'a later clock added a year the summary never reached'
   );
@@ -1623,6 +1627,7 @@ test('the statistics export is the summary the page shows, written here', async 
       counted: 6,
       total: 6,
       years: [{ year: 2026, months: [0, 0, 2, 0, 0, 2, 1, 1, 0, null, null, null], total: 6 }],
+      monthTotals: [0, 0, 2, 0, 0, 2, 1, 1, 0, 0, 0, 0],
     },
     timeToFirstResponse: {
       loaded: 4,

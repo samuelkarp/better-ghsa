@@ -984,6 +984,17 @@ test('the years of reports run through the later of now and the latest report', 
   assert.deepStrictEqual(stats.yearsOf({}, at), []);
 });
 
+test('the month totals sum each month across the years', () => {
+  // August 2026, so September to December of 2026 are blank.
+  const at = Date.parse('2026-08-15T00:00:00Z');
+  const rows = stats.yearsOf({ '2025-03': 1, '2025-11': 2, '2026-03': 3 }, at);
+  assert.deepStrictEqual(stats.monthTotalsOf(rows), {
+    months: [0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 2, 0],
+    total: 6,
+  });
+  assert.deepStrictEqual(stats.monthTotalsOf([]), { months: Array(12).fill(0), total: 0 });
+});
+
 test('a corpus of one real advisory measures what its page carries', async () => {
   const published = fixture('published-containerd.html');
   const summary = await stats.summarize(

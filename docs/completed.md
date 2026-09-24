@@ -209,7 +209,9 @@ report at 23:30 on December 31 in New York (UTC-5) counts in January. An
 advisory whose detail read supplies no report time, because it is not loaded yet
 or its page shows none, uses the time its list row shows. Months without reports
 show 0, months after the end of the table are blank, and "Total" sums the row. A
-year without reports between two with them appears with all zeros.
+year without reports between two with them appears with all zeros. A last row,
+"Total", sums each month across the years, a blank month adding nothing. Its
+last cell sums the whole table and equals the sample size's first number.
 
 The sample size counts advisories with a report time out of all advisories.
 With no report time at all, the table reads "Nothing counted".
@@ -366,6 +368,7 @@ Each row holds:
 | `counted` | number | Advisories with a report time. | The first number of "N of M" |
 | `total` | number | All advisories counted. | The second number of "N of M" |
 | `years` | array | One object per table row, oldest year first. Empty when the box reads "Nothing counted". | The table rows |
+| `monthTotals` | array | Twelve numbers, January first. Each is the sum of that month across `years`, a `null` month adding nothing. Twelve zeros when the box reads "Nothing counted". | The "Total" row, "Jan" through "Dec" |
 
 Each year holds:
 
@@ -394,8 +397,8 @@ share one shape. `timeToClose` does not have a `waiting` key.
 
 A repository with one triage advisory, one published advisory, and one closed
 advisory whose detail page has not been loaded, exported at midnight UTC on
-September 1, 2026. The example puts each row and each `months` array on one
-line, where the file puts each value on its own line.
+September 1, 2026. The example puts each row, each `months` array, and
+`monthTotals` on one line, where the file puts each value on its own line.
 
 ```json
 {
@@ -439,7 +442,8 @@ line, where the file puts each value on its own line.
     "total": 3,
     "years": [
       { "year": 2026, "months": [0, 0, 1, 0, 0, 0, 1, 1, 0, null, null, null], "total": 3 }
-    ]
+    ],
+    "monthTotals": [0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0]
   },
   "timeToFirstResponse": {
     "loaded": 2,

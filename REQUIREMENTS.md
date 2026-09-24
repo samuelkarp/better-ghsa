@@ -418,7 +418,8 @@ of their report, falling back to the list page's opened time. It ends at the
 later of the current UTC month and the month of the latest report. It has one
 row per year, from the year of the earliest report to the year it ends, and a
 column per month and a total. Every month through its end shows its count,
-zero included; later months are blank. It spans the full width of the
+zero included; later months are blank. A last row totals each month across
+the years and the whole table. It spans the full width of the
 view, below the counts and above the timings, and shows its sample size as the
 advisories with a report time out of all advisories.
 

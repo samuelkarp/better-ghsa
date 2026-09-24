@@ -172,6 +172,8 @@ if (typeof require === 'function') {
     '.bghsa-stats-table th, .bghsa-stats-table td { padding: 8px 16px; text-align: right;' +
       ' white-space: nowrap; border-top: 1px solid var(--borderColor-muted, currentColor); }',
     '.bghsa-stats-table thead th { border-top: 0; }',
+    '.bghsa-stats-table tfoot th, .bghsa-stats-table tfoot td { font-weight: 600;' +
+      ' border-top: 2px solid var(--borderColor-muted, currentColor); }',
     '.bghsa-stats-table th[scope="row"], .bghsa-stats-table thead th:first-child' +
       ' { text-align: left; }',
   ].join('\n');
@@ -504,7 +506,7 @@ if (typeof require === 'function') {
 
   /**
    * Count reports in a grid of years by months, through the later of the
-   * current month and the latest report month.
+   * current month and the latest report month. A footer row sums each column.
    *
    * @param {Document} doc
    * @param {import('../done/stats.js').Tally | undefined} tally The month tally.
@@ -544,6 +546,16 @@ if (typeof require === 'function') {
       body.append(line);
     }
     grid.append(body);
+    const sums = globalThis.bghsa.stats.monthTotalsOf(rows);
+    const foot = element(doc, 'tfoot', '');
+    const line = element(doc, 'tr', '');
+    const label = element(doc, 'th', '', TOTAL_HEADER);
+    label.setAttribute('scope', 'row');
+    line.append(label);
+    for (const count of sums.months) line.append(element(doc, 'td', '', String(count)));
+    line.append(element(doc, 'td', 'text-bold', String(sums.total)));
+    foot.append(line);
+    grid.append(foot);
     const scroll = element(doc, 'div', 'bghsa-stats-scroll');
     scroll.append(grid);
     box.append(scroll);
@@ -731,10 +743,13 @@ if (typeof require === 'function') {
       };
     }
     const months = summary.counts.month;
+    const years = globalThis.bghsa.stats.yearsOf(months?.counts ?? {}, summary.at);
+    const sums = globalThis.bghsa.stats.monthTotalsOf(years);
     out.reportsByMonth = {
       counted: months?.counted ?? 0,
       total: months?.corpus ?? 0,
-      years: globalThis.bghsa.stats.yearsOf(months?.counts ?? {}, summary.at),
+      years,
+      monthTotals: sums.months,
     };
     for (const timing of globalThis.bghsa.stats.TIMINGS) {
       const found = summary.timings[timing.key];
