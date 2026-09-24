@@ -45,7 +45,17 @@ if (typeof require === 'function') {
  */
 
 /**
+ * The first-response timing. `counted` holds the answered advisories, those
+ * with a response at or after the report time. `read` counts the members with
+ * detail data. `waiting` is the longest time in milliseconds since the report
+ * among read open advisories without a response, or null when there is none.
+ *
+ * @typedef {Timing & { read: number, waiting: number | null }} ResponseTiming
+ */
+
+/**
  * @typedef {object} Summary
+ * @property {number} at The instant in milliseconds the summary is computed against.
  * @property {number} corpus The number of members in this sample.
  * @property {number} unread The number of members without detail data.
  * @property {boolean} complete Whether every selected state crawl reached its last page.
@@ -55,7 +65,8 @@ if (typeof require === 'function') {
  *   reason tally covers read closed advisories; the open tally covers triage and draft
  *   advisories; the severity tally covers published advisories and drafts whose scoring
  *   a maintainer confirmed.
- * @property {Record<string, Timing>} timings Timings keyed by TIMINGS entries.
+ * @property {{ firstResponse: ResponseTiming } & Record<string, Timing>} timings Timings
+ *   keyed by TIMINGS entries.
  * @property {Record<string, string>} uncomputed Unavailable metrics and their reasons.
  */
 
@@ -200,13 +211,14 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Measure first response from the earliest trusted member comment, excluding
-   * state and preservation comments. Membership comes from the comment's role
-   * badge. Email and activity without a qualifying comment are outside this
+   * Measure first response to the earlier of the earliest trusted member
+   * comment, excluding state and preservation comments, and the earliest
+   * timeline event only a maintainer can cause (derive.maintainerOnlyEvent).
+   * Membership comes from the comment's role badge. Email is outside this
    * measurement (REQUIREMENTS.md section 10).
    *
    * @param {import('../common/parse-detail.js').ParsedDetail} advisory
-   * @returns {number | null} The first qualifying comment timestamp, or null if unavailable.
+   * @returns {number | null} The first qualifying timestamp, or null if unavailable.
    */
   function firstResponseAt(advisory) {
     /** @type {number | null} */
@@ -219,7 +231,27 @@ if (typeof require === 'function') {
       if (at === null) continue;
       if (earliest === null || at < earliest) earliest = at;
     }
+    for (const event of advisory.timeline) {
+      if (!globalThis.bghsa.derive.maintainerOnlyEvent(event)) continue;
+      const at = instantOf(event.at);
+      if (at === null) continue;
+      if (earliest === null || at < earliest) earliest = at;
+    }
     return earliest;
+  }
+
+  /**
+   * @param {import('../common/parse-detail.js').ParsedDetail} advisory
+   * @param {number} at The current instant in milliseconds.
+   * @returns {number | null} Milliseconds from report to `at` for an advisory
+   *   without a response, or null when it has one or its report time is
+   *   missing, invalid, or after `at`.
+   */
+  function waitOf(advisory, at) {
+    const from = instantOf(advisory.reportedAt);
+    if (from === null || from > at) return null;
+    if (firstResponseAt(advisory) !== null) return null;
+    return at - from;
   }
 
   /**
@@ -397,10 +429,14 @@ if (typeof require === 'function') {
    * maintainer confirmed. Unread drafts are outside its corpus and counted in
    * its `unread`.
    *
+   * The first-response timing also counts read advisories and holds the
+   * longest wait, to `at`, of read open advisories without a response.
+   *
    * @param {import('./corpus.js').Corpus} held
+   * @param {number} at The current instant in milliseconds.
    * @returns {Promise<Summary>}
    */
-  async function summarize(held) {
+  async function summarize(held, at) {
     const over = { corpus: held.members.length, unread: held.unread.length };
 
     /** @type {(string | null)[]} */
@@ -420,6 +456,9 @@ if (typeof require === 'function') {
     const months = [];
     /** @type {(number | null)[]} */
     const firstResponses = [];
+    let read = 0;
+    /** @type {number | null} */
+    let waiting = null;
     /** @type {(number | null)[]} */
     const drafts = [];
     /** @type {(number | null)[]} */
@@ -431,7 +470,14 @@ if (typeof require === 'function') {
       const advisory = member.advisory;
       const state = advisory?.state ?? member.row.state ?? member.state;
       const named = state === null ? null : state.toLowerCase();
-      if (named !== null && OPEN_STATES.includes(named)) opens.push(named);
+      if (named !== null && OPEN_STATES.includes(named)) {
+        opens.push(named);
+        if (advisory !== null) {
+          const wait = waitOf(advisory, at);
+          if (wait !== null && (waiting === null || wait > waiting)) waiting = wait;
+        }
+      }
+      if (advisory !== null) read += 1;
       if (named === PUBLISHED_STATE || named === CLOSED_STATE) outcomes.push(named);
       if (named === CLOSED_STATE) {
         if (advisory === null) unreadReasons += 1;
@@ -451,7 +497,11 @@ if (typeof require === 'function') {
       publishes.push(durationOf(advisory, publishAt));
     }
 
+    /** @type {ResponseTiming} */
+    const response = { ...timing(firstResponses, over), read, waiting };
+
     return {
+      at,
       corpus: over.corpus,
       unread: over.unread,
       complete: held.complete,
@@ -465,7 +515,7 @@ if (typeof require === 'function') {
         month: tally(months, over),
       },
       timings: {
-        firstResponse: timing(firstResponses, over),
+        firstResponse: response,
         accept: timing(drafts, over),
         close: timing(closes, over),
         publish: timing(publishes, over),

@@ -424,9 +424,11 @@ advisories with a report time out of all advisories.
 
 Timing, reconstructed from page-observable events:
 
-- Time to first response, measured to the first comment by an org member that
-  the extension did not write. Exclude state and preserved-report comments.
-  Email contact is unobservable and excluded.
+- Time to first response, measured to the earlier of the first comment by an
+  org member that the extension did not write and the first timeline event
+  that counts as a review in section 6. Exclude state and preserved-report
+  comments. Email contact is unobservable and excluded. Advisories a
+  maintainer filed are included.
 - Time to accept, measured to the advisory entering draft.
 - Time to close.
 - Time to publish.
@@ -434,8 +436,16 @@ Timing, reconstructed from page-observable events:
 Measure closure and publication separately. Timings use the first matching
 event; done-list ordering uses the last.
 
-Beside each timing, show a row counting advisories without the required event:
-response, acceptance, closure, or publication. Display each omission as a label
+Time to first response shows its sample size as the read advisories out of all
+advisories; unread advisories appear only as that difference. Its spread covers
+read advisories with a response at or after the report time. Beside the spread,
+a no-response row shows the longest current wait: among read open advisories
+without a response, the longest time from the report to now. The row is absent
+when there is no such advisory. Read completed advisories without a response
+are outside that row.
+
+Beside each other timing, show a row counting advisories without the required
+event: acceptance, closure, or publication. Display each omission as a label
 and count.
 
 Omit metrics whose required event is unobservable. Do not estimate them.

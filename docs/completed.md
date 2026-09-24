@@ -216,15 +216,33 @@ Four sections measure elapsed time from the report: "Time to first response",
 "Time to accept", "Time to close", and "Time to publish". Each shows "Min",
 "Median", "Mean", and "Max".
 
-Unavailable durations are excluded from these calculations and counted in
-separate rows: "No response", "Never accepted", "Never closed", and "Never
-published". They are neither estimated nor counted as zero.
+In "Time to accept", "Time to close", and "Time to publish", unavailable
+durations are excluded from these calculations and counted in separate rows:
+"Never accepted", "Never closed", and "Never published". They are neither
+estimated nor counted as zero. The sample size counts measured advisories out
+of all advisories.
 
-First response uses the earliest comment by an organization member, excluding
-the extension's state and preservation comments. Email responses and actions
-without comments are outside this measurement. Acceptance, closure, and
-publication use the first matching timeline event. An advisory that is closed,
-reopened, and closed again is measured to its first closure.
+A first response is the earlier of the earliest comment by an organization
+member and the earliest maintainer action on the timeline. The comments
+exclude the extension's state and preservation comments. The actions are the
+ones that clear "Never reviewed" in the open list: accepting the report,
+adding another person as a collaborator, requesting a CVE, publishing, closing,
+and deleting the temporary private fork. A reporter adding themselves as a
+collaborator is not a response. Email responses are outside this measurement.
+Advisories a maintainer filed are included.
+
+"Time to first response" reports its sample size as the read advisories out of
+all advisories, so unread advisories show only as the difference: with 52
+advisories, 5 of them unread, it reads "47 of 52". "Min", "Median", "Mean", and
+"Max" cover the read advisories with a response at or after the report time.
+"No response" shows no count. It shows the longest current wait: among read
+triage and draft advisories without a response, the longest time since the
+report. It appears only when there is such an advisory. Completed advisories
+without a response are outside this row.
+
+Acceptance, closure, and publication use the first matching timeline event. An
+advisory that is closed, reopened, and closed again is measured to its first
+closure.
 
 ### Export
 
@@ -233,5 +251,6 @@ reopened, and closed again is measured to its first closure.
 `state`, `severity`, `closure_reason`, `reported_at`, `month`,
 `time_to_first_response_ms`, `time_to_accept_ms`, `time_to_close_ms`,
 `time_to_publish_ms`, `detail_fetched`, and `observed_at`. Durations use
-milliseconds; unavailable durations are blank. The browser generates the file
+milliseconds; unavailable durations are blank. `time_to_first_response_ms`
+measures to the first response the statistics use. The browser generates the file
 locally without transmitting it.

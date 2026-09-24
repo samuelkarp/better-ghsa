@@ -149,6 +149,9 @@ function corpusOf(members, over = {}) {
   };
 }
 
+/** The instant the summaries are taken at. */
+const NOW = Date.parse('2026-08-27T12:00:00Z');
+
 const CLOSED_AS = /** @param {string} reason */ (reason) => ({
   betterGhsa: '1.0',
   seq: 1,
@@ -207,6 +210,36 @@ test('the first response is the earliest qualifying comment, not the first found
     ],
   });
   assert.strictEqual(stats.durationOf(held, stats.firstResponseAt), 30 * 60 * 1000);
+});
+
+test('a maintainer action with no comment is a first response', () => {
+  const held = advisory({
+    reportedAt: '2026-08-25T22:00:00Z',
+    timeline: [
+      // A reporter can add themselves; only a maintainer's action counts.
+      event({ at: '2026-08-25T22:30:00Z', text: 'prakleumas added themselves as a collaborator' }),
+      event({ at: '2026-08-26T00:00:00Z', text: 'samuelkarp requested a CVE' }),
+    ],
+  });
+  assert.deepStrictEqual(held.comments, []);
+  assert.strictEqual(stats.firstResponseAt(held), Date.parse('2026-08-26T00:00:00Z'));
+  assert.strictEqual(stats.durationOf(held, stats.firstResponseAt), 2 * 60 * 60 * 1000);
+});
+
+test('the first response is the earlier of a member comment and a maintainer action', () => {
+  const commentFirst = advisory({
+    reportedAt: '2026-08-25T22:00:00Z',
+    comments: [comment({ author: 'samuelkarp', role: 'Member', at: '2026-08-25T22:30:00Z' })],
+    timeline: [event({ at: '2026-08-26T00:00:00Z', text: 'samuelkarp accepted this report' })],
+  });
+  assert.strictEqual(stats.durationOf(commentFirst, stats.firstResponseAt), 30 * 60 * 1000);
+
+  const actionFirst = advisory({
+    reportedAt: '2026-08-25T22:00:00Z',
+    comments: [comment({ author: 'samuelkarp', role: 'Member', at: '2026-08-26T01:00:00Z' })],
+    timeline: [event({ at: '2026-08-25T22:45:00Z', text: 'samuelkarp closed this' })],
+  });
+  assert.strictEqual(stats.durationOf(actionFirst, stats.firstResponseAt), 45 * 60 * 1000);
 });
 
 test('a reporter accepting credit is not the advisory entering draft', () => {
@@ -423,7 +456,8 @@ test('time from report to close is a timing, and nothing is left uncomputed', as
         state: 'closed',
         advisory: advisory({ state: 'Closed', reportedAt: '2026-08-24T16:19:16Z' }),
       }),
-    ])
+    ]),
+    NOW
   );
   assert.deepStrictEqual(Object.keys(summary.timings).sort(), [
     'accept',
@@ -462,7 +496,8 @@ test('an advisory the event is not observable on contributes to no timing', asyn
       member({ ghsaId: 'GHSA-aaaa-aaaa-aaaa', state: 'published', advisory: answered }),
       member({ ghsaId: 'GHSA-bbbb-bbbb-bbbb', state: 'closed', advisory: silent }),
       member({ ghsaId: 'GHSA-cccc-cccc-cccc', state: 'closed' }),
-    ])
+    ]),
+    NOW
   );
 
   const first = summary.timings.firstResponse;
@@ -477,6 +512,80 @@ test('an advisory the event is not observable on contributes to no timing', asyn
   const draft = summary.timings.accept;
   assert.deepStrictEqual(draft?.values, [2 * 60 * 60 * 1000]);
   assert.strictEqual(draft?.omitted, 2);
+});
+
+test('the first response counts read advisories and holds the longest open wait', async () => {
+  const HOUR_MS = 60 * 60 * 1000;
+  const DAY_MS = 24 * HOUR_MS;
+  const before = /** @param {number} ms */ (ms) => new Date(NOW - ms).toISOString();
+  const summary = await stats.summarize(
+    corpusOf([
+      member({
+        ghsaId: 'GHSA-aaaa-aaaa-aaaa',
+        state: 'triage',
+        advisory: advisory({ state: 'Triage', reportedAt: before(45 * DAY_MS + 3 * HOUR_MS) }),
+      }),
+      member({
+        ghsaId: 'GHSA-bbbb-bbbb-bbbb',
+        state: 'draft',
+        advisory: advisory({ state: 'Draft', reportedAt: before(10 * DAY_MS) }),
+      }),
+      // Unanswered and waiting longest, but closed.
+      member({
+        ghsaId: 'GHSA-cccc-cccc-cccc',
+        state: 'closed',
+        advisory: advisory({ state: 'Closed', reportedAt: before(90 * DAY_MS) }),
+      }),
+      member({
+        ghsaId: 'GHSA-dddd-dddd-dddd',
+        state: 'published',
+        advisory: advisory({
+          state: 'Published',
+          reportedAt: '2026-04-01T00:00:00Z',
+          comments: [comment({ author: 'samuelkarp', role: 'Member', at: '2026-04-01T01:00:00Z' })],
+        }),
+      }),
+      member({
+        ghsaId: 'GHSA-eeee-eeee-eeee',
+        state: 'triage',
+        advisory: advisory({
+          state: 'Triage',
+          reportedAt: '2026-04-01T00:00:00Z',
+          timeline: [
+            event({ at: '2026-04-01T02:00:00Z', text: 'samuelkarp added nettleweed as a collaborator' }),
+          ],
+        }),
+      }),
+      // Read, and without a report time to measure anything from.
+      member({
+        ghsaId: 'GHSA-ffff-ffff-ffff',
+        state: 'triage',
+        advisory: advisory({ state: 'Triage' }),
+      }),
+      member({ ghsaId: 'GHSA-gggg-gggg-gggg', state: 'triage' }),
+    ]),
+    NOW
+  );
+
+  const first = summary.timings.firstResponse;
+  assert.deepStrictEqual(first.values, [HOUR_MS, 2 * HOUR_MS], 'over the answered advisories');
+  assert.strictEqual(first.read, 6, 'every advisory but the unread one');
+  assert.strictEqual(first.corpus, 7);
+  assert.strictEqual(first.waiting, 45 * DAY_MS + 3 * HOUR_MS, 'the triage advisory, to now');
+});
+
+test('an open advisory reported after now has no wait', async () => {
+  const summary = await stats.summarize(
+    corpusOf([
+      member({
+        ghsaId: 'GHSA-aaaa-aaaa-aaaa',
+        state: 'triage',
+        advisory: advisory({ state: 'Triage', reportedAt: new Date(NOW + 1000).toISOString() }),
+      }),
+    ]),
+    NOW
+  );
+  assert.strictEqual(summary.timings.firstResponse.waiting, null);
 });
 
 test('a timing reports the spread of what it measured', () => {
@@ -554,7 +663,8 @@ test('the corpus is counted by outcome, closure reason, severity, and month', as
         severity: 'moderate',
         openedAt: '2026-04-15T00:00:00Z',
       }),
-    ])
+    ]),
+    NOW
   );
 
   assert.strictEqual(summary.corpus, 4);
@@ -613,7 +723,8 @@ test('outcomes count every ending, and reasons every read closure', async () => 
         state: 'closed',
         advisory: advisory({ state: 'Closed' }),
       }),
-    ])
+    ]),
+    NOW
   );
 
   assert.strictEqual(summary.corpus, 6, 'the corpus is every advisory the crawl found');
@@ -727,7 +838,8 @@ test('severity counts publications and drafts whose current scoring is confirmed
         state: 'closed',
         advisory: scored('Closed', 'high', confirming(await schema.scoringFingerprint('high', ''))),
       }),
-    ])
+    ]),
+    NOW
   );
 
   assert.deepStrictEqual(
@@ -770,7 +882,8 @@ test('a closure reason this reader does not interpret is counted as it stands', 
           ],
         }),
       }),
-    ])
+    ]),
+    NOW
   );
   assert.deepStrictEqual({ ...summary.counts.reason?.counts }, { 'rejected by the sun': 1 });
 });
@@ -802,7 +915,8 @@ test('a summary says whether it is over the whole corpus', async () => {
     corpusOf([member({ ghsaId: 'GHSA-aaaa-aaaa-aaaa', state: 'published' })], {
       complete: false,
       expected: { published: 41, closed: 12 },
-    })
+    }),
+    NOW
   );
   assert.strictEqual(partial.complete, false, 'the walk did not reach the last page');
   assert.strictEqual(partial.corpus, 1, 'and this is what it found');
@@ -879,7 +993,8 @@ test('a corpus of one real advisory measures what its page carries', async () =>
   const summary = await stats.summarize(
     corpusOf([
       member({ ghsaId: 'GHSA-6r4h-2xvq-wm93', state: 'published', advisory: published }),
-    ])
+    ]),
+    NOW
   );
   assert.deepStrictEqual({ ...summary.counts.outcome?.counts }, { published: 1 });
   assert.deepStrictEqual({ ...summary.counts.severity?.counts }, { moderate: 1 });
@@ -888,11 +1003,10 @@ test('a corpus of one real advisory measures what its page carries', async () =>
   assert.deepStrictEqual(summary.timings.publish?.values, [10210000 * 1000]);
   assert.strictEqual(summary.timings.close?.counted, 0, 'a published advisory is not a closed one');
   assert.strictEqual(summary.timings.close?.omitted, 1);
-  // Comments were removed from the capture. Its first-response duration is unavailable.
+  // Comments were removed from the capture. Its first response is the
+  // acceptance, the earliest maintainer action on its timeline.
   assert.deepStrictEqual(published.comments, []);
-  assert.deepStrictEqual(summary.timings.firstResponse?.values, []);
-  assert.strictEqual(summary.timings.firstResponse?.omitted, 1);
-  assert.strictEqual(summary.timings.firstResponse?.mean, null);
+  assert.deepStrictEqual(summary.timings.firstResponse?.values, [3434 * 1000]);
 });
 
 const HOUR = 60 * 60 * 1000;

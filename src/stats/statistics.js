@@ -291,7 +291,12 @@ if (typeof require === 'function') {
         walked: half.states.some((state) => crawl.walkOf(list, state).started),
       });
     }
-    return { ref, halves, summary: await globalThis.bghsa.stats.summarize(whole(halves)) };
+    // Take the instant after loading, so every figure on the page uses it.
+    const summary = await globalThis.bghsa.stats.summarize(
+      whole(halves),
+      globalThis.bghsa.cache.now()
+    );
+    return { ref, halves, summary };
   }
 
   /**
@@ -467,17 +472,15 @@ if (typeof require === 'function') {
    *
    * @param {Document} doc
    * @param {import('../done/stats.js').Tally | undefined} tally The month tally.
+   * @param {number} at The instant the summary is computed against.
    * @returns {Element}
    */
-  function buildMonths(doc, tally) {
+  function buildMonths(doc, tally, at) {
     const box = element(doc, 'div', 'Box mb-3 bghsa-stats-months');
     box.setAttribute('data-bghsa-months', '1');
     const counted = tally?.counted ?? 0;
     box.append(buildHeader(doc, MONTHS_NAME, `${counted} of ${tally?.corpus ?? 0}`));
-    const rows = globalThis.bghsa.stats.yearsOf(
-      tally?.counts ?? {},
-      globalThis.bghsa.cache.now()
-    );
+    const rows = globalThis.bghsa.stats.yearsOf(tally?.counts ?? {}, at);
     if (rows.length === 0) {
       box.append(element(doc, 'div', 'Box-body bghsa-stats-empty', NOTHING_TEXT));
       return box;
@@ -513,22 +516,56 @@ if (typeof require === 'function') {
 
   /**
    * @param {Document} doc
+   * @param {{ key: string, name: string }} timing
+   * @param {string} meta The sample size.
+   * @param {import('../done/stats.js').Timing} found
+   * @returns {{ box: Element, list: Element }} The box holding the spread, and
+   *   the list to add rows to before appending it.
+   */
+  function timingBox(doc, timing, meta, found) {
+    const box = element(doc, 'div', 'Box mb-3 bghsa-stats-list');
+    box.setAttribute('data-bghsa-timing', timing.key);
+    box.append(buildHeader(doc, timing.name, meta));
+    const list = element(doc, 'ul', 'bghsa-stats-rows');
+    for (const each of SPREAD) {
+      list.append(buildLine(doc, each.name, formatDuration(found[each.key]), ''));
+    }
+    return { box, list };
+  }
+
+  /**
+   * @param {Document} doc
    * @param {{ key: string, name: string, omission: string }} timing
    * @param {import('../done/stats.js').Timing} found
    * @returns {Element}
    */
   function buildTiming(doc, timing, found) {
-    const box = element(doc, 'div', 'Box mb-3 bghsa-stats-list');
-    box.setAttribute('data-bghsa-timing', timing.key);
-    box.append(buildHeader(doc, timing.name, `${found.counted} of ${found.corpus}`));
-    const list = element(doc, 'ul', 'bghsa-stats-rows');
-    for (const each of SPREAD) {
-      list.append(buildLine(doc, each.name, formatDuration(found[each.key]), ''));
-    }
+    const { box, list } = timingBox(doc, timing, `${found.counted} of ${found.corpus}`, found);
     if (found.omitted > 0) {
       // Show the number of omitted durations and the event required to measure them.
       const line = buildLine(doc, timing.omission, String(found.omitted), '');
       line.classList.add('bghsa-stats-omitted');
+      list.append(line);
+    }
+    box.append(list);
+    return box;
+  }
+
+  /**
+   * The sample size counts read advisories, and unread ones only as its
+   * shortfall. The spread covers answered advisories. The omission row holds
+   * the longest current wait of an open advisory without a response.
+   *
+   * @param {Document} doc
+   * @param {{ key: string, name: string, omission: string }} timing
+   * @param {import('../done/stats.js').ResponseTiming} found
+   * @returns {Element}
+   */
+  function buildResponse(doc, timing, found) {
+    const { box, list } = timingBox(doc, timing, `${found.read} of ${found.corpus}`, found);
+    if (found.waiting !== null) {
+      const line = buildLine(doc, timing.omission, formatDuration(found.waiting), '');
+      line.classList.add('bghsa-stats-waiting');
       list.append(line);
     }
     box.append(list);
@@ -555,10 +592,14 @@ if (typeof require === 'function') {
     }
     parts.push(counts);
 
-    parts.push(buildMonths(doc, summary.counts.month));
+    parts.push(buildMonths(doc, summary.counts.month, summary.at));
 
     const timings = element(doc, 'div', 'bghsa-stats-lists bghsa-stats-timings');
     for (const timing of globalThis.bghsa.stats.TIMINGS) {
+      if (timing.key === 'firstResponse') {
+        timings.append(buildResponse(doc, timing, summary.timings.firstResponse));
+        continue;
+      }
       const found = summary.timings[timing.key];
       if (found === undefined) continue;
       timings.append(buildTiming(doc, timing, found));

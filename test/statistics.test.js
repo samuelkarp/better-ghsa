@@ -528,6 +528,35 @@ test('reports are counted by month in a table of years', async () => {
   );
 });
 
+test('the table of years runs to the instant its summary was taken at', async () => {
+  const reported = ghsa('oaaa');
+  const { doc } = await repository({
+    owner: 'stats-months-at',
+    states: { triage: [{ ghsaId: reported }] },
+    reads: [{ ghsaId: reported, state: 'Triage', reportedAt: '2026-03-02T00:00:00Z' }],
+    crawl: ['open'],
+  });
+
+  statsToggle(doc).click();
+  await statistics.load(doc);
+  const held = clockAt;
+  // Redrawing without a load keeps the summary taken in 2026.
+  clockAt = Date.parse('2027-02-15T00:00:00Z');
+  try {
+    statistics.draw(doc);
+  } finally {
+    clockAt = held;
+  }
+
+  assert.deepStrictEqual(
+    monthCells(doc)
+      .slice(1)
+      .map((row) => row[0]),
+    ['2026'],
+    'a later clock added a year the summary never reached'
+  );
+});
+
 test('reports without a time leave the table empty', async () => {
   const { doc } = await repository({
     owner: 'stats-undated',
@@ -1004,13 +1033,17 @@ test('each timing says how many it could not measure and why', async () => {
   statsToggle(doc).click();
   await statistics.load(doc);
 
-  assert.deepStrictEqual(timingLines(doc, 'firstResponse'), [
-    'Min —',
-    'Median —',
-    'Mean —',
-    'Max —',
-    'No response 6',
-  ]);
+  // Each action is a response: 1, 3, 2, 4, and 8 days after the report.
+  assert.deepStrictEqual(
+    timingLines(doc, 'firstResponse'),
+    ['Min 1d 0h', 'Median 3d 0h', 'Mean 3d 14h', 'Max 8d 0h'],
+    'the advisory without a response is unread, so no wait is shown'
+  );
+  assert.strictEqual(
+    textOf(doc, `#${statistics.ROOT_ID} [data-bghsa-timing="firstResponse"] .bghsa-stats-meta`),
+    '5 of 6',
+    'the unread advisory shows only as the gap between the count and the total'
+  );
   assert.deepStrictEqual(timingLines(doc, 'accept'), [
     'Min 1d 0h',
     'Median 2d 0h',
@@ -1085,3 +1118,62 @@ test('a timing that measured every advisory carries no omission row', async () =
   );
 });
 
+
+test('the first response shows the longest wait of an open advisory without one', async () => {
+  const HOUR_MS = 60 * 60 * 1000;
+  const DAY_MS = 24 * HOUR_MS;
+  const now = clockAt;
+  const before = /** @param {number} ms */ (ms) => new Date(now - ms).toISOString();
+  const waiting = ghsa('wait');
+  const closedId = ghsa('clsd');
+  const acceptedId = ghsa('acpt');
+  const publishedId = ghsa('publ');
+  const unread = ghsa('nrd1');
+  const { doc } = await repository({
+    owner: 'stats-waiting',
+    states: {
+      triage: [{ ghsaId: waiting }, { ghsaId: unread }],
+      draft: [{ ghsaId: acceptedId }],
+      published: [{ ghsaId: publishedId }],
+      closed: [{ ghsaId: closedId }],
+    },
+    reads: [
+      // The crawl moves the clock on by seconds, well inside the half hour.
+      {
+        ghsaId: waiting,
+        state: 'Triage',
+        reportedAt: before(45 * DAY_MS + 3 * HOUR_MS + 30 * 60 * 1000),
+      },
+      // Unanswered for longer, but closed.
+      { ghsaId: closedId, state: 'Closed', reportedAt: before(90 * DAY_MS) },
+      {
+        ghsaId: acceptedId,
+        state: 'Draft',
+        reportedAt: '2026-03-02T00:00:00Z',
+        timeline: [{ at: '2026-03-03T00:00:00Z', text: 'samuelkarp accepted this report' }],
+      },
+      {
+        ghsaId: publishedId,
+        state: 'Published',
+        reportedAt: '2026-03-02T00:00:00Z',
+        timeline: [{ at: '2026-03-05T00:00:00Z', text: 'samuelkarp published this' }],
+      },
+    ],
+    crawl: ['open', 'done'],
+  });
+
+  statsToggle(doc).click();
+  await statistics.load(doc);
+
+  assert.deepStrictEqual(timingLines(doc, 'firstResponse'), [
+    'Min 1d 0h',
+    'Median 2d 0h',
+    'Mean 2d 0h',
+    'Max 3d 0h',
+    'No response 45d 3h',
+  ]);
+  assert.strictEqual(
+    textOf(doc, `#${statistics.ROOT_ID} [data-bghsa-timing="firstResponse"] .bghsa-stats-meta`),
+    '4 of 5'
+  );
+});
