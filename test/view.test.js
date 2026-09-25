@@ -3022,6 +3022,40 @@ test('a refresh while the completed view shows reads nothing for it', async () =
 });
 
 /**
+ * Press a toggle while the queue saves the first progress record that holds
+ * one advisory pending, and finish that write only after the work the press
+ * started has had its turns: the maintainer clicks as the save is under way.
+ *
+ * @param {string} ghsaId
+ * @param {() => void} press
+ * @returns {() => void} Takes the hold away if it never met its write.
+ */
+function pressDuringSave(ghsaId, press) {
+  const storage = /** @type {import('../test-support/storage.js').FakeStorage} */ (
+    QUEUE_OPTIONS.storage
+  );
+  const store = storage.set;
+  storage.set = async (items) => {
+    const saving = Object.entries(items).some(([key, value]) => {
+      if (!key.startsWith('queue:') || !schema.isPlainObject(value)) return false;
+      const progress = /** @type {Record<string, unknown>} */ (value).record;
+      return schema.isPlainObject(progress) && Array.isArray(progress.pending)
+        ? progress.pending.includes(ghsaId)
+        : false;
+    });
+    if (saving) {
+      storage.set = store;
+      press();
+      for (let turn = 0; turn < 20; turn += 1) await new Promise(setImmediate);
+    }
+    return store(items);
+  };
+  return () => {
+    storage.set = store;
+  };
+}
+
+/**
  * Start a page load on the open table the way the content script does, with
  * every advisory stale: two open advisories on the triage list besides the
  * one the visible page names, two published, and one closed. Each request
@@ -3029,13 +3063,16 @@ test('a refresh while the completed view shows reads nothing for it', async () =
  * completed view's status chip, how many of its rows carry a read, and the
  * open table's status chip. Each click presses the completed view's toggle
  * as its request goes out, or, with no request named, once the page load's
- * refresh has ended. Return once the collection and the walk have ended.
+ * refresh has ended. Each save presses the toggle while the first write of
+ * queue progress holding the advisory it names is being saved. Return once
+ * the collection and the walk have ended.
  *
  * @param {string} prefix Two letters that make the advisories' IDs.
  * @param {readonly ((ids: Record<string, string>) => string | null)[]} clicks
+ * @param {readonly ((ids: Record<string, string>) => string)[]} [saves]
  * @returns {Promise<{ trace: string[], doc: Document }>}
  */
-async function switchedFromTable(prefix, clicks) {
+async function switchedFromTable(prefix, clicks, saves = []) {
   /** @type {Record<string, string>} */
   const ids = {};
   for (const name of ['oa', 'ob', 'pa', 'pb', 'ca']) ids[name] = ghsa(`${prefix}${name}`);
@@ -3066,6 +3103,8 @@ async function switchedFromTable(prefix, clicks) {
     /** @type {unknown} */ ({ pathname: `/${REF.owner}/${REF.repo}/security/advisories` })
   );
   const urls = [...Object.keys(pages)];
+  /** @type {(() => void)[]} */
+  const holds = [];
   try {
     const doc = await page();
     /** @type {string[]} */
@@ -3078,6 +3117,14 @@ async function switchedFromTable(prefix, clicks) {
       const opened = textsOf(doc, `#${table.ROOT_ID} .bghsa-list-status .bghsa-list-progress`);
       trace.push(`${what}: completed ${done || 'none'}, ${painted} read; open ${opened.join('+') || 'none'}`);
     };
+    for (const save of saves) {
+      holds.push(
+        pressDuringSave(save(ids), () => {
+          doneToggle(doc).click();
+          note('show completed while saving');
+        })
+      );
+    }
     const pressed = new Set(clicks.map((click) => click(ids)));
     for (const url of urls) {
       const what = url.includes('?state=')
@@ -3104,6 +3151,7 @@ async function switchedFromTable(prefix, clicks) {
     note('the end');
     return { trace, doc };
   } finally {
+    for (const release of holds) release();
     globalThis.location = location;
     for (const url of urls) delete during[url];
     for (const [id] of read) delete pages[detailUrl(id)];
@@ -3224,4 +3272,105 @@ test('the chip says loading, not a count, while the completed lists are walked',
     delete during[detailUrl(closed)];
     leave();
   }
+});
+
+test('the completed view shown as the open reads are saved leaves them all to read', async () => {
+  const { trace, doc } = await switchedFromTable('tg', [], [(ids) => ids['oa'] ?? '']);
+  assert.deepStrictEqual(trace, [
+    'triage list: completed none, 0 read; open Loading...',
+    'draft list: completed none, 0 read; open Loading...',
+    // The completed view loads the saved progress as the open advisories
+    // just queued are being saved, and every one of them is still read.
+    'show completed while saving: completed Loading..., 0 read; open Loading...',
+    'published list: completed Loading..., 0 read; open Loading (3 left)...',
+    'closed list: completed Loading..., 0 read; open Loading (3 left)...',
+    'ca: completed Loading (3 left)..., 0 read; open Loading (3 left)...',
+    'pa: completed Loading (2 left)..., 1 read; open Loading (3 left)...',
+    'pb: completed Loading (1 left)..., 2 read; open Loading (3 left)...',
+    'triage advisory: completed none, 3 read; open Loading (3 left)...',
+    'oa: completed none, 3 read; open Loading (2 left)...',
+    'ob: completed none, 3 read; open Loading (1 left)...',
+    'the end: completed none, 3 read; open none',
+  ]);
+  assert.deepStrictEqual(view.stateOf(doc).corpus?.unread, [], 'a completed row went unread');
+});
+
+/**
+ * After a page load on the open table has read everything and every advisory
+ * has gone stale, press one view's toggle, which asks the walk for the
+ * completed advisories, and press the other's while the queue saves them.
+ * Each note says what the completed view's status chip reads, as the second
+ * toggle is pressed, as each completed advisory's request goes out, and once
+ * the collection and the walk have ended.
+ *
+ * @param {string} prefix Two letters that make the completed advisories' IDs.
+ * @param {(doc: Document) => HTMLElement} first
+ * @param {(doc: Document) => HTMLElement} second
+ * @returns {Promise<{ said: string[], read: string[], unread: string[] | undefined }>}
+ *   What the chip read, the advisories requested, and the completed rows unread.
+ */
+async function pressedWhileSaving(prefix, first, second) {
+  const { doc, published, closed, leave } = await walkedOnTable(prefix);
+  /** @type {() => void} */
+  let release = () => {};
+  try {
+    clockAt += 31 * 24 * 60 * MINUTE;
+    const chip = () => textsOf(doc, `#${view.ROOT_ID} .bghsa-done-header span.Label`).join('+');
+    /** @type {string[]} */
+    const said = [];
+    release = pressDuringSave(published, () => {
+      second(doc).click();
+      said.push(`pressed while saving: ${chip() || 'none'}`);
+    });
+    for (const id of [published, closed]) {
+      during[detailUrl(id)] = async () => {
+        said.push(`${id === published ? 'published' : 'closed'}: ${chip() || 'none'}`);
+      };
+    }
+    const before = asked.length;
+    first(doc).click();
+    await until('began the collection', () => view.stateOf(doc).reading);
+    await until(
+      'ended the collection and the walk',
+      () => !view.stateOf(doc).reading && table.progressOf(doc) === null
+    );
+    await settled();
+    said.push(`the end: ${chip() || 'none'}`);
+    const names = new Map([
+      [detailUrl(TRIAGE_ID), 'triage'],
+      [detailUrl(published), 'published'],
+      [detailUrl(closed), 'closed'],
+    ]);
+    const read = asked.slice(before).map((url) => names.get(url) ?? url);
+    return { said, read: read.sort(), unread: view.stateOf(doc).corpus?.unread };
+  } finally {
+    release();
+    delete during[detailUrl(published)];
+    delete during[detailUrl(closed)];
+    leave();
+  }
+}
+
+test('the completed view shown as the statistics reads are saved reads its rows', async () => {
+  const { said, read, unread } = await pressedWhileSaving('th', statsToggle, doneToggle);
+  assert.deepStrictEqual(read, ['closed', 'published', 'triage'], 'a stale advisory went unread');
+  assert.deepStrictEqual(said, [
+    'pressed while saving: Loading (2 left)...',
+    'closed: Loading (2 left)...',
+    'published: Loading (1 left)...',
+    'the end: none',
+  ]);
+  assert.deepStrictEqual(unread, [], 'a completed row went unread');
+});
+
+test('the statistics shown as the completed reads are saved leave them to read', async () => {
+  const { said, read, unread } = await pressedWhileSaving('ti', doneToggle, statsToggle);
+  assert.deepStrictEqual(read, ['closed', 'published', 'triage'], 'a stale advisory went unread');
+  assert.deepStrictEqual(said, [
+    'pressed while saving: Loading (2 left)...',
+    'closed: Loading (2 left)...',
+    'published: Loading (1 left)...',
+    'the end: none',
+  ]);
+  assert.deepStrictEqual(unread, [], 'a completed row went unread');
 });

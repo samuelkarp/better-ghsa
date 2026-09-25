@@ -341,6 +341,11 @@ if (typeof require === 'function') {
      * previous in-flight advisory; the freshness check skips it if its response
      * was already cached. Loading also restarts a stopped queue.
      *
+     * The stored pending advisories join the ones this queue holds, after
+     * them. A load keeps every advisory queued since the last save: one
+     * whose save is still under way, one whose save failed, or one another
+     * page's save left out of the stored record.
+     *
      * @returns {Promise<QueueProgress | null>} The restored progress, or null if absent.
      */
     function load() {
@@ -350,7 +355,8 @@ if (typeof require === 'function') {
           await globalThis.bghsa.cache.getProgress(ref, { storage, at: clock() })
         );
         if (held === null) return null;
-        pending = idsOf(held.inFlight === null ? held.pending : [held.inFlight, ...held.pending]);
+        const stored = held.inFlight === null ? held.pending : [held.inFlight, ...held.pending];
+        pending = idsOf([...pending, ...stored]);
         inFlight = null;
         done = [...held.done];
         failed = [...held.failed];

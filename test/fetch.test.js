@@ -407,6 +407,96 @@ test('an answer that landed before the page went away is not fetched again', asy
   assert.ok(summary.skipped === 1, `${summary.skipped} advisories were skipped`);
 });
 
+test('a load while queued work is being saved keeps that work', async () => {
+  const clock = fakeClock(0);
+  const storage = fakeStorage();
+  // An earlier request left progress with nothing pending.
+  await cache.putProgress(
+    REF,
+    {
+      pending: [],
+      inFlight: null,
+      done: [],
+      failed: [],
+      lastRequestAt: 0,
+      startedAt: 0,
+      updatedAt: 0,
+    },
+    { storage, at: clock.now() }
+  );
+  const fetch = fakeFetch(clock);
+  const queue = queues.createQueue(options(clock, storage, { fetch: fetch.send }));
+  await queue.load();
+
+  // Hold the next progress write until the load has read storage.
+  const store = storage.set;
+  /** @type {() => void} */
+  let release = () => {};
+  const held = new Promise((resolve) => {
+    release = () => resolve(undefined);
+  });
+  let saving = false;
+  storage.set = async (items) => {
+    storage.set = store;
+    saving = true;
+    await held;
+    return store(items);
+  };
+  const adding = queue.add([ghsa('aaaa'), ghsa('bbbb')]);
+  for (let turn = 0; turn < 20 && !saving; turn += 1) await new Promise(setImmediate);
+  assert.ok(saving, 'the add never began saving');
+  const loading = queue.load();
+  for (let turn = 0; turn < 20; turn += 1) await new Promise(setImmediate);
+  release();
+  await Promise.all([adding, loading]);
+
+  assert.deepStrictEqual(queue.progress().pending, [ghsa('aaaa'), ghsa('bbbb')]);
+  const summary = await queue.run();
+  assert.deepStrictEqual(
+    fetch.urls.map((url) => url.split('/').pop()),
+    [ghsa('aaaa'), ghsa('bbbb')],
+    'an advisory queued during the load went unread'
+  );
+  assert.ok(summary.complete, 'the pass did not finish');
+});
+
+test('a load keeps unsaved work and takes in what another page saved', async () => {
+  const clock = fakeClock(0);
+  const storage = fakeStorage();
+  const fetch = fakeFetch(clock);
+  const queue = queues.createQueue(options(clock, storage, { fetch: fetch.send }));
+  // The progress write fails. Only this queue holds what was added.
+  const store = storage.set;
+  storage.set = async () => {
+    throw new Error('the storage refused the write');
+  };
+  await queue.add([ghsa('aaaa')]);
+  storage.set = store;
+  // Another page saved an advisory of its own.
+  await cache.putProgress(
+    REF,
+    {
+      pending: [ghsa('cccc')],
+      inFlight: ghsa('bbbb'),
+      done: [],
+      failed: [],
+      lastRequestAt: 0,
+      startedAt: 0,
+      updatedAt: 0,
+    },
+    { storage, at: clock.now() }
+  );
+  await queue.load();
+
+  assert.deepStrictEqual(queue.progress().pending, [ghsa('aaaa'), ghsa('bbbb'), ghsa('cccc')]);
+  await queue.run();
+  assert.deepStrictEqual(
+    fetch.urls.map((url) => url.split('/').pop()),
+    [ghsa('aaaa'), ghsa('bbbb'), ghsa('cccc')],
+    'the load dropped work'
+  );
+});
+
 test('a finished pass leaves nothing to resume and the request time', async () => {
   const clock = fakeClock(0);
   const storage = fakeStorage();
