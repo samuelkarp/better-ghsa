@@ -688,9 +688,9 @@ test('parse-list cannot read the table the extension inserts', async () => {
 });
 
 test('the CVE a row carries is the one the advisory read names', async () => {
-  /** @type {Array<[string, Record<string, unknown>, string | null]>} */
+  /** @type {Array<[string, Record<string, unknown>, string | null, boolean]>} */
   const wanted = [
-    ['GHSA-aaaa-aaaa-aaaa', { cveId: 'CVE-2026-12345' }, 'CVE-2026-12345'],
+    ['GHSA-aaaa-aaaa-aaaa', { cveId: 'CVE-2026-12345' }, 'CVE-2026-12345', true],
     [
       'GHSA-bbbb-bbbb-bbbb',
       {
@@ -700,9 +700,10 @@ test('the CVE a row carries is the one the advisory read names', async () => {
         ],
       },
       'CVE requested',
+      false,
     ],
-    ['GHSA-cccc-cccc-cccc', { cveId: null, cveSelection: 'not_applicable' }, 'CVE not applicable'],
-    ['GHSA-dddd-dddd-dddd', { cveId: null, cveSelection: null }, null],
+    ['GHSA-cccc-cccc-cccc', { cveId: null, cveSelection: 'not_applicable' }, 'CVE not applicable', false],
+    ['GHSA-dddd-dddd-dddd', { cveId: null, cveSelection: null }, null, false],
   ];
 
   const storage = fakeStorage();
@@ -725,10 +726,11 @@ test('the CVE a row carries is the one the advisory read names', async () => {
       openCount: wanted.length,
     };
     const view = await table.readView(parsed, { at: AT });
-    for (const [ghsaId, , cve] of wanted) {
+    for (const [ghsaId, , cve, assigned] of wanted) {
       const row = view.rows.find((each) => each.ghsaId === ghsaId);
       assert.ok(row?.read === true, `${ghsaId} was not read`);
       assert.strictEqual(row?.cve, cve, `${ghsaId} carries another CVE`);
+      assert.strictEqual(row?.cveAssigned, assigned, `${ghsaId} reads another CVE state`);
     }
   } finally {
     cache.setStorage(null);
@@ -927,10 +929,25 @@ test('a confirmed severity is drawn filled and an unconfirmed one is not', () =>
 });
 
 test('the CVE, patch, backport, and embargo chips read what the advisory holds', () => {
-  const assigned = chipsOf({ read: true, cve: 'CVE-2026-12345' });
+  const assigned = chipsOf({ read: true, cve: 'CVE-2026-12345', cveAssigned: true });
   assert.ok(
-    assigned === 'Blocked on us[danger] | CVE-2026-12345',
+    assigned === 'Blocked on us[danger] | CVE-2026-12345[success-muted]',
     `an assigned CVE: ${assigned}`
+  );
+
+  const requested = chipsOf({ read: true, cve: 'CVE requested' });
+  assert.ok(requested === 'Blocked on us[danger] | CVE requested', `a requested CVE: ${requested}`);
+
+  const inapplicable = chipsOf({ read: true, cve: 'CVE not applicable' });
+  assert.ok(
+    inapplicable === 'Blocked on us[danger] | CVE not applicable',
+    `a CVE marked not applicable: ${inapplicable}`
+  );
+
+  const unassigned = chipsOf({ read: true, cve: 'CVE pending review' });
+  assert.ok(
+    unassigned === 'Blocked on us[danger] | CVE pending review',
+    `a CVE chip is green only for an assigned CVE: ${unassigned}`
   );
 
   const draft = { read: true, state: 'Draft' };

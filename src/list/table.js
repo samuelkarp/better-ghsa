@@ -54,6 +54,7 @@ if (typeof require === 'function') {
  * @property {number} backportTargets The number of requested backport branches.
  * @property {number} backportsDone The number of targets with an open pull request.
  * @property {string | null} cve The CVE chip text, or null when absent.
+ * @property {boolean} cveAssigned Whether the advisory has an assigned CVE.
  */
 
 /**
@@ -305,6 +306,7 @@ if (typeof require === 'function') {
       backportTargets: 0,
       backportsDone: 0,
       cve: null,
+      cveAssigned: false,
     };
   }
 
@@ -357,6 +359,7 @@ if (typeof require === 'function') {
       backportTargets: tracking.backports.length,
       backportsDone: backportsDoneIn(derived.patch, tracking.backports),
       cve: cveTextOf(derived.cve),
+      cveAssigned: derived.cve.state === 'assigned',
     };
   }
 
@@ -449,7 +452,12 @@ if (typeof require === 'function') {
       backports.tone = row.backportsDone < row.backportTargets ? 'attention' : 'success-muted';
       chips.push(backports);
     }
-    if (row.cve !== null) chips.push({ text: row.cve });
+    if (row.cve !== null) {
+      /** @type {import('../common/chips.js').ChipSpec} */
+      const cve = { text: row.cve };
+      if (row.cveAssigned) cve.tone = 'success-muted';
+      chips.push(cve);
+    }
 
     // Label scoring as unconfirmed only after reading the advisory.
     if (row.severityLabel !== null) {

@@ -83,6 +83,7 @@ prepared pull request. The chip is pale yellow while any target lacks one and
 pale green once every target has one. Without targets there is no chip.
 
 **CVE.** The assigned identifier, "CVE requested", or "CVE not applicable".
+The chip is pale green when it shows an assigned identifier.
 
 **Severity.** The level with ", unconfirmed" appended until a maintainer
 confirms the scoring. Confirmed severity uses a filled chip in GitHub's color
