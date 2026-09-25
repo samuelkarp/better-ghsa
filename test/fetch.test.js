@@ -477,6 +477,29 @@ test('a stop during the wait spends no further request', async () => {
   assert.ok(held?.inFlight === null, 'a stopped pass left a request in flight');
 });
 
+test('the advisory a pass waits to send counts as in flight', async () => {
+  const clock = fakeClock(0);
+  const storage = fakeStorage();
+  const fetch = fakeFetch(clock);
+  /** @type {string[]} */
+  const seen = [];
+  const queue = queues.createQueue(
+    options(clock, storage, {
+      fetch: fetch.send,
+      wait: async (ms) => {
+        const held = queue.progress();
+        seen.push(`in flight ${held.inFlight}, pending ${held.pending.join(',') || 'none'}`);
+        await clock.wait(ms);
+      },
+    })
+  );
+  await queue.add([ghsa('aaaa'), ghsa('bbbb')]);
+  await queue.run();
+
+  // A count of the reads left, taken during the wait, holds the one waiting.
+  assert.deepStrictEqual(seen, [`in flight ${ghsa('bbbb')}, pending none`]);
+});
+
 test('a failed read caches nothing and the pass carries on', async () => {
   const clock = fakeClock(0);
   const storage = fakeStorage();

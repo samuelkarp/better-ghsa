@@ -1808,7 +1808,9 @@ if (typeof require === 'function') {
   /**
    * @typedef {object} WalkWatcher
    * @property {(list: import('../common/crawl.js').CrawledList) => void} [onPage]
-   *   Called after each list page adds rows.
+   *   Called on joining a walk that holds the lists, after each list page
+   *   adds rows, and once after the walk of a list that added no page, such
+   *   as one this page load already walked.
    * @property {(state: string, url: string, reason: unknown) => void} [onFailure]
    *   Called for each list page the walk could not read.
    * @property {(step: WalkStep) => void} [onStep] Called before each list page
@@ -1858,7 +1860,8 @@ if (typeof require === 'function') {
    *     stopped: boolean,
    *     asked: Set<WalkGroup>,
    *     ask: (group: WalkGroup) => Promise<WalkRead>,
-   *     left: (group: WalkGroup) => number,
+   *     progress: (group: WalkGroup) => RefreshProgress,
+   *     join: (watcher: WalkWatcher) => void,
    *     started: Promise<import('../common/crawl.js').CrawlResult>,
    *     watchers: Set<WalkWatcher>,
    *   }
@@ -1918,6 +1921,8 @@ if (typeof require === 'function') {
     const queued = new Set();
     /** @type {import('../common/crawl.js').CrawledList} */
     let list = { walks: {}, rows: {} };
+    /** Whether the walk holds the lists, once a list's walk has read them. */
+    let known = false;
     let fetched = 0;
     let failed = 0;
     /** @type {{ fetched: number, skipped: number }} */
@@ -1985,6 +1990,20 @@ if (typeof require === 'function') {
     };
 
     /**
+     * @param {import('../common/crawl.js').CrawledList} seen
+     * @returns {void} Hands the lists to the watchers.
+     */
+    const tell = (seen) => {
+      for (const each of [...watchers]) {
+        try {
+          each.onPage?.(seen);
+        } catch {
+          // Continue notifying the remaining watchers if one fails.
+        }
+      }
+    };
+
+    /**
      * Take in the asks of the view showing and pick the work that goes next.
      *
      * @returns {WalkStep | null} The next work, or null when none is left.
@@ -2044,6 +2063,7 @@ if (typeof require === 'function') {
             // The visible page seeds the walk of the list it shows.
             const seed = !seeded.has(state) && (shown === null || shown === state);
             seeded.add(state);
+            let told = false;
             const result = await crawl.crawl({
               ref,
               queue: gated,
@@ -2056,13 +2076,10 @@ if (typeof require === 'function') {
               onPage: (seen) => {
                 // Redraw the table to include advisories discovered by this page.
                 void pass();
-                for (const each of [...watchers]) {
-                  try {
-                    each.onPage?.(seen);
-                  } catch {
-                    // Continue notifying the remaining watchers if one fails.
-                  }
-                }
+                list = seen;
+                known = true;
+                told = true;
+                tell(seen);
               },
               onFailure: (failing, url, reason) => {
                 for (const each of [...watchers]) {
@@ -2075,10 +2092,14 @@ if (typeof require === 'function') {
               },
             });
             list = result.list;
+            known = true;
             fetched += result.fetched;
             failed += result.failed;
             if (halted) break;
-            if (!yielded) finished.add(state);
+            if (yielded) continue;
+            finished.add(state);
+            // A list this page load already walked adds no page.
+            if (!told) tell(list);
             continue;
           }
           const group = step.read;
@@ -2133,18 +2154,47 @@ if (typeof require === 'function') {
       },
       /**
        * @param {WalkGroup} group
-       * @returns {number} How many of the group's advisories are left to read.
+       * @returns {RefreshProgress} The group's work left: walking while any of
+       *   its lists is left to walk or none of its advisories is queued, then
+       *   how many of its advisories are left to read, the one in flight
+       *   included.
        */
-      left: (group) => {
+      progress: (group) => {
         const inFlight = queue.progress().inFlight;
         const sending = inFlight !== null && groupOf(inFlight) === group ? 1 : 0;
-        return pendingOf(group).length + sending;
+        const left = pendingOf(group).length + sending;
+        const walking = GROUPS[group].some((state) => !finished.has(state));
+        return walking || left === 0 ? { phase: 'walking', left: 0 } : { phase: 'reading', left };
+      },
+      /**
+       * @param {WalkWatcher} watcher
+       * @returns {void} Follows the walk from here, handed the lists as the
+       *   walk holds them now.
+       */
+      join: (watcher) => {
+        watchers.add(watcher);
+        if (!known) return;
+        try {
+          watcher.onPage?.(list);
+        } catch {
+          // A failing watcher still follows the rest of the walk.
+        }
       },
       started,
       watchers,
     };
     walks.set(doc, fresh);
     return fresh;
+  }
+
+  /**
+   * @param {Document} doc
+   * @param {WalkGroup} group
+   * @returns {RefreshProgress | null} The group's work left in the document's
+   *   walk, or null when no walk is in progress.
+   */
+  function walkProgress(doc, group) {
+    return walks.get(doc)?.progress(group) ?? null;
   }
 
   /**
@@ -2164,7 +2214,7 @@ if (typeof require === 'function') {
    */
   function walk(doc, parsed, options = {}, watcher = {}, group = undefined) {
     const held = begin(doc, parsed, options);
-    held.watchers.add(watcher);
+    held.join(watcher);
     const settled =
       group === undefined
         ? held.started
@@ -2203,16 +2253,6 @@ if (typeof require === 'function') {
   }
 
   /**
-   * @param {ReturnType<typeof globalThis.bghsa.fetch.createQueue>} queue
-   * @returns {number} The pending and in-flight advisory count from the shared
-   *   queue.
-   */
-  function leftToRead(queue) {
-    const held = queue.progress();
-    return held.pending.length + (held.inFlight === null ? 0 : 1);
-  }
-
-  /**
    * Load saved queue progress before the walk queues the open advisories it
    * finds, and follow the reads of them.
    *
@@ -2231,24 +2271,17 @@ if (typeof require === 'function') {
 
     /** @type {Promise<unknown>[]} */
     const updates = [];
-    /** @type {() => number} */
-    let left = () => 0;
+    /** @type {() => RefreshProgress} The open advisories' work left. */
+    let work = () => ({ phase: 'walking', left: 0 });
     /** @type {(ghsaId: string, entry: import('../common/cache.js').CacheEntry) => void} */
     const listener = (ghsaId, entry) => {
       updates.push(applyEntry(doc, ghsaId, entry, { storage: options.storage }));
-      if (progresses.get(doc)?.phase === 'reading') {
-        setProgress(doc, { phase: 'reading', left: left() });
-      }
+      if (progresses.get(doc)?.phase === 'reading') setProgress(doc, work());
     };
     /** @type {WalkWatcher} */
     const watcher = {
-      onStep: (step) => {
-        setProgress(
-          doc,
-          'read' in step && step.read === 'open'
-            ? { phase: 'reading', left: left() }
-            : { phase: 'walking', left: 0 }
-        );
+      onStep: () => {
+        setProgress(doc, work());
       },
     };
     listening.add(listener);
@@ -2262,7 +2295,7 @@ if (typeof require === 'function') {
       await queue.load();
       const walking = begin(doc, parsed, options);
       held = walking;
-      left = () => walking.left('open');
+      work = () => walking.progress('open');
       walking.watchers.add(watcher);
       const { read } = await walking.ask('open');
       setProgress(doc, { phase: 'walking', left: 0 });
@@ -2475,7 +2508,6 @@ if (typeof require === 'function') {
     buildBody,
     refreshBody,
     countTextOf,
-    leftToRead,
     buildOwners,
     nativeControls,
     surfaces,
@@ -2497,6 +2529,7 @@ if (typeof require === 'function') {
     loadedAt,
     visit,
     walk,
+    walkProgress,
     refresh,
     ensureRefresh,
     refreshShown,

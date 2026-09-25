@@ -2151,7 +2151,13 @@ test('a caller that starts during a walk joins it', async () => {
       [draft, `${base}?state=published`, `${base}?state=closed`],
       'the second caller walked the lists again'
     );
-    assert.strictEqual(seen.length, 3, `the second caller saw the pages ${JSON.stringify(seen)}`);
+    // The second caller is handed the lists as the walk holds them on
+    // joining, then each list page after.
+    assert.deepStrictEqual(
+      seen,
+      ['triage', 'triage,draft', 'triage,draft,published', 'triage,draft,published,closed'],
+      'the second caller missed the lists on joining or a page after'
+    );
     assert.ok(result.complete, 'the joined walk was not reported complete');
   } finally {
     release();
@@ -2361,8 +2367,9 @@ const CLOSED_R = 'GHSA-rrrr-rrrr-rrrr';
  *
  * @param {{ doc: Document, options: import('../src/list/table.js').RefreshOptions }} held
  * @param {string} mode
- * @param {string[]} [seen] Collects a mark for each list page the joining
- *   caller sees, and for each list page it hears failed.
+ * @param {string[]} [seen] Collects a mark for the lists the joining caller
+ *   is handed on joining and for each list page it sees after, and one for
+ *   each list page it hears failed.
  * @returns {void}
  */
 function show(held, mode, seen) {
@@ -2402,8 +2409,42 @@ test('switching to the completed view mid-walk puts its work first, and switchin
       `${base}/${PUBLISHED_Q}`,
       `${base}/${CLOSED_R}`,
     ]);
-    assert.strictEqual(seen.length, 3, 'the joining caller did not see each list page');
+    assert.strictEqual(
+      seen.length,
+      4,
+      'the joining caller was not handed the lists on joining and each list page after'
+    );
     assert.ok(summary !== null && summary.read.remaining.length === 0, 'an open advisory was left');
+  } finally {
+    clockAt = started;
+  }
+});
+
+test('a caller that joins part way through a list is handed the rows read so far', async () => {
+  const started = clockAt;
+  try {
+    /** @type {string[]} */
+    const handed = [];
+    await switching('walk-part', (held) => ({
+      // The caller joins while the published list's second page is out.
+      [`${held.base}?state=published&page=2`]: () => {
+        const parsed = table.pageOf(held.doc);
+        if (parsed === null) throw new Error('the page did not read as a list');
+        let joining = true;
+        void table.walk(held.doc, parsed, held.options, {
+          onPage: (list) => {
+            if (!joining) return;
+            handed.push(
+              Object.keys(list.rows)
+                .filter((ghsaId) => list.rows[ghsaId]?.state === 'published')
+                .join()
+            );
+          },
+        });
+        joining = false;
+      },
+    }));
+    assert.deepStrictEqual(handed, [PUBLISHED_P], 'the caller was not handed the first page on joining');
   } finally {
     clockAt = started;
   }

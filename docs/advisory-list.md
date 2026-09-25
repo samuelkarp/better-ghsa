@@ -175,8 +175,10 @@ tab. The statistics view does not send a request of its own. Background
 requests are throttled to one per second within each queue. Requests from
 separate tabs can occur closer together.
 
-The heading shows "Loading..." during the list walk and "Loading (12 left)..."
-during advisory reads. The progress chip disappears when the refresh finishes,
+The heading shows "Loading (12 left)..." while open advisories remain to be
+read, the one being requested included, and keeps that count while the walk
+serves another view first. It shows "Loading..." for the rest of the refresh.
+The progress chip disappears when the refresh finishes,
 once the four lists are walked and the advisory pages the view showing asked
 for are read.
 

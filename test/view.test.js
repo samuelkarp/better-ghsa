@@ -1528,12 +1528,12 @@ test('the header counts what a running crawl has still to read', async () => {
   for (const id of ids) during[detailUrl(id)] = record;
   await view.collect(doc, QUEUE_OPTIONS);
 
-  // The queue count becomes available after the crawl.
-  // The header then reports pending advisory reads.
+  // The header reports the lists being walked, then the advisory reads left,
+  // the one in flight included.
   assert.deepStrictEqual(said, [
     table.WALKING_TEXT,
     table.WALKING_TEXT,
-    table.WALKING_TEXT,
+    'Loading (3 left)...',
     'Loading (2 left)...',
     'Loading (1 left)...',
   ]);
@@ -1544,7 +1544,7 @@ test('the header counts what a running crawl has still to read', async () => {
   );
 });
 
-test('the header keeps up while the queue serves the open list', async () => {
+test('the header counts its own reads while the queue holds open ones', async () => {
   const done = [ghsa('yaaa'), ghsa('ybbb')];
   const open = [ghsa('zaaa'), ghsa('zbbb'), ghsa('zccc')];
   const base = `/${REF.owner}/${REF.repo}/security/advisories`;
@@ -1578,15 +1578,15 @@ test('the header keeps up while the queue serves the open list', async () => {
 
   await view.collect(doc, QUEUE_OPTIONS);
 
-  // Both surfaces share the queue count, including reads queued for the open
-  // list. The collection ends once its own advisories are read.
-  assert.deepStrictEqual(said, [table.WALKING_TEXT, 'Loading (4 left)...']);
+  // The collection ends once its own advisories are read, and the open
+  // advisories read after it draw no chip here.
+  await queue.run();
+  assert.deepStrictEqual(said, ['Loading (2 left)...', 'Loading (1 left)...', '', '', '']);
   assert.deepStrictEqual(
     textsOf(doc, `#${view.ROOT_ID} .bghsa-done-header span.Label`),
     [],
     'the header still says the collection is running'
   );
-  await queue.run();
 });
 
 test('the header stops saying it is loading when the collection is put down', async () => {
@@ -1635,9 +1635,10 @@ test('the header stops saying it is loading when the collection is put down', as
   await queue.run();
 });
 
-test('the header stands from the ask and counts down while the walk waits', async () => {
-  // The completed-list crawl waits behind queued open-list reads.
-  // Its header must show progress while those reads finish.
+test('the header stands from the ask and counts its own work while the walk waits', async () => {
+  // The completed-list crawl waits behind queued open-list reads. Its
+  // header says it is loading while those reads finish, and counts only
+  // its own advisories.
   const open = [ghsa('kaaa'), ghsa('kbbb'), ghsa('kccc'), ghsa('kddd')];
   const done = [ghsa('laaa')];
   const base = `/${REF.owner}/${REF.repo}/security/advisories`;
@@ -1674,31 +1675,32 @@ test('the header stands from the ask and counts down while the walk waits', asyn
   await refreshing;
   record('the end');
 
-  // The header tracks the shared queue before this view has any rows.
   assert.deepStrictEqual(said, [
-    'the ask: Loading (4 left)... rows=0 corpus=null',
-    'open read 1: Loading (4 left)... rows=0 corpus=null',
-    'open read 2: Loading (3 left)... rows=0 corpus=null',
-    'open read 3: Loading (2 left)... rows=0 corpus=null',
-    'open read 4: Loading (1 left)... rows=0 corpus=null',
+    'the ask: Loading... rows=0 corpus=null',
+    'open read 1: Loading... rows=0 corpus=null',
+    'open read 2: Loading... rows=0 corpus=null',
+    'open read 3: Loading... rows=0 corpus=null',
+    'open read 4: Loading... rows=0 corpus=null',
     'its own walk: Loading... rows=0 corpus=null',
-    'its own read: Loading... rows=1 corpus=1',
+    'its own read: Loading (1 left)... rows=1 corpus=1',
     'the end: no chip rows=1 corpus=1',
   ]);
 });
 
 test('the count carries the read the queue has in flight', async () => {
-  // The queue count includes the in-flight request and both waiting advisories.
+  // The count includes the completed advisory in flight and the one waiting,
+  // and none of the open advisories read before them.
   const open = [ghsa('faaa'), ghsa('fbbb'), ghsa('fccc')];
   const held = ghsa('gaaa');
+  const waiting = ghsa('gbbb');
   const base = `/${REF.owner}/${REF.repo}/security/advisories`;
   pages[`${base}?state=published`] = listHtml({
     state: 'published',
-    ids: [held],
-    counts: { published: 1 },
+    ids: [held, waiting],
+    counts: { published: 2 },
   });
-  pages[`${base}?state=closed`] = listHtml({ state: 'closed', ids: [], counts: { published: 1 } });
-  for (const id of [...open, held]) {
+  pages[`${base}?state=closed`] = listHtml({ state: 'closed', ids: [], counts: { published: 2 } });
+  for (const id of [...open, held, waiting]) {
     pages[detailUrl(id)] = detailHtml({
       ghsaId: id,
       state: 'Published',
@@ -1713,16 +1715,29 @@ test('the count carries the read the queue has in flight', async () => {
 
   /** @type {string[]} */
   const said = [];
+  const record = async () => {
+    said.push(textsOf(doc, `#${view.ROOT_ID} .bghsa-done-header span.Label`).join('+'));
+  };
   during[detailUrl(open[0] ?? '')] = async () => {
     doneToggle(doc).click();
-    said.push(textsOf(doc, `#${view.ROOT_ID} .bghsa-done-header span.Label`).join('+'));
+    await record();
+  };
+  // Draw the view again as the request goes out, after the queue took the
+  // advisory from pending.
+  during[detailUrl(held)] = async () => {
+    view.draw(doc);
+    await record();
   };
 
   const refreshing = queue.run();
   await view.collect(doc, QUEUE_OPTIONS);
   await refreshing;
 
-  assert.deepStrictEqual(said, ['Loading (3 left)...'], 'the read in flight went uncounted');
+  assert.deepStrictEqual(
+    said,
+    [table.WALKING_TEXT, 'Loading (2 left)...'],
+    'the count took in an open read, or left out the read in flight'
+  );
 });
 
 test('the list reads as loading until the first page of the walk lands', async () => {
@@ -2874,6 +2889,115 @@ test('the completed view shown after the walk ended reads its advisories at once
   }
 });
 
+test('the completed view shown while the statistics read paints each read as it lands', async () => {
+  const { doc, published, closed, leave } = await walkedOnTable('se');
+  try {
+    // The statistics start a walk whose lists this page load has walked, and
+    // the completed view joins it while it reads the completed advisories.
+    /** @type {string[]} */
+    const said = [];
+    during[detailUrl(closed)] = async () => {
+      doneToggle(doc).click();
+    };
+    during[detailUrl(published)] = async () => {
+      const held = view.stateOf(doc).corpus;
+      const read = held === null ? 0 : held.members.filter((each) => each.advisory !== null).length;
+      const rows = doc.querySelectorAll(`#${view.ROOT_ID} [data-bghsa-ghsa]`).length;
+      said.push(`${rows} rows, ${read} read`);
+    };
+    statsToggle(doc).click();
+    await until(
+      'ended the collection and the walk',
+      () => table.viewMode(doc) === view.MODE && !view.stateOf(doc).reading
+    );
+    assert.deepStrictEqual(said, ['2 rows, 1 read'], 'the rows waited for the last read');
+    assert.deepStrictEqual(view.stateOf(doc).corpus?.unread, [], 'a completed row went unread');
+  } finally {
+    delete during[detailUrl(published)];
+    delete during[detailUrl(closed)];
+    leave();
+  }
+});
+
+test('the open chip counts down past advisories another page has read', async () => {
+  const open = [ghsa('ubba'), ghsa('ubbb'), ghsa('ubbc')];
+  const [first, second, last] = open;
+  const counts = { triage: 4 };
+  pages[listUrl(REF, 'triage')] = listHtml({ state: 'triage', ids: open, counts });
+  pages[listUrl(REF, 'draft')] = listHtml({ state: 'draft', ids: [], counts });
+  pages[listUrl(REF, 'published')] = listHtml({ state: 'published', ids: [], counts });
+  pages[listUrl(REF, 'closed')] = listHtml({ state: 'closed', ids: [], counts });
+  for (const id of [TRIAGE_ID, ...open]) {
+    pages[detailUrl(id)] = detailHtml({ ghsaId: id, state: 'Triage', reportedAt: '2026-03-02T00:00:00Z' });
+  }
+  await cache.clear();
+  clockAt += 31 * 24 * 60 * MINUTE;
+  const location = globalThis.location;
+  globalThis.location = /** @type {Location} */ (
+    /** @type {unknown} */ ({ pathname: `/${REF.owner}/${REF.repo}/security/advisories` })
+  );
+  try {
+    const doc = await page();
+    /** @type {string[]} */
+    const said = [];
+    // Another page reads two of the open advisories while this one reads the
+    // visible page's advisory. The walk passes them without a request.
+    during[detailUrl(TRIAGE_ID)] = async () => {
+      for (const id of [first, second]) {
+        const html = detailHtml({ ghsaId: id ?? '', state: 'Triage', reportedAt: '2026-03-02T00:00:00Z' });
+        const record = parseDetail.parseDetail(document(html));
+        await cache.putAdvisory({ ...REF, ghsaId: id }, record, { storage: cache.storageOf(), at: clockAt });
+      }
+    };
+    during[detailUrl(last ?? '')] = async () => {
+      said.push(textsOf(doc, `#${table.ROOT_ID} .bghsa-list-status .bghsa-list-progress`).join('+'));
+    };
+    const before = asked.length;
+    await table.passFor(doc, QUEUE_OPTIONS)();
+    await until('ended its refresh', () => table.progressOf(doc) === null);
+    assert.deepStrictEqual(
+      asked.slice(before).filter((url) => !url.includes('?state=')),
+      [detailUrl(TRIAGE_ID), detailUrl(last ?? '')],
+      'the walk read an advisory another page had read'
+    );
+    assert.deepStrictEqual(said, ['Loading (1 left)...'], 'the chip held still past the advisories passed');
+  } finally {
+    globalThis.location = location;
+    delete during[detailUrl(TRIAGE_ID)];
+    delete during[detailUrl(last ?? '')];
+    for (const id of [TRIAGE_ID, ...open]) delete pages[detailUrl(id)];
+  }
+});
+
+test('the completed list says it is loading while the walk goes on past a failed list page', async () => {
+  const closed = ghsa('uccc');
+  const failing = pages[listUrl(REF, 'published')];
+  delete pages[listUrl(REF, 'published')];
+  pages[listUrl(REF, 'closed')] = listHtml({ state: 'closed', ids: [closed], counts: { closed: 1 } });
+  pages[detailUrl(closed)] = detailHtml({ ghsaId: closed, state: 'Closed', reportedAt: '2026-03-02T00:00:00Z' });
+  await cache.clear();
+  try {
+    const doc = await page();
+    const body = () => textsOf(doc, `#${view.ROOT_ID} .bghsa-done-empty`).join('+') || 'rows';
+    const failures = () => textsOf(doc, `#${view.ROOT_ID} .bghsa-done-failure`).length;
+    /** @type {string[]} */
+    const said = [];
+    during[listUrl(REF, 'closed')] = async () => {
+      said.push(`closed list: ${body()} beside ${failures()} failure`);
+    };
+    await view.collect(doc, QUEUE_OPTIONS);
+    said.push(`the end: ${body()} beside ${failures()} failure`);
+    assert.deepStrictEqual(said, [
+      'closed list: Loading... beside 1 failure',
+      'the end: rows beside 1 failure',
+    ]);
+  } finally {
+    if (failing !== undefined) pages[listUrl(REF, 'published')] = failing;
+    delete during[listUrl(REF, 'closed')];
+    delete pages[detailUrl(closed)];
+  }
+});
+
 test('a refresh while the completed view shows reads nothing for it', async () => {
   const { doc, leave } = await walkedOnTable('sc');
   try {
@@ -2893,6 +3017,211 @@ test('a refresh while the completed view shows reads nothing for it', async () =
       'the refresh read for a view that was not listening'
     );
   } finally {
+    leave();
+  }
+});
+
+/**
+ * Start a page load on the open table the way the content script does, with
+ * every advisory stale: two open advisories on the triage list besides the
+ * one the visible page names, two published, and one closed. Each request
+ * the page sends notes what the maintainer sees as it goes out: the
+ * completed view's status chip, how many of its rows carry a read, and the
+ * open table's status chip. Each click presses the completed view's toggle
+ * as its request goes out, or, with no request named, once the page load's
+ * refresh has ended. Return once the collection and the walk have ended.
+ *
+ * @param {string} prefix Two letters that make the advisories' IDs.
+ * @param {readonly ((ids: Record<string, string>) => string | null)[]} clicks
+ * @returns {Promise<{ trace: string[], doc: Document }>}
+ */
+async function switchedFromTable(prefix, clicks) {
+  /** @type {Record<string, string>} */
+  const ids = {};
+  for (const name of ['oa', 'ob', 'pa', 'pb', 'ca']) ids[name] = ghsa(`${prefix}${name}`);
+  const open = [ids['oa'] ?? '', ids['ob'] ?? ''];
+  const published = [ids['pa'] ?? '', ids['pb'] ?? ''];
+  const closed = [ids['ca'] ?? ''];
+  const counts = { triage: 3, published: 2, closed: 1 };
+  pages[listUrl(REF, 'triage')] = listHtml({ state: 'triage', ids: open, counts });
+  pages[listUrl(REF, 'draft')] = listHtml({ state: 'draft', ids: [], counts });
+  pages[listUrl(REF, 'published')] = listHtml({ state: 'published', ids: published, counts });
+  pages[listUrl(REF, 'closed')] = listHtml({ state: 'closed', ids: closed, counts });
+  /** @type {[string, string][]} */
+  const read = [
+    [TRIAGE_ID, 'Triage'],
+    ...open.map((id) => /** @type {[string, string]} */ ([id, 'Triage'])),
+    ...published.map((id) => /** @type {[string, string]} */ ([id, 'Published'])),
+    ...closed.map((id) => /** @type {[string, string]} */ ([id, 'Closed'])),
+  ];
+  for (const [id, state] of read) {
+    pages[detailUrl(id)] = detailHtml({ ghsaId: id, state, reportedAt: '2026-03-02T00:00:00Z' });
+  }
+  const names = new Map(Object.entries(ids).map(([name, id]) => [id, name]));
+  names.set(TRIAGE_ID, 'triage advisory');
+  await cache.clear();
+  clockAt += 31 * 24 * 60 * MINUTE;
+  const location = globalThis.location;
+  globalThis.location = /** @type {Location} */ (
+    /** @type {unknown} */ ({ pathname: `/${REF.owner}/${REF.repo}/security/advisories` })
+  );
+  const urls = [...Object.keys(pages)];
+  try {
+    const doc = await page();
+    /** @type {string[]} */
+    const trace = [];
+    /** @param {string} what @returns {void} */
+    const note = (what) => {
+      const done = textsOf(doc, `#${view.ROOT_ID} .bghsa-done-header span.Label`).join('+');
+      const held = view.stateOf(doc).corpus;
+      const painted = held === null ? 0 : held.members.filter((each) => each.advisory !== null).length;
+      const opened = textsOf(doc, `#${table.ROOT_ID} .bghsa-list-status .bghsa-list-progress`);
+      trace.push(`${what}: completed ${done || 'none'}, ${painted} read; open ${opened.join('+') || 'none'}`);
+    };
+    const pressed = new Set(clicks.map((click) => click(ids)));
+    for (const url of urls) {
+      const what = url.includes('?state=')
+        ? `${url.replace(/.*state=/, '')} list`
+        : (names.get(url.replace(/.*\//, '')) ?? url);
+      during[url] = async () => {
+        note(what);
+        if (!pressed.has(url)) return;
+        doneToggle(doc).click();
+        note(`${table.viewMode(doc) === view.MODE ? 'show completed' : 'show open'}`);
+      };
+    }
+    await table.passFor(doc, QUEUE_OPTIONS)();
+    await until('ended its refresh', () => table.progressOf(doc) === null);
+    if (pressed.has(null)) {
+      doneToggle(doc).click();
+      note('show completed');
+    }
+    await until(
+      'ended the collection and the walk',
+      () => !view.stateOf(doc).reading && table.progressOf(doc) === null
+    );
+    await settled();
+    note('the end');
+    return { trace, doc };
+  } finally {
+    globalThis.location = location;
+    for (const url of urls) delete during[url];
+    for (const [id] of read) delete pages[detailUrl(id)];
+  }
+}
+
+test('the completed view shown during the open reads walks and reads its own first', async () => {
+  const { trace, doc } = await switchedFromTable('ta', [(ids) => detailUrl(ids['oa'] ?? '')]);
+  assert.deepStrictEqual(trace, [
+    'triage list: completed none, 0 read; open Loading...',
+    'draft list: completed none, 0 read; open Loading...',
+    'triage advisory: completed none, 0 read; open Loading (3 left)...',
+    'oa: completed none, 0 read; open Loading (2 left)...',
+    // The open read in flight finishes. The completed lists and advisories
+    // go next, and the chip counts them alone.
+    'show completed: completed Loading..., 0 read; open Loading (2 left)...',
+    'published list: completed Loading..., 0 read; open Loading (1 left)...',
+    'closed list: completed Loading..., 0 read; open Loading (1 left)...',
+    'ca: completed Loading (3 left)..., 0 read; open Loading (1 left)...',
+    'pa: completed Loading (2 left)..., 1 read; open Loading (1 left)...',
+    'pb: completed Loading (1 left)..., 2 read; open Loading (1 left)...',
+    'ob: completed none, 3 read; open Loading (1 left)...',
+    'the end: completed none, 3 read; open none',
+  ]);
+  assert.deepStrictEqual(view.stateOf(doc).corpus?.unread, [], 'a completed row went unread');
+});
+
+test('the completed view shown after the walk ended paints each read as it lands', async () => {
+  const { trace, doc } = await switchedFromTable('tc', [() => null]);
+  assert.deepStrictEqual(trace, [
+    'triage list: completed none, 0 read; open Loading...',
+    'draft list: completed none, 0 read; open Loading...',
+    'triage advisory: completed none, 0 read; open Loading (3 left)...',
+    'oa: completed none, 0 read; open Loading (2 left)...',
+    'ob: completed none, 0 read; open Loading (1 left)...',
+    'published list: completed none, 0 read; open Loading...',
+    'closed list: completed none, 0 read; open Loading...',
+    'show completed: completed Loading..., 0 read; open none',
+    'ca: completed Loading (3 left)..., 0 read; open none',
+    'pa: completed Loading (2 left)..., 1 read; open none',
+    'pb: completed Loading (1 left)..., 2 read; open none',
+    'the end: completed none, 3 read; open none',
+  ]);
+  assert.deepStrictEqual(view.stateOf(doc).corpus?.unread, [], 'a completed row went unread');
+});
+
+test('the completed view shown, left, and shown again counts only its own work', async () => {
+  const { trace, doc } = await switchedFromTable('td', [
+    (ids) => detailUrl(ids['oa'] ?? ''),
+    () => listUrl(REF, 'published'),
+    (ids) => detailUrl(ids['ob'] ?? ''),
+  ]);
+  assert.deepStrictEqual(trace, [
+    'triage list: completed none, 0 read; open Loading...',
+    'draft list: completed none, 0 read; open Loading...',
+    'triage advisory: completed none, 0 read; open Loading (3 left)...',
+    'oa: completed none, 0 read; open Loading (2 left)...',
+    'show completed: completed Loading..., 0 read; open Loading (2 left)...',
+    'published list: completed Loading..., 0 read; open Loading (1 left)...',
+    // The open table goes first again while it shows.
+    'show open: completed Loading..., 0 read; open Loading (1 left)...',
+    'ob: completed Loading..., 0 read; open Loading (1 left)...',
+    'show completed: completed Loading..., 0 read; open Loading (1 left)...',
+    'closed list: completed Loading..., 0 read; open Loading...',
+    'ca: completed Loading (3 left)..., 0 read; open Loading...',
+    'pa: completed Loading (2 left)..., 1 read; open Loading...',
+    'pb: completed Loading (1 left)..., 2 read; open Loading...',
+    'the end: completed none, 3 read; open none',
+  ]);
+  assert.deepStrictEqual(view.stateOf(doc).corpus?.unread, [], 'a completed row went unread');
+});
+
+test('the chip says loading, not a count, while the completed lists are walked', async () => {
+  const { published, closed, leave } = await walkedOnTable('tf');
+  try {
+    // The last page load went away with a published advisory still queued,
+    // and every advisory has gone stale since.
+    clockAt += 31 * 24 * 60 * MINUTE;
+    await cache.putProgress(
+      REF,
+      {
+        pending: [published],
+        inFlight: null,
+        done: [],
+        failed: [],
+        lastRequestAt: clockAt,
+        startedAt: clockAt,
+        updatedAt: clockAt,
+      },
+      { storage: cache.storageOf(), at: clockAt }
+    );
+    const doc = await page();
+    const chip = () => textsOf(doc, `#${view.ROOT_ID} .bghsa-done-header span.Label`).join('+');
+    /** @type {string[]} */
+    const said = [];
+    during[listUrl(REF, 'triage')] = async () => {
+      doneToggle(doc).click();
+    };
+    during[listUrl(REF, 'published')] = async () => {
+      said.push(`published list: ${chip()}`);
+    };
+    during[detailUrl(closed)] = async () => {
+      said.push(`first read: ${chip()}`);
+    };
+    await table.passFor(doc, QUEUE_OPTIONS)();
+    await until(
+      'ended the collection and the walk',
+      () => !view.stateOf(doc).reading && table.progressOf(doc) === null
+    );
+    assert.deepStrictEqual(said, [
+      `published list: ${table.WALKING_TEXT}`,
+      'first read: Loading (2 left)...',
+    ]);
+    assert.deepStrictEqual(view.stateOf(doc).corpus?.unread, [], 'a completed row went unread');
+  } finally {
+    delete during[listUrl(REF, 'triage')];
+    delete during[listUrl(REF, 'published')];
+    delete during[detailUrl(closed)];
     leave();
   }
 });

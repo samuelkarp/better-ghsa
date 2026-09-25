@@ -765,8 +765,9 @@ if (typeof require === 'function') {
 
   /**
    * Read progress from the active collection because a retained corpus may
-   * still have its running flag after cancellation. Use the shared queue
-   * progress chip while collecting and report incomplete results afterward.
+   * still have its running flag after cancellation. While collecting, show
+   * the walk's work left for the published and closed advisories, and report
+   * incomplete results afterward.
    *
    * @param {Document} doc
    * @param {Held} state
@@ -774,12 +775,10 @@ if (typeof require === 'function') {
    */
   function buildStatus(doc, state) {
     const table = globalThis.bghsa.table;
-    const collecting = running.get(doc);
-    if (collecting !== undefined) {
-      const left = table.leftToRead(collecting.queue);
+    if (running.get(doc) !== undefined) {
       return table.progressChip(
         doc,
-        left > 0 ? { phase: 'reading', left } : { phase: 'walking', left: 0 }
+        table.walkProgress(doc, 'done') ?? { phase: 'walking', left: 0 }
       );
     }
     if (state.corpus !== null && !state.corpus.complete) {
@@ -789,8 +788,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Refresh progress independently of rows because open-list reads also advance
-   * the shared queue.
+   * Refresh progress independently of rows as the walk takes up each list
+   * page and each read.
    *
    * @param {Document} doc
    * @returns {void}
@@ -809,7 +808,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Show loading before the first corpus page arrives.
+   * Show loading while collection runs with no rows to show, and an empty
+   * list only once collection has ended.
    *
    * @param {Document} doc
    * @param {readonly DoneRow[]} rows
@@ -823,6 +823,7 @@ if (typeof require === 'function') {
       let empty = EMPTY_TEXT;
       if (state.corpus === null) empty = statusTextOf(state) ?? EMPTY_TEXT;
       else if (filtering(doc)) empty = globalThis.bghsa.table.EMPTY_TEXT;
+      else if (state.reading) empty = LOADING_TEXT;
       list.append(element(doc, 'li', 'Box-row bghsa-done-empty', empty));
       return list;
     }
@@ -1018,7 +1019,8 @@ if (typeof require === 'function') {
       .collect({
         ref,
         queue,
-        walk: (watcher) => table.walk(doc, parsed, options, watcher, 'done'),
+        walk: (watcher) =>
+          table.walk(doc, parsed, options, { ...watcher, onStep: () => drawStatus(doc) }, 'done'),
         parsed,
         storage: options.storage,
         now: options.now,

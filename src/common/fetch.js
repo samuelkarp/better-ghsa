@@ -18,7 +18,8 @@ if (typeof require === 'function') {
  * @typedef {object} QueueProgress
  * @property {string[]} pending The advisories still to read, in the order they
  *   will be read.
- * @property {string | null} inFlight The advisory currently being fetched.
+ * @property {string | null} inFlight The advisory a pass has taken from pending and not
+ *   yet finished, through the wait before its request.
  * @property {string[]} done Advisories with fetched or fresh cached observations.
  * @property {string[]} failed The advisories whose read failed this pass.
  * @property {number | null} lastRequestAt The last request time in epoch
@@ -490,6 +491,7 @@ if (typeof require === 'function') {
       const at = clock();
       const held = await globalThis.bghsa.cache.getAdvisory({ ...ref, ghsaId }, { storage, at });
       if (held === null || globalThis.bghsa.cache.isStale(held, at)) return false;
+      inFlight = null;
       if (!done.includes(ghsaId)) done.push(ghsaId);
       skipped += 1;
       report(ghsaId, held);
@@ -544,6 +546,9 @@ if (typeof require === 'function') {
         if (at === -1) break;
         const ghsaId = pending.splice(at, 1)[0];
         if (ghsaId === undefined) break;
+        // The advisory is in flight from the moment it leaves pending, through
+        // the wait before its request.
+        inFlight = ghsaId;
 
         // Another page may have refreshed the entry since it was queued.
         if (await fresh(ghsaId)) continue;
@@ -551,14 +556,13 @@ if (typeof require === 'function') {
         await throttle();
         // Preserve the unsent request for the next page load.
         if (stopped) {
+          inFlight = null;
           pending.unshift(ghsaId);
           await persist();
           break;
         }
         // The entry may have been refreshed during the wait.
         if (await fresh(ghsaId)) continue;
-        // Record the pending request before sending it to survive navigation.
-        inFlight = ghsaId;
         lastRequestAt = clock();
         await persist();
 

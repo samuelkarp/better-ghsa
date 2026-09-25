@@ -52,18 +52,21 @@ Each row shows:
 The open and completed views use the same row builder. Both put state and
 observation time in the last two cells.
 
-Before the first page arrives, the list reads "Loading...". A completed search
-without results reads "Not found".
+While collection runs and no row has arrived, the list reads "Loading...",
+also after a list page fails. A completed search without results reads
+"Not found".
 
-The heading also shows a progress chip: "Loading..." during the list walk and
-"Loading (37 left)..." during advisory reads. The count comes from the queue
-shared with the open list and includes both views' pending advisories.
-Collection joins the list walk of the page load. Completed rows arrive as the
-published and closed list pages are read.
+The heading also shows a progress chip: "Loading..." while the published and
+closed lists are walked and "Loading (37 left)..." while their advisories are
+read. The count covers this view's advisories alone, the one being requested
+included. Collection joins the list walk of the page load. Completed rows
+arrive as the published and closed list pages are read. A view opened part way
+through the walk, or after it, shows the rows walked so far at once. Each row
+fills in as its advisory is read.
 
-The count updates after each successful read. Failed reads are reflected in
-the next update. The progress chip disappears when collection finishes or
-stops.
+The count updates as the walk takes up each request and after each read.
+Failed reads are reflected in the next update. The progress chip disappears
+when collection finishes or stops.
 
 ## Filters
 

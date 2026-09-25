@@ -408,9 +408,10 @@ a value for unset reasons. Apply severity filtering to published advisories.
 Use the open list's filter bar and show the controls for the current view.
 
 Show collection status from the moment collection is requested, including
-while the page load's list walk is still running. Identify the list walk, then
-show the remaining advisory reads across all views sharing the queue. Update
-the count as work proceeds and clear the loading status when collection stops.
+while the page load's list walk is still running. Identify the walk of the
+published and closed lists, then show the remaining reads of their advisories.
+Update the count as work proceeds and clear the loading status when collection
+stops.
 
 Update the originating row after saving a closure reason.
 
