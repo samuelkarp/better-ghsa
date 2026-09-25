@@ -1619,8 +1619,16 @@ if (typeof require === 'function') {
     if (held !== undefined) return held;
     const loop = renderLoop(doc, options);
     loops.set(doc, loop);
+    settings.set(doc, options);
     return loop;
   }
+
+  /**
+   * The options each document's render loop refreshes with.
+   *
+   * @type {WeakMap<Document, RefreshOptions>}
+   */
+  const settings = new WeakMap();
 
   /**
    * @typedef {object} QueueHandle
@@ -1692,12 +1700,54 @@ if (typeof require === 'function') {
   const running = new WeakMap();
 
   /**
-   * The lists the page-load walk reads, in the order it reads them. The open
-   * table, the completed view, and the statistics view all read what it finds.
-   *
-   * @type {readonly string[]}
+   * @typedef {'open' | 'done'} WalkGroup A group of lists the page-load walk
+   *   walks, whose advisories it reads.
    */
-  const WALK_STATES = Object.keys(globalThis.bghsa.parseList.STATES);
+
+  /**
+   * The lists of each group: open is triage and draft, done is published and
+   * closed. The open table reads the open group's advisories and the
+   * completed view the done group's.
+   *
+   * @type {Readonly<Record<WalkGroup, readonly string[]>>}
+   */
+  const GROUPS = {
+    open: globalThis.bghsa.parseList.OPEN_STATES,
+    done: Object.keys(globalThis.bghsa.parseList.STATES).filter(
+      (state) => !globalThis.bghsa.parseList.OPEN_STATES.includes(state)
+    ),
+  };
+
+  /**
+   * @typedef {{ walk: WalkGroup } | { read: WalkGroup }} WalkStep Work of the
+   *   page-load walk: walk a group's lists, or read the stale advisories they
+   *   name.
+   */
+
+  /**
+   * The order the page-load walk takes its work in, by the view mode showing
+   * when it picks its next request. GitHub's view takes the open table's
+   * order. The statistics view needs every list. It walks all four before it
+   * reads.
+   *
+   * @type {Readonly<Record<string, readonly WalkStep[]>>}
+   */
+  const ORDERS = {
+    [VIEW_TABLE]: [{ walk: 'open' }, { read: 'open' }, { walk: 'done' }, { read: 'done' }],
+    done: [{ walk: 'done' }, { read: 'done' }, { walk: 'open' }, { read: 'open' }],
+    statistics: [{ walk: 'open' }, { walk: 'done' }, { read: 'open' }, { read: 'done' }],
+  };
+
+  /**
+   * The groups whose advisories a view mode asks the walk to read while it
+   * shows. The open table asks through its refresh and the completed view
+   * through its collection, which listens for the reads it asks for. The
+   * statistics view has neither and is drawn again once the refresh ends. It
+   * asks for both.
+   *
+   * @type {Readonly<Record<string, readonly WalkGroup[]>>}
+   */
+  const ASKS = { statistics: ['open', 'done'] };
 
   /**
    * The page load of each document: the repository whose advisory list it
@@ -1761,17 +1811,54 @@ if (typeof require === 'function') {
    *   Called after each list page adds rows.
    * @property {(state: string, url: string, reason: unknown) => void} [onFailure]
    *   Called for each list page the walk could not read.
+   * @property {(step: WalkStep) => void} [onStep] Called before each list page
+   *   and each advisory read the walk takes up.
    */
 
   /**
+   * @typedef {object} WalkRead What a walk read of a group's advisories.
+   * @property {import('../common/crawl.js').CrawlResult} crawled The lists as
+   *   the walk held them when the group's reads ended.
+   * @property {import('../common/fetch.js').QueueSummary} read The reads of
+   *   the group's stale advisories. The failures and the remaining advisories
+   *   are the group's alone.
+   */
+
+  /**
+   * @typedef {object} WalkReads A group's reads in a walk.
+   * @property {Promise<WalkRead>} ended Settles once the group's stale
+   *   advisories are read, or once the walk ends.
+   * @property {(read: WalkRead) => void} end
+   * @property {boolean} settled
+   */
+
+  /**
+   * @returns {WalkReads} A group's reads, not yet ended.
+   */
+  function readsOf() {
+    /** @type {(read: WalkRead) => void} */
+    let end = () => {};
+    /** @type {Promise<WalkRead>} */
+    const ended = new Promise((resolve) => {
+      end = resolve;
+    });
+    return { ended, end, settled: false };
+  }
+
+  /**
    * The walk in progress for each document. A walk is stopped once the
-   * document leaves its repository's list, which stops its queue.
+   * document leaves its repository's list, which stops its queue. Its
+   * started promise settles once the walk ends, whether it completes or
+   * stops.
    *
    * @type {WeakMap<
    *   Document,
    *   {
    *     key: string,
    *     stopped: boolean,
+   *     asked: Set<WalkGroup>,
+   *     ask: (group: WalkGroup) => Promise<WalkRead>,
+   *     left: (group: WalkGroup) => number,
    *     started: Promise<import('../common/crawl.js').CrawlResult>,
    *     watchers: Set<WalkWatcher>,
    *   }
@@ -1789,89 +1876,308 @@ if (typeof require === 'function') {
   const walked = new Map();
 
   /**
-   * Walk all four lists once for this page load through the shared queue. A
-   * call during a walk joins it, unless the document left the walk's list,
-   * which stopped it. Any other call walks only a list whose walk has not
-   * finished during this page load.
+   * Walk all four lists once for this page load, and read the stale
+   * advisories of each group a view asks for, through the shared queue. The
+   * walk picks its next request from the view showing at that moment
+   * (ORDERS): before each list page, and before each advisory read. Work
+   * for the view showing goes first, and a list page or read already sent
+   * finishes. A list set aside part way resumes from its next page. A call
+   * during a walk joins it, unless the document left the walk's list, which
+   * stopped it. Any other call walks only a list whose walk has not finished
+   * during this page load.
    *
    * @param {Document} doc
    * @param {import('../common/parse-list.js').ParsedList} parsed The page's list,
    *   naming the repository.
-   * @param {RefreshOptions} [options]
-   * @param {WalkWatcher} [watcher] Receives the pages and failures of the walk.
-   * @returns {Promise<import('../common/crawl.js').CrawlResult>}
+   * @param {RefreshOptions} options
+   * @returns {NonNullable<ReturnType<typeof walks.get>>} The document's walk.
    */
-  function walk(doc, parsed, options = {}, watcher = {}) {
+  function begin(doc, parsed, options) {
     const ref = {
       owner: /** @type {string} */ (parsed.owner),
       repo: /** @type {string} */ (parsed.repo),
     };
     const key = refKey(ref);
     const since = loadedAt(doc, ref, options.now?.() ?? globalThis.bghsa.cache.now());
-    let held = walks.get(doc);
-    if (held === undefined || held.key !== key || held.stopped) {
-      const { queue } = queueFor(ref, options);
-      const pass = passFor(doc, options);
-      /** @type {Set<WalkWatcher>} */
-      const watchers = new Set();
-      const before = walked.get(key) ?? Promise.resolve();
-      const started = before
-        .then(() =>
-          globalThis.bghsa.crawl.crawl({
-            ref,
-            queue,
-            parsed,
-            href: options.href ?? globalThis.location?.href,
-            storage: options.storage,
-            now: options.now,
-            states: WALK_STATES,
-            since,
-            onPage: (list) => {
-              // Redraw the table to include advisories discovered by this page.
-              void pass();
-              for (const each of [...watchers]) {
-                try {
-                  each.onPage?.(list);
-                } catch {
-                  // Continue notifying the remaining watchers if one fails.
+    const held = walks.get(doc);
+    if (held !== undefined && held.key === key && !held.stopped) return held;
+    const crawl = globalThis.bghsa.crawl;
+    const { queue } = queueFor(ref, options);
+    const pass = passFor(doc, options);
+    const shown = crawl.stateKeyOf(parsed.selectedState);
+    const states = [...GROUPS.open, ...GROUPS.done];
+    /** @type {Record<WalkGroup, WalkReads>} */
+    const reads = { open: readsOf(), done: readsOf() };
+    /** @type {Record<WalkGroup, string[]>} */
+    const failures = { open: [], done: [] };
+    /** @type {Set<string>} Lists this walk took to their end, or gave up on. */
+    const finished = new Set();
+    /** @type {Set<string>} */
+    const seeded = new Set();
+    /** @type {Set<WalkGroup>} Groups queued since they were last asked for. */
+    const queued = new Set();
+    /** @type {import('../common/crawl.js').CrawledList} */
+    let list = { walks: {}, rows: {} };
+    let fetched = 0;
+    let failed = 0;
+    /** @type {{ fetched: number, skipped: number }} */
+    let counts = { fetched: 0, skipped: 0 };
+
+    /**
+     * @param {string} ghsaId
+     * @returns {WalkGroup} The group of the list the advisory was last seen
+     *   on. One no list holds is read with the open advisories.
+     */
+    const groupOf = (ghsaId) => {
+      const row = list.rows[ghsaId];
+      return row !== undefined && GROUPS.done.includes(row.state) ? 'done' : 'open';
+    };
+
+    /**
+     * @param {WalkGroup} group
+     * @returns {string[]} The group's advisories the queue holds to read.
+     */
+    const pendingOf = (group) =>
+      queue.progress().pending.filter((ghsaId) => groupOf(ghsaId) === group);
+
+    /** @returns {import('../common/crawl.js').CrawlResult} The lists as they stand. */
+    const resultOf = () => ({
+      list,
+      ids: crawl.idsIn(list, states),
+      fetched,
+      failed,
+      complete: states.every((state) => crawl.walkedSince(list, state, since)),
+      since,
+    });
+
+    /**
+     * @param {WalkGroup} group
+     * @returns {void} Ends the group's reads, once.
+     */
+    const settle = (group) => {
+      const held = reads[group];
+      if (held.settled) return;
+      held.settled = true;
+      const remaining = pendingOf(group);
+      held.end({
+        crawled: resultOf(),
+        read: {
+          ...counts,
+          failed: [...failures[group]],
+          remaining,
+          complete: remaining.length === 0,
+        },
+      });
+    };
+
+    /**
+     * @param {WalkStep} step
+     * @returns {void}
+     */
+    const notify = (step) => {
+      for (const each of [...watchers]) {
+        try {
+          each.onStep?.(step);
+        } catch {
+          // Continue notifying the remaining watchers if one fails.
+        }
+      }
+    };
+
+    /**
+     * Take in the asks of the view showing and pick the work that goes next.
+     *
+     * @returns {WalkStep | null} The next work, or null when none is left.
+     */
+    const next = () => {
+      const mode = viewMode(doc);
+      for (const group of ASKS[mode] ?? []) fresh.asked.add(group);
+      for (const step of ORDERS[mode] ?? ORDERS[VIEW_TABLE] ?? []) {
+        if ('walk' in step) {
+          if (GROUPS[step.walk].some((state) => !finished.has(state))) return step;
+        } else if (fresh.asked.has(step.read) && !reads[step.read].settled) {
+          return step;
+        }
+      }
+      return null;
+    };
+
+    /** @type {WalkGroup} */
+    let walking = 'open';
+    let yielded = false;
+    let halted = false;
+    // Each list page first asks whether its group's lists still go next. A
+    // page set aside is left unsent, and the list's walk resumes from it.
+    const gated = {
+      /**
+       * @param {string} url
+       * @returns {Promise<import('../common/fetch.js').PageRead>}
+       */
+      page: async (url) => {
+        const step = next();
+        if (fresh.stopped || step === null || !('walk' in step) || step.walk !== walking) {
+          yielded = true;
+          return { body: null, status: null, reason: 'Other work went first.', stopped: true };
+        }
+        notify(step);
+        const answer = await queue.page(url);
+        if (answer.stopped) halted = true;
+        return answer;
+      },
+    };
+
+    /** @type {Set<WalkWatcher>} */
+    const watchers = new Set();
+    const before = walked.get(key) ?? Promise.resolve();
+    const started = before.then(async () => {
+      try {
+        for (;;) {
+          if (fresh.stopped) break;
+          const step = next();
+          if (step === null) break;
+          if ('walk' in step) {
+            const state = /** @type {string} */ (
+              GROUPS[step.walk].find((each) => !finished.has(each))
+            );
+            walking = step.walk;
+            yielded = false;
+            // The visible page seeds the walk of the list it shows.
+            const seed = !seeded.has(state) && (shown === null || shown === state);
+            seeded.add(state);
+            const result = await crawl.crawl({
+              ref,
+              queue: gated,
+              parsed: seed ? parsed : null,
+              href: options.href ?? globalThis.location?.href,
+              storage: options.storage,
+              now: options.now,
+              states: [state],
+              since,
+              onPage: (seen) => {
+                // Redraw the table to include advisories discovered by this page.
+                void pass();
+                for (const each of [...watchers]) {
+                  try {
+                    each.onPage?.(seen);
+                  } catch {
+                    // Continue notifying the remaining watchers if one fails.
+                  }
                 }
-              }
-            },
-            onFailure: (state, url, reason) => {
-              for (const each of [...watchers]) {
-                try {
-                  each.onFailure?.(state, url, reason);
-                } catch {
-                  // Continue notifying the remaining watchers if one fails.
+              },
+              onFailure: (failing, url, reason) => {
+                for (const each of [...watchers]) {
+                  try {
+                    each.onFailure?.(failing, url, reason);
+                  } catch {
+                    // Continue notifying the remaining watchers if one fails.
+                  }
                 }
-              }
-            },
-          })
-        )
-        .finally(() => {
-          if (walks.get(doc)?.started === started) walks.delete(doc);
-        });
-      walked.set(
-        key,
-        started.then(
-          () => {},
-          () => {}
-        )
-      );
-      held = { key, stopped: false, started, watchers };
-      walks.set(doc, held);
-    }
-    const { started, watchers } = held;
-    watchers.add(watcher);
-    return started.finally(() => {
-      watchers.delete(watcher);
+              },
+            });
+            list = result.list;
+            fetched += result.fetched;
+            failed += result.failed;
+            if (halted) break;
+            if (!yielded) finished.add(state);
+            continue;
+          }
+          const group = step.read;
+          if (!queued.has(group)) {
+            queued.add(group);
+            await queue.add(crawl.idsIn(list, GROUPS[group]));
+            continue;
+          }
+          if (pendingOf(group).length > 0) notify(step);
+          const summary = await queue.readNext((ghsaId) => groupOf(ghsaId) === group);
+          counts = { fetched: summary.fetched, skipped: summary.skipped };
+          for (const ghsaId of summary.failed) {
+            if (!failures[group].includes(ghsaId)) failures[group].push(ghsaId);
+          }
+          if (queue.isStopped()) break;
+          if (pendingOf(group).length === 0) settle(group);
+        }
+        return resultOf();
+      } finally {
+        // Nothing is awaited between picking no work and here. A caller that
+        // asks later starts a walk of its own.
+        settle('open');
+        settle('done');
+        if (walks.get(doc) === fresh) walks.delete(doc);
+      }
+    });
+    walked.set(
+      key,
+      started.then(
+        () => {},
+        () => {}
+      )
+    );
+    const fresh = {
+      key,
+      stopped: false,
+      /** @type {Set<WalkGroup>} */
+      asked: new Set(),
+      /**
+       * @param {WalkGroup} group
+       * @returns {Promise<WalkRead>} The group's reads, which take in stale
+       *   advisories again once an earlier ask's reads have ended.
+       */
+      ask: (group) => {
+        fresh.asked.add(group);
+        if (reads[group].settled) {
+          reads[group] = readsOf();
+          queued.delete(group);
+          failures[group] = [];
+        }
+        return reads[group].ended;
+      },
+      /**
+       * @param {WalkGroup} group
+       * @returns {number} How many of the group's advisories are left to read.
+       */
+      left: (group) => {
+        const inFlight = queue.progress().inFlight;
+        const sending = inFlight !== null && groupOf(inFlight) === group ? 1 : 0;
+        return pendingOf(group).length + sending;
+      },
+      started,
+      watchers,
+    };
+    walks.set(doc, fresh);
+    return fresh;
+  }
+
+  /**
+   * Join or start this page load's walk of the lists.
+   *
+   * @param {Document} doc
+   * @param {import('../common/parse-list.js').ParsedList} parsed The page's list,
+   *   naming the repository.
+   * @param {RefreshOptions} [options]
+   * @param {WalkWatcher} [watcher] Receives the pages and failures of the walk.
+   * @param {WalkGroup} [group] A group whose stale advisories the caller reads.
+   * @returns {Promise<import('../common/crawl.js').CrawlResult & {
+   *   read?: import('../common/fetch.js').QueueSummary,
+   * }>} All four lists once the walk ends, whether it completes or stops.
+   *   With a group, the lists once the group's advisories are read and the
+   *   summary of those reads.
+   */
+  function walk(doc, parsed, options = {}, watcher = {}, group = undefined) {
+    const held = begin(doc, parsed, options);
+    held.watchers.add(watcher);
+    const settled =
+      group === undefined
+        ? held.started
+        : held.ask(group).then(({ crawled, read }) => ({ ...crawled, read }));
+    return settled.finally(() => {
+      held.watchers.delete(watcher);
     });
   }
 
   /**
-   * Walk the lists, then refresh open advisory data through the shared
-   * queue. Concurrent calls for this document and repository share the
-   * active refresh.
+   * Join or start the page-load walk and read the stale open advisories
+   * through it, all through the shared queue. Concurrent calls for this
+   * document and repository share the active refresh.
    *
    * @param {Document} doc
    * @param {RefreshOptions} [options]
@@ -1907,7 +2213,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Load saved queue progress before adding open advisories the walk found.
+   * Load saved queue progress before the walk queues the open advisories it
+   * finds, and follow the reads of them.
    *
    * @param {Document} doc
    * @param {import('../common/parse-list.js').ParsedList} parsed
@@ -1924,32 +2231,55 @@ if (typeof require === 'function') {
 
     /** @type {Promise<unknown>[]} */
     const updates = [];
+    /** @type {() => number} */
+    let left = () => 0;
     /** @type {(ghsaId: string, entry: import('../common/cache.js').CacheEntry) => void} */
     const listener = (ghsaId, entry) => {
       updates.push(applyEntry(doc, ghsaId, entry, { storage: options.storage }));
-      setProgress(doc, { phase: 'reading', left: leftToRead(queue) });
+      if (progresses.get(doc)?.phase === 'reading') {
+        setProgress(doc, { phase: 'reading', left: left() });
+      }
+    };
+    /** @type {WalkWatcher} */
+    const watcher = {
+      onStep: (step) => {
+        setProgress(
+          doc,
+          'read' in step && step.read === 'open'
+            ? { phase: 'reading', left: left() }
+            : { phase: 'walking', left: 0 }
+        );
+      },
     };
     listening.add(listener);
 
+    /** @type {NonNullable<ReturnType<typeof walks.get>> | null} */
+    let held = null;
+    /** @type {RefreshSummary} */
+    let summary;
     try {
       setProgress(doc, { phase: 'walking', left: 0 });
       await queue.load();
-      const crawled = await walk(doc, parsed, options);
-      const open = globalThis.bghsa.crawl.idsIn(
-        crawled.list,
-        globalThis.bghsa.parseList.OPEN_STATES
-      );
-      const { queued } = await queue.add(open);
-      setProgress(doc, { phase: 'reading', left: queued.length });
-      const read = await queue.run();
+      const walking = begin(doc, parsed, options);
+      held = walking;
+      left = () => walking.left('open');
+      walking.watchers.add(watcher);
+      const { read } = await walking.ask('open');
+      setProgress(doc, { phase: 'walking', left: 0 });
       await Promise.all(updates);
       // Reapply sorting and filters after all row updates finish.
       await pass();
-      return { crawled, read };
+      const crawled = await walking.started;
+      summary = { crawled, read };
     } finally {
+      held?.watchers.delete(watcher);
       listening.delete(listener);
       setProgress(doc, null);
     }
+    // Draw the views again without the progress, with what the walk read
+    // after the open advisories: the statistics read both.
+    await pass();
+    return summary;
   }
 
   /**
@@ -2024,6 +2354,23 @@ if (typeof require === 'function') {
     if (held?.key === key && at - held.at < globalThis.bghsa.cache.STALE_MS) return;
     refreshed.set(doc, { key, at });
     void refresh(doc, { ...options, parsed });
+  }
+
+  /**
+   * Refresh at once for a view the maintainer shows, however recently the
+   * last refresh began, or join the refresh running. Within a page load it
+   * does not walk a finished list and reads only stale advisories, those of each
+   * group the view shown asks for (ASKS) and the open ones.
+   *
+   * @param {Document} doc
+   * @returns {void}
+   */
+  function refreshShown(doc) {
+    if (!globalThis.bghsa.content.enabled()) return;
+    const parsed = pageOf(doc);
+    if (parsed === null || parsed.owner === null || parsed.repo === null) return;
+    if (doc.getElementById(ROOT_ID) === null) return;
+    void refresh(doc, { ...settings.get(doc), parsed });
   }
 
   /**
@@ -2152,6 +2499,7 @@ if (typeof require === 'function') {
     walk,
     refresh,
     ensureRefresh,
+    refreshShown,
     renderLoop,
     passFor,
     observe,

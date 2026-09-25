@@ -146,18 +146,39 @@ The table reads "No matches" when filters exclude every row.
 ## Reading and refreshing
 
 The table initially displays cached data and the list markup already on the
-page. At the start of each page load, a refresh walks the triage, draft,
-published, and closed lists, then reads the open advisories' pages, stalest
-first. Each read updates its row in place. The walk runs whichever view is
-showing, and the completed and statistics views use what it finds.
+page. At the start of each page load, a refresh walks the lists and reads the
+open advisories' pages, stalest first. Each read updates its row in place. The
+completed view asks the walk to read the completed advisories' pages, and the
+statistics view asks for both. Before each list page and each advisory read,
+the walk picks its next work from the view showing at that moment, and the
+work of that view goes first:
 
-The list walk, the table's reads, and the completed view's reads share one
-request queue per repository within a tab. The statistics view issues no
-requests. Background requests are throttled to one per second within each
-queue. Requests from separate tabs can occur closer together.
+- Open table or GitHub's view: the triage and draft lists, the open
+  advisories' pages, the published and closed lists, then the completed
+  advisories' pages if a view asked for them.
+- Completed view: the published and closed lists, the completed advisories'
+  pages, then the open work that remains.
+- Statistics view: all four lists, the open advisories' pages, then the
+  completed advisories' pages.
+
+Switching views moves the work of the view now showing ahead of the rest. A
+request already sent finishes, a list set aside resumes at the page it stopped
+on, and nothing already read is requested again. Opening the completed view
+does not read an open advisory. Opening the completed view or the statistics
+view asks for its reads at once: it joins the refresh running, or starts one
+that does not walk a list finished during the page load and reads only stale
+advisories. A refresh that starts while the completed view shows does not read
+a completed advisory, and opening that view again reads the stale ones.
+
+The list walk and the reads share one request queue per repository within a
+tab. The statistics view does not send a request of its own. Background
+requests are throttled to one per second within each queue. Requests from
+separate tabs can occur closer together.
 
 The heading shows "Loading..." during the list walk and "Loading (12 left)..."
-during advisory reads. The progress chip disappears when the refresh finishes.
+during advisory reads. The progress chip disappears when the refresh finishes,
+once the four lists are walked and the advisory pages the view showing asked
+for are read.
 
 Each list is walked once per page load. A page load starts when a page shows
 the repository's advisory list. Moving between the list's tabs and the

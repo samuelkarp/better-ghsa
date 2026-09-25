@@ -1018,7 +1018,7 @@ if (typeof require === 'function') {
       .collect({
         ref,
         queue,
-        walk: (watcher) => table.walk(doc, parsed, options, watcher),
+        walk: (watcher) => table.walk(doc, parsed, options, watcher, 'done'),
         parsed,
         storage: options.storage,
         now: options.now,

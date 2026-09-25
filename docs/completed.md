@@ -128,13 +128,17 @@ been read.
 ## Reading and refreshing
 
 This view takes the published and closed advisories from the list walk that
-runs once per page load (see the advisory list page), then reads advisory
-pages as needed based on cache freshness. Opening the view again within the
-page load walks no finished list. Requests use the queue shared with
+runs once per page load (see the advisory list page), and asks the walk to read
+their advisory pages as needed based on cache freshness. While this view shows,
+the walk takes the published and closed lists and these reads before any open
+work that remains. Whenever the view opens, the walk's next request is for this
+view, and the walk starts at once if none is running. Opening the view again
+within the page load does not walk a finished list or read an open advisory.
+The view asks for its reads when it opens. A refresh of the open list that runs
+while it shows does not read its advisories. Requests use the queue shared with
 the open list in the same tab. Background advisory reads are throttled to one
-request per second within each queue.
-Requests from separate tabs can occur closer together. Rows initially use
-cached data and update as reads finish.
+request per second within each queue. Requests from separate tabs can occur
+closer together. Rows initially use cached data and update as reads finish.
 
 Navigating to another repository stops collection after the current request.
 Saved progress allows collection to resume when you return.
@@ -148,22 +152,25 @@ the heading.
 ## The statistics view
 
 Statistics cover both open and completed advisories. The view uses the list
-walk that runs once per page load and the advisory pages the other views have
-read, with coverage limited to what has been read.
-Calculations run locally in the page. The statistics view sends no requests
-or data.
+walk that runs once per page load and the advisory pages read so far, with
+coverage limited to what has been read. While this view shows, the walk takes
+all four lists, then reads the open and the completed advisories' pages.
+Opening the view asks for those reads at once, and the walk starts if none is
+running. Calculations run locally in the page. The statistics view does not
+send data, and its only requests are those of the walk.
 
 A repository without collected data shows "Nothing has been read on this
 repository".
 
 Chips above the statistics show the total and the open and completed counts, as
 "3 open" and "2 completed". "5 not loaded yet" counts advisories whose detail
-page has not been read. "Open list not loaded" names a group no list walk
-has started on. "Completed list partly loaded" names a group whose lists have
-not all been walked to the end during this page load, including lists walked
-on an earlier one. "4 on GitHub" shows the sum of GitHub's tab counts when it
-differs from the total. "Loading..." appears while the list walk and the
-reads run; the numbers can change as results arrive.
+page has not been read. "Open list not loaded" names a group no list walk has
+started on. "Completed list partly loaded" names a group whose lists have not
+all been walked to the end during this page load, including lists walked on an
+earlier one. While this view shows, the walk takes the triage and draft lists
+first. The open group reads as loaded first. "4 on GitHub" shows the sum of
+GitHub's tab counts when it differs from the total. "Loading..." appears while
+the list walk and the reads run; the numbers can change as results arrive.
 
 Below the chips, "Reports by month" and then "Published advisories by month"
 span the full width of the view. The four count boxes follow, then the four

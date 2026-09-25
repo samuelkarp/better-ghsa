@@ -52,8 +52,11 @@ if (typeof require === 'function') {
  * @property {(watcher: {
  *   onPage: (list: import('../common/crawl.js').CrawledList) => void,
  *   onFailure: (state: string, url: string, reason: unknown) => void,
- * }) => Promise<import('../common/crawl.js').CrawlResult>} walk Joins or starts the
- *   page-load walk of the lists, which reports its pages and failures to the watcher.
+ * }) => Promise<import('../common/crawl.js').CrawlResult & {
+ *   read?: import('../common/fetch.js').QueueSummary,
+ * }>} walk Joins or starts the page-load walk of the lists, which reports its
+ *   pages and failures to the watcher. A result carrying read is one whose walk
+ *   also read the published and closed advisories it names.
  * @property {import('../common/parse-list.js').ParsedList | null} [parsed] The parsed
  *   current list page.
  * @property {import('../common/cache.js').CacheStorage | null} [storage]
@@ -198,8 +201,11 @@ if (typeof require === 'function') {
     });
 
     const crawl = globalThis.bghsa.crawl;
-    await options.queue.add(crawl.idsIn(crawled.list, DONE_STATES));
-    const read = await options.queue.run();
+    let read = crawled.read;
+    if (read === undefined) {
+      await options.queue.add(crawl.idsIn(crawled.list, DONE_STATES));
+      read = await options.queue.run();
+    }
     const complete = DONE_STATES.every((state) =>
       crawl.walkedSince(crawled.list, state, crawled.since)
     );

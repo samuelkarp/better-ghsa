@@ -920,6 +920,7 @@ if (typeof require === 'function') {
 
   /**
    * The list surface owns view selection to keep only one view visible.
+   * Showing the statistics asks the walk for their reads at once.
    *
    * @param {Document} doc
    * @returns {void}
@@ -929,6 +930,7 @@ if (typeof require === 'function') {
     const wanted = table.viewMode(doc) === MODE ? table.VIEW_TABLE : MODE;
     table.setViewMode(doc, wanted);
     table.applyVisibility(doc);
+    if (wanted === MODE) table.refreshShown(doc);
   }
 
   /**

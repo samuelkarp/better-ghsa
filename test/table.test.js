@@ -1395,11 +1395,11 @@ test('the header says what the refresh is doing and stops when it is done', asyn
 
   assert.deepStrictEqual(said, [
     table.WALKING_TEXT,
-    table.WALKING_TEXT,
-    table.WALKING_TEXT,
     'Loading (3 left)...',
     'Loading (2 left)...',
     'Loading (1 left)...',
+    table.WALKING_TEXT,
+    table.WALKING_TEXT,
   ]);
   assert.strictEqual(progressText(doc), null, 'the header still said a refresh was running');
 
@@ -1488,10 +1488,10 @@ test('a refresh walks every list and fills every open row in', async () => {
 
     assert.deepStrictEqual(fetch.urls, [
       `${base}?state=draft`,
-      `${base}?state=published`,
-      `${base}?state=closed`,
       `${base}/${triage}`,
       `${base}/${draft}`,
+      `${base}?state=published`,
+      `${base}?state=closed`,
     ]);
     assert.ok(summary !== null && summary.read.fetched === 2, 'both advisories were not read');
 
@@ -1553,9 +1553,9 @@ test('an advisory observed four minutes ago is not read again', async () => {
 
     assert.deepStrictEqual(fetch.urls, [
       `${base}?state=draft`,
+      `${base}/${stale}`,
       `${base}?state=published`,
       `${base}?state=closed`,
-      `${base}/${stale}`,
     ]);
     assert.ok(summary !== null && summary.read.skipped === 1, 'the fresh advisory was not skipped');
   } finally {
@@ -1634,24 +1634,22 @@ test('a soft navigation to another repository crawls that repository', async () 
     observer = table.observe(doc, pass);
     assert.ok(observer !== null, 'the document offered nothing to watch');
     await pass();
-    await until('crawled the repository it opened on', () => urls.length === 5);
+    await until('crawled the repository it opened on', () => urls.length === 3);
     assert.deepStrictEqual(urls, [
       `${alphaBase}?state=triage`,
       `${alphaBase}?state=draft`,
-      `${alphaBase}?state=published`,
-      `${alphaBase}?state=closed`,
       `${alphaBase}/${alphaId}`,
     ]);
 
     one(doc, '#repo-content-turbo-frame').innerHTML = betaList;
 
-    await until('crawled the repository it navigated to', () => urls.length === 10);
-    assert.deepStrictEqual(urls.slice(5), [
+    await until('crawled the repository it navigated to', () => urls.length === 8);
+    assert.deepStrictEqual(urls.slice(3), [
       `${betaBase}?state=triage`,
       `${betaBase}?state=draft`,
+      `${betaBase}/${betaId}`,
       `${betaBase}?state=published`,
       `${betaBase}?state=closed`,
-      `${betaBase}/${betaId}`,
     ]);
 
     release();
@@ -1687,9 +1685,9 @@ test('a list page reached again rereads stale advisories and walks no finished l
     `${base}?state=triage`,
     second,
     `${base}?state=draft`,
+    `${base}/${ghsaId}`,
     `${base}?state=published`,
     `${base}?state=closed`,
-    `${base}/${ghsaId}`,
   ];
 
   const doc = pageOf(list);
@@ -1798,22 +1796,16 @@ test('a pass stops when the page it is reading for goes to another repository', 
     const pass = table.passFor(doc, { storage, fetch: send, wait: advance });
     observer = table.observe(doc, pass);
     await pass();
-    await until('asked for the first advisory', () => urls.length === 5);
+    await until('asked for the first advisory', () => urls.length === 3);
 
     one(doc, '#repo-content-turbo-frame').innerHTML = betaList;
-    await until('crawled the repository it navigated to', () => urls.length === 10);
+    await until('crawled the repository it navigated to', () => urls.length === 8);
 
     release();
     await quiet();
     assert.deepStrictEqual(
       urls.filter((asked) => asked.startsWith(alphaBase)),
-      [
-        `${alphaBase}?state=triage`,
-        `${alphaBase}?state=draft`,
-        `${alphaBase}?state=published`,
-        `${alphaBase}?state=closed`,
-        `${alphaBase}/${first}`,
-      ],
+      [`${alphaBase}?state=triage`, `${alphaBase}?state=draft`, `${alphaBase}/${first}`],
       'the repository the page left went on spending requests'
     );
     assert.deepStrictEqual(
@@ -1821,9 +1813,9 @@ test('a pass stops when the page it is reading for goes to another repository', 
       [
         `${betaBase}?state=triage`,
         `${betaBase}?state=draft`,
+        `${betaBase}/${betaId}`,
         `${betaBase}?state=published`,
         `${betaBase}?state=closed`,
-        `${betaBase}/${betaId}`,
       ],
       'the repository the page went to was not read through'
     );
@@ -1845,14 +1837,9 @@ test('a page left and come straight back to takes its pass back', async () => {
   const second = 'GHSA-bbbb-bbbb-bbbb';
   const page2 = `${base}?state=triage&page=2`;
   const list = listHtml({ ...ref, state: 'triage', ids: [first, second], next: page2 });
-  // The interrupted refresh leaves both a pending crawl page and an unread advisory.
-  const walked = [
-    `${base}?state=triage`,
-    page2,
-    `${base}?state=draft`,
-    `${base}?state=published`,
-    `${base}?state=closed`,
-  ];
+  // The interrupted refresh leaves a pending crawl page, an unread advisory,
+  // and the published and closed lists unwalked.
+  const walked = [`${base}?state=triage`, page2, `${base}?state=draft`];
 
   /** @type {Record<string, string>} */
   const pages = {
@@ -1889,7 +1876,7 @@ test('a page left and come straight back to takes its pass back', async () => {
     const pass = table.passFor(doc, { storage, fetch: send, wait: advance });
     observer = table.observe(doc, pass);
     await pass();
-    await until('asked for the first advisory', () => urls.length === 6);
+    await until('asked for the first advisory', () => urls.length === 4);
 
     const frame = one(doc, '#repo-content-turbo-frame');
     frame.innerHTML = '<div id="show_dialog"></div>';
@@ -1907,8 +1894,8 @@ test('a page left and come straight back to takes its pass back', async () => {
     await until('read the advisory the pass had left', () => urls.length === 8);
     await quiet();
     assert.deepStrictEqual(
-      urls.slice(6),
-      [page2, `${base}/${second}`],
+      urls.slice(4),
+      [page2, `${base}/${second}`, `${base}?state=published`, `${base}?state=closed`],
       'coming back read something other than what was left'
     );
 
@@ -2306,6 +2293,172 @@ test('a walk starts only after the walk of the same lists before it settles', as
     );
   } finally {
     release();
+    clockAt = started;
+  }
+});
+
+/**
+ * Start a page load on the open table of a repository whose lists hold one
+ * triage advisory, two draft ones, two published ones over two pages, and a
+ * closed one, none of them read before. Each hook runs once, while the
+ * request for its URL is out.
+ *
+ * @param {string} owner
+ * @param {(held: { base: string, doc: Document, options: import('../src/list/table.js').RefreshOptions }) => Record<string, () => void>} hooksFor
+ */
+async function switching(owner, hooksFor) {
+  const ref = { owner, repo: 'repo' };
+  const base = `/${owner}/${ref.repo}/security/advisories`;
+  const published2 = `${base}?state=published&page=2`;
+  const fetch = fakeFetch({
+    [`${base}?state=draft`]: listHtml({ ...ref, state: 'draft', ids: [DRAFT_B, DRAFT_C] }),
+    [`${base}?state=published`]: listHtml({
+      ...ref,
+      state: 'published',
+      ids: [PUBLISHED_P],
+      next: published2,
+    }),
+    [published2]: listHtml({ ...ref, state: 'published', ids: [PUBLISHED_Q] }),
+    [`${base}?state=closed`]: listHtml({ ...ref, state: 'closed', ids: [CLOSED_R] }),
+    [`${base}/${TRIAGE_A}`]: detailHtml(TRIAGE_A, 'Triage'),
+    [`${base}/${DRAFT_B}`]: detailHtml(DRAFT_B, 'Draft'),
+    [`${base}/${DRAFT_C}`]: detailHtml(DRAFT_C, 'Draft'),
+    [`${base}/${PUBLISHED_P}`]: detailHtml(PUBLISHED_P, 'Published'),
+    [`${base}/${PUBLISHED_Q}`]: detailHtml(PUBLISHED_Q, 'Published'),
+    [`${base}/${CLOSED_R}`]: detailHtml(CLOSED_R, 'Closed'),
+  });
+  const doc = pageOf(listHtml({ ...ref, state: 'triage', ids: [TRIAGE_A] }));
+  const storage = fakeStorage();
+  cache.setStorage(storage);
+  /** @type {import('../src/list/table.js').RefreshOptions} */
+  const options = {
+    storage,
+    wait: advance,
+    href: `https://github.com${base}?state=triage`,
+  };
+  const hooks = hooksFor({ base, doc, options });
+  options.fetch = async (url, init) => {
+    const hook = hooks[String(url)];
+    delete hooks[String(url)];
+    hook?.();
+    return fetch.send(url, init);
+  };
+  await table.render(doc);
+  const summary = await table.refresh(doc, options);
+  return { base, urls: fetch.urls, summary, published2 };
+}
+
+const TRIAGE_A = 'GHSA-aaaa-aaaa-aaaa';
+const DRAFT_B = 'GHSA-bbbb-bbbb-bbbb';
+const DRAFT_C = 'GHSA-cccc-cccc-cccc';
+const PUBLISHED_P = 'GHSA-pppp-pppp-pppp';
+const PUBLISHED_Q = 'GHSA-qqqq-qqqq-qqqq';
+const CLOSED_R = 'GHSA-rrrr-rrrr-rrrr';
+
+/**
+ * Switch the document to a view mode, and join its walk the way the
+ * completed view's collection does when it opens.
+ *
+ * @param {{ doc: Document, options: import('../src/list/table.js').RefreshOptions }} held
+ * @param {string} mode
+ * @param {string[]} [seen] Collects a mark for each list page the joining
+ *   caller sees, and for each list page it hears failed.
+ * @returns {void}
+ */
+function show(held, mode, seen) {
+  table.setViewMode(held.doc, mode);
+  if (mode !== 'done') return;
+  const parsed = table.pageOf(held.doc);
+  if (parsed === null) throw new Error('the page did not read as a list');
+  void table.walk(
+    held.doc,
+    parsed,
+    held.options,
+    { onPage: () => seen?.push('page'), onFailure: () => seen?.push('failure') },
+    'done'
+  );
+}
+
+test('switching to the completed view mid-walk puts its work first, and switching back undoes it', async () => {
+  const started = clockAt;
+  try {
+    /** @type {string[]} */
+    const seen = [];
+    const { base, urls, summary } = await switching('walk-switch', (held) => ({
+      // The completed view opens while the first open advisory is read, and
+      // the open table comes back while the first completed one is.
+      [`${held.base}/${TRIAGE_A}`]: () => show(held, 'done', seen),
+      [`${held.base}/${PUBLISHED_P}`]: () => show(held, table.VIEW_TABLE),
+    }));
+    assert.deepStrictEqual(urls, [
+      `${base}?state=draft`,
+      `${base}/${TRIAGE_A}`,
+      `${base}?state=published`,
+      `${base}?state=published&page=2`,
+      `${base}?state=closed`,
+      `${base}/${PUBLISHED_P}`,
+      `${base}/${DRAFT_B}`,
+      `${base}/${DRAFT_C}`,
+      `${base}/${PUBLISHED_Q}`,
+      `${base}/${CLOSED_R}`,
+    ]);
+    assert.strictEqual(seen.length, 3, 'the joining caller did not see each list page');
+    assert.ok(summary !== null && summary.read.remaining.length === 0, 'an open advisory was left');
+  } finally {
+    clockAt = started;
+  }
+});
+
+test('a list set aside for the view shown resumes at the page it stopped on', async () => {
+  const started = clockAt;
+  try {
+    /** @type {string[]} */
+    const seen = [];
+    const { base, urls, summary } = await switching('walk-set-aside', (held) => ({
+      [`${held.base}/${TRIAGE_A}`]: () => show(held, 'done', seen),
+      // The open table comes back while the first published page is out, so
+      // the open reads go ahead of the second page.
+      [`${held.base}?state=published`]: () => show(held, table.VIEW_TABLE),
+    }));
+    assert.deepStrictEqual(urls, [
+      `${base}?state=draft`,
+      `${base}/${TRIAGE_A}`,
+      `${base}?state=published`,
+      `${base}/${DRAFT_B}`,
+      `${base}/${DRAFT_C}`,
+      `${base}?state=published&page=2`,
+      `${base}?state=closed`,
+      `${base}/${PUBLISHED_P}`,
+      `${base}/${PUBLISHED_Q}`,
+      `${base}/${CLOSED_R}`,
+    ]);
+    // The second published page was set aside unsent. It is not a failure.
+    assert.ok(!seen.includes('failure'), `the joining caller heard a failure: ${seen}`);
+    assert.strictEqual(summary?.crawled.failed, 0, 'the walk counted a list page as failed');
+  } finally {
+    clockAt = started;
+  }
+});
+
+test('the statistics view shown mid-walk gets every list, then every advisory read', async () => {
+  const started = clockAt;
+  try {
+    const { base, urls } = await switching('walk-statistics', (held) => ({
+      [`${held.base}/${TRIAGE_A}`]: () => show(held, 'statistics'),
+    }));
+    assert.deepStrictEqual(urls, [
+      `${base}?state=draft`,
+      `${base}/${TRIAGE_A}`,
+      `${base}?state=published`,
+      `${base}?state=published&page=2`,
+      `${base}?state=closed`,
+      `${base}/${DRAFT_B}`,
+      `${base}/${DRAFT_C}`,
+      `${base}/${PUBLISHED_P}`,
+      `${base}/${PUBLISHED_Q}`,
+      `${base}/${CLOSED_R}`,
+    ]);
+  } finally {
     clockAt = started;
   }
 });

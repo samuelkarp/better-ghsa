@@ -529,13 +529,20 @@ if (typeof require === 'function') {
       });
     }
 
-    /** @returns {Promise<QueueSummary>} */
-    async function pass() {
+    /**
+     * @param {((ghsaId: string) => boolean) | null} wanted Reads only the
+     *   pending advisories it accepts, in pending order, and ends once one
+     *   request is sent. Null reads every pending advisory.
+     * @returns {Promise<QueueSummary>}
+     */
+    async function pass(wanted) {
       // Report only failures from this pass.
       /** @type {string[]} */
       const failures = [];
       while (!stopped) {
-        const ghsaId = pending.shift();
+        const at = wanted === null ? 0 : pending.findIndex(wanted);
+        if (at === -1) break;
+        const ghsaId = pending.splice(at, 1)[0];
         if (ghsaId === undefined) break;
 
         // Another page may have refreshed the entry since it was queued.
@@ -566,6 +573,7 @@ if (typeof require === 'function') {
           report(ghsaId, entry);
         }
         await persist();
+        if (wanted !== null) break;
       }
 
       const complete = pending.length === 0 && inFlight === null;
@@ -590,12 +598,25 @@ if (typeof require === 'function') {
       if (startedAt === null) startedAt = clock();
       running = serially(async () => {
         try {
-          return await pass();
+          return await pass(null);
         } finally {
           running = null;
         }
       });
       return running;
+    }
+
+    /**
+     * Read pending advisories the predicate accepts, stalest first, until one
+     * request is sent, after the work queued before it settles. Fresh entries
+     * it passes on the way are reported without a request.
+     *
+     * @param {(ghsaId: string) => boolean} wanted
+     * @returns {Promise<QueueSummary>}
+     */
+    function readNext(wanted) {
+      if (startedAt === null) startedAt = clock();
+      return serially(() => pass(wanted));
     }
 
     /**
@@ -614,8 +635,11 @@ if (typeof require === 'function') {
       add,
       page,
       run,
+      readNext,
       stop,
       persist,
+      /** @returns {boolean} whether the queue is stopped. */
+      isStopped: () => stopped,
       /** @returns {boolean} whether a pass is running. */
       isRunning: () => running !== null,
     };

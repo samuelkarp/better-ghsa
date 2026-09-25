@@ -11,6 +11,7 @@ const table = require('../src/list/table.js');
 const csv = require('../src/done/csv.js');
 const view = require('../src/done/view.js');
 const statistics = require('../src/stats/statistics.js');
+const allowlist = require('../src/common/allowlist.js');
 
 const { fakeStorage } = require('../test-support/storage.js');
 
@@ -1119,13 +1120,25 @@ test('the statistics view shown first gets every list walked on each page load',
    * Show the statistics view, then run the render pass that starts the list
    * surface's refresh, and wait for that refresh.
    *
-   * @returns {Promise<{ doc: Document, base: string, before: string[], walking: string[] }>}
+   * @returns {Promise<{
+   *   doc: Document,
+   *   base: string,
+   *   before: string[],
+   *   opened: string[],
+   *   walking: string[],
+   * }>}
    */
   const load = async () => {
     const { doc, base } = await repository(setup);
     statsToggle(doc).click();
     await statistics.load(doc);
     const before = over(doc);
+    /** @type {string[]} */
+    let opened = [];
+    during[`${base}?state=published`] = async () => {
+      await statistics.load(doc);
+      opened = over(doc);
+    };
     /** @type {string[]} */
     let walking = [];
     during[`${base}?state=closed`] = async () => {
@@ -1136,15 +1149,27 @@ test('the statistics view shown first gets every list walked on each page load',
     await table.passFor(doc, { ...QUEUE_OPTIONS, href })();
     await table.refresh(doc, { ...QUEUE_OPTIONS, href });
     await statistics.load(doc);
-    return { doc, base, before, walking };
+    return { doc, base, before, opened, walking };
   };
 
   const first = await load();
-  const lists = () => asked.filter((url) => url.startsWith(`${first.base}?`));
+  const requests = () => asked.filter((url) => url.startsWith(`${first.base}`));
+  // The statistics view needs every list. The walk does not read an
+  // advisory until all four lists are walked, and it asks for the open and
+  // the completed advisories both.
+  const walked = [
+    `${first.base}?state=draft`,
+    `${first.base}?state=published`,
+    `${first.base}?state=closed`,
+    `${first.base}/${ghsa('sfaa')}`,
+    `${first.base}/${ghsa('sfbb')}`,
+    `${first.base}/${ghsa('sfcc')}`,
+    `${first.base}/${ghsa('sfdd')}`,
+  ];
   assert.deepStrictEqual(
-    lists(),
-    [`${first.base}?state=draft`, `${first.base}?state=published`, `${first.base}?state=closed`],
-    'the page load did not walk the lists past the triage page it shows'
+    requests(),
+    walked,
+    'the page load did not walk every list, then read the open and the completed advisories'
   );
   assert.deepStrictEqual(first.before, [
     '1 total advisory',
@@ -1155,6 +1180,12 @@ test('the statistics view shown first gets every list walked on each page load',
     '1 not loaded yet',
     '4 on GitHub',
   ]);
+  assert.ok(
+    !first.opened.some((chip) => chip.startsWith('Open list')) &&
+      first.opened.includes('Completed list partly loaded') &&
+      first.opened.includes('Loading...'),
+    `the chips while the published list was read: ${JSON.stringify(first.opened)}`
+  );
   assert.ok(
     first.walking.includes('Completed list partly loaded') && first.walking.includes('Loading...'),
     `the chips while the closed list was read: ${JSON.stringify(first.walking)}`
@@ -1173,9 +1204,9 @@ test('the statistics view shown first gets every list walked on each page load',
     `lists walked on an earlier page load read as loaded: ${JSON.stringify(second.before)}`
   );
   assert.deepStrictEqual(
-    lists().slice(3),
-    [`${first.base}?state=draft`, `${first.base}?state=published`, `${first.base}?state=closed`],
-    'the next page load did not walk the lists again'
+    requests().slice(walked.length),
+    walked,
+    'the next page load did not walk every list and read every advisory again, in order'
   );
 });
 
@@ -1271,36 +1302,59 @@ test('a repository nothing has read says so and offers no export', async () => {
 });
 
 test('the statistics view asks GitHub for nothing of its own', async () => {
-  const { doc, base } = await repository({
-    owner: 'stats-quiet',
+  const ref = { owner: 'stats-quiet', repo: 'Spoon-Knife' };
+  const setup = {
+    owner: ref.owner,
     states: {
       triage: [{ ghsaId: ghsa('mmmm') }],
       published: [{ ghsaId: ghsa('nnnn') }],
       closed: [{ ghsaId: ghsa('oooo') }],
     },
-    crawl: ['open', 'done'],
+    reads: [
+      { ghsaId: ghsa('mmmm'), state: 'triage' },
+      { ghsaId: ghsa('nnnn'), state: 'published' },
+      { ghsaId: ghsa('oooo'), state: 'closed' },
+    ],
+    crawl: /** @type {const} */ (['open', 'done']),
+  };
+  const location = globalThis.location;
+  allowlist.setStorage({
+    get: async () => ({ [allowlist.STORAGE_KEY]: [`${ref.owner}/${ref.repo}`] }),
+    set: async () => {},
   });
-
-  const before = asked.length;
-  statsToggle(doc).click();
-  await statistics.load(doc);
-  statsToggle(doc).click();
-  statsToggle(doc).click();
-  await statistics.load(doc);
-  statistics.draw(doc);
-  await settle();
-
-  // Other repositories may retry pending crawls. Count this repository's requests only.
-  assert.deepStrictEqual(
-    asked.slice(before).filter((url) => url.startsWith(base)),
-    [],
-    'the view spent a request of its own'
+  await allowlist.load();
+  globalThis.location = /** @type {Location} */ (
+    /** @type {unknown} */ ({ pathname: `/${ref.owner}/${ref.repo}/security/advisories` })
   );
-  assert.deepStrictEqual(
-    over(doc),
-    ['3 total advisories', '1 open', '2 completed', '3 not loaded yet'],
-    'and it still drew the whole corpus, so the count above is not over nothing'
-  );
+  try {
+    const { doc, base } = await repository(setup);
+
+    // Showing the view asks the walk for its reads, and the walk has
+    // walked every list this page load and holds every advisory fresh.
+    const before = asked.length;
+    statsToggle(doc).click();
+    await statistics.load(doc);
+    statsToggle(doc).click();
+    statsToggle(doc).click();
+    await table.refresh(doc, QUEUE_OPTIONS);
+    await statistics.load(doc);
+    statistics.draw(doc);
+    await settle();
+
+    // Other repositories may retry pending crawls. Count this repository's requests only.
+    assert.deepStrictEqual(
+      asked.slice(before).filter((url) => url.startsWith(base)),
+      [],
+      'the view spent a request of its own'
+    );
+    assert.deepStrictEqual(
+      over(doc),
+      ['3 total advisories', '1 open', '2 completed'],
+      'and it still drew the whole corpus, so the count above is not over nothing'
+    );
+  } finally {
+    globalThis.location = location;
+  }
 });
 
 test('the export is the whole corpus, written here in the page', async () => {

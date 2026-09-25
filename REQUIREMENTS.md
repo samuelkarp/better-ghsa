@@ -356,15 +356,34 @@ incomplete in the views that use it.
 
 Walk the triage, draft, published, and closed lists once per page load,
 whichever view is showing. The open table, the done page, and the statistics
-view all use that walk. A list gains entries whenever an advisory changes
-state, so the time since a list was last walked says nothing about what it
-holds. A page load begins when a page shows a repository's advisory list and
-lasts while the page moves between that list's tabs and the repository's
-advisories. Moving to another repository or to any other page ends it, and so
-does reloading the page. Within a page load, finish a walk that stopped part
-way and walk no finished list again. A walk an earlier page load left part way
-starts over from its first page. A list page that fails three times in a row
-abandons its walk until the next page load.
+view all use that walk. The open table asks it to read the stale open
+advisories, the done page the stale published and closed ones, and the
+statistics view both. The done page and the statistics view ask when they open,
+and the walk starts at once if none is running. Its work has four parts: the
+open lists (triage and draft), the reads of the open advisories, the done lists
+(published and closed), and the reads of the published and closed advisories.
+Before each list page and each advisory read it requests, the walk picks the
+part that goes next from the view showing at that moment. The work of that view
+goes first, and a group's lists come before its reads:
+
+- Open table or GitHub's view: the open lists, the open reads, the done lists,
+  then the done reads if a view asked for them.
+- Done page: the done lists, the done reads, then the open work that remains.
+- Statistics view: all four lists, then the open reads and the done reads.
+
+Switching views moves the work of the view now showing ahead of the rest. A
+request already sent finishes, a list set aside resumes at the page it stopped
+on, and nothing already read is requested again. The open table reads only open
+advisories and the done page only published and closed ones. Opening the done
+page again within a page load does not read an open advisory. A list gains
+entries whenever an advisory changes state. The time since a list was last
+walked says nothing about what it holds. A page load begins when a page shows a
+repository's advisory list and lasts while the page moves between that list's
+tabs and the repository's advisories. Moving to another repository or to any
+other page ends it, and so does reloading the page. Within a page load, finish
+a walk that stopped part way and do not walk a finished list again. A walk an
+earlier page load left part way starts over from its first page. A list page
+that fails three times in a row abandons its walk until the next page load.
 
 ## 10. Done page and statistics
 
