@@ -1785,6 +1785,17 @@ if (typeof require === 'function') {
   }
 
   /**
+   * @param {Document} doc
+   * @param {{ owner: string, repo: string }} ref
+   * @returns {number | null} When this document's page load of the
+   *   repository's list began, epoch milliseconds, or null when none has.
+   */
+  function pageLoadAt(doc, ref) {
+    const held = loads.get(doc);
+    return held !== undefined && held.key === refKey(ref) ? held.at : null;
+  }
+
+  /**
    * End the page load when the document's location leaves the advisory pages
    * of the repository it was in, and stop the work of that page load. The
    * next list the document shows begins a new page load and refreshes at once.
@@ -1931,9 +1942,12 @@ if (typeof require === 'function') {
     /**
      * @param {string} ghsaId
      * @returns {WalkGroup} The group of the list the advisory was last seen
-     *   on. One no list holds is read with the open advisories.
+     *   on. One no list holds is read with the open advisories. A forced read
+     *   belongs to the completed view's reload that forced it, and is read
+     *   with the completed advisories whatever list now holds it.
      */
     const groupOf = (ghsaId) => {
+      if (queue.isForced(ghsaId)) return 'done';
       const row = list.rows[ghsaId];
       return row !== undefined && GROUPS.done.includes(row.state) ? 'done' : 'open';
     };
@@ -2527,6 +2541,7 @@ if (typeof require === 'function') {
     refKey,
     queueFor,
     loadedAt,
+    pageLoadAt,
     visit,
     walk,
     walkProgress,

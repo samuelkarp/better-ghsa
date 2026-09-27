@@ -407,6 +407,13 @@ every filter. Apply closure-reason filtering to closed advisories, including
 a value for unset reasons. Apply severity filtering to published advisories.
 Use the open list's filter bar and show the controls for the current view.
 
+Provide a control on the filter bar that reads the advisory pages of the rows
+shown again, whatever their cache freshness, through the shared queue, with
+the collection status counting those reads. A cached entry changes only on a
+read, and the advisory list does not show anything that changes when a
+comment is posted. Beside it, count the rows shown whose advisory data
+predates the page load, and omit the count at zero.
+
 Show collection status from the moment collection is requested, including
 while the page load's list walk is still running. Identify the walk of the
 published and closed lists, then show the remaining reads of their advisories.

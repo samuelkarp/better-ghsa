@@ -151,21 +151,27 @@ if (typeof require === 'function') {
 
   /**
    * Fetch uncached advisories first, then stale observations from oldest to
-   * newest. Break ties by identifier. Fresh entries are skipped.
+   * newest. Break ties by identifier. Fresh entries are skipped, except the
+   * forced ones, which are read whatever their freshness.
    *
    * @param {readonly string[]} ghsaIds
    * @param {Map<string, import('./cache.js').CacheEntry>} entries Cached advisory entries.
    * @param {number} at
+   * @param {ReadonlySet<string>} [forced] Advisories to read even when fresh.
    * @returns {{ order: string[], fresh: string[] }}
    */
-  function plan(ghsaIds, entries, at) {
+  function plan(ghsaIds, entries, at, forced = new Set()) {
     /** @type {string[]} */
     const order = [];
     /** @type {string[]} */
     const fresh = [];
     for (const ghsaId of idsOf([...ghsaIds])) {
       const entry = entries.get(ghsaId);
-      if (entry !== undefined && !globalThis.bghsa.cache.isStale(entry, at)) {
+      if (
+        entry !== undefined &&
+        !forced.has(ghsaId) &&
+        !globalThis.bghsa.cache.isStale(entry, at)
+      ) {
         fresh.push(ghsaId);
         continue;
       }
@@ -229,6 +235,13 @@ if (typeof require === 'function') {
     let startedAt = null;
     /** @type {Promise<QueueSummary> | null} */
     let running = null;
+    /**
+     * Advisories to read over the network whatever their cache freshness,
+     * each until its next read. Held in memory for this page only.
+     *
+     * @type {Set<string>}
+     */
+    const forced = new Set();
     let stopped = false;
     let fetched = 0;
     let skipped = 0;
@@ -374,7 +387,7 @@ if (typeof require === 'function') {
       const at = clock();
       const wanted = idsOf([...pending, ...ghsaIds]).filter((ghsaId) => ghsaId !== inFlight);
       const entries = await globalThis.bghsa.cache.getAdvisories(ref, wanted, { storage, at });
-      const { order, fresh } = plan(wanted, entries, at);
+      const { order, fresh } = plan(wanted, entries, at, forced);
       pending = order;
       for (const ghsaId of fresh) {
         if (done.includes(ghsaId)) continue;
@@ -386,6 +399,22 @@ if (typeof require === 'function') {
       if (startedAt === null) startedAt = at;
       await persist();
       return { queued: [...pending], fresh };
+    }
+
+    /**
+     * Queue advisories to be read over the network even if their cache
+     * entries are fresh. An advisory already pending keeps its place.
+     *
+     * @param {readonly string[]} ghsaIds
+     * @returns {Promise<void>}
+     */
+    async function reread(ghsaIds) {
+      for (const ghsaId of idsOf([...ghsaIds])) {
+        forced.add(ghsaId);
+        if (!pending.includes(ghsaId)) pending.push(ghsaId);
+      }
+      if (startedAt === null) startedAt = clock();
+      await persist();
     }
 
     /**
@@ -496,6 +525,7 @@ if (typeof require === 'function') {
     async function fresh(ghsaId) {
       const at = clock();
       const held = await globalThis.bghsa.cache.getAdvisory({ ...ref, ghsaId }, { storage, at });
+      if (forced.has(ghsaId)) return false;
       if (held === null || globalThis.bghsa.cache.isStale(held, at)) return false;
       inFlight = null;
       if (!done.includes(ghsaId)) done.push(ghsaId);
@@ -574,6 +604,7 @@ if (typeof require === 'function') {
 
         const entry = await read(ghsaId);
         inFlight = null;
+        forced.delete(ghsaId);
         if (entry === null) {
           if (!failed.includes(ghsaId)) failed.push(ghsaId);
           if (!failures.includes(ghsaId)) failures.push(ghsaId);
@@ -646,12 +677,20 @@ if (typeof require === 'function') {
       page,
       run,
       readNext,
+      reread,
       stop,
       persist,
       /** @returns {boolean} whether the queue is stopped. */
       isStopped: () => stopped,
       /** @returns {boolean} whether a pass is running. */
       isRunning: () => running !== null,
+      /** @returns {string[]} the advisories forced and not yet read. */
+      forcing: () => [...forced],
+      /**
+       * @param {string} ghsaId
+       * @returns {boolean} whether the advisory is forced and not yet read.
+       */
+      isForced: (ghsaId) => forced.has(ghsaId),
     };
   }
 

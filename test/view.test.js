@@ -3374,3 +3374,333 @@ test('the statistics shown as the completed reads are saved leave them to read',
   ]);
   assert.deepStrictEqual(unread, [], 'a completed row went unread');
 });
+
+/**
+ * @param {Document} doc
+ * @returns {HTMLElement} the control that reloads the cached advisories.
+ */
+function reloadButton(doc) {
+  return /** @type {HTMLElement} */ (
+    /** @type {unknown} */ (one(doc, `#${table.ROOT_ID} .bghsa-done-controls .bghsa-done-reload`))
+  );
+}
+
+/**
+ * @param {Document} doc
+ * @returns {string[]} the texts of the chip counting rows loaded from cache.
+ */
+function cachedChips(doc) {
+  return textsOf(doc, `#${table.ROOT_ID} .bghsa-done-controls .bghsa-done-cached`);
+}
+
+/**
+ * Read two published and one closed advisory in one page load, then start a
+ * second page load ten minutes later, on the completed view, whose rows all
+ * come from the first one's reads. The advisory pages then name a later
+ * report date, which a row shows once its advisory is read again.
+ *
+ * @param {string} prefix Two letters that make the advisories' IDs.
+ * @returns {Promise<{
+ *   doc: Document,
+ *   parsed: import('../src/common/parse-list.js').ParsedList,
+ *   published: string[],
+ *   closed: string,
+ *   leave: () => void,
+ * }>}
+ */
+async function cachedPage(prefix) {
+  const published = [ghsa(`${prefix}pa`), ghsa(`${prefix}pb`)];
+  const closed = ghsa(`${prefix}cc`);
+  const counts = { published: 2, closed: 1 };
+  pages[listUrl(REF, 'triage')] = listHtml({ state: 'triage', ids: [], counts });
+  pages[listUrl(REF, 'draft')] = listHtml({ state: 'draft', ids: [], counts });
+  pages[listUrl(REF, 'published')] = listHtml({ state: 'published', ids: published, counts });
+  pages[listUrl(REF, 'closed')] = listHtml({ state: 'closed', ids: [closed], counts });
+  /** @param {string} reportedAt @returns {void} */
+  const serve = (reportedAt) => {
+    for (const id of published) {
+      pages[detailUrl(id)] = detailHtml({ ghsaId: id, state: 'Published', reportedAt });
+    }
+    pages[detailUrl(closed)] = detailHtml({ ghsaId: closed, state: 'Closed', reportedAt });
+  };
+  const leave = () => {
+    for (const state of ['triage', 'draft', 'published', 'closed']) {
+      delete pages[listUrl(REF, state)];
+    }
+    for (const id of [...published, closed]) delete pages[detailUrl(id)];
+  };
+  try {
+    serve('2026-03-02T00:00:00Z');
+    await cache.clear();
+    const first = await page();
+    const parsed = table.pageOf(first);
+    assert.ok(parsed !== null, 'the page reads as a list');
+    doneToggle(first).click();
+    await view.collect(first, QUEUE_OPTIONS);
+    await table.walk(first, parsed);
+
+    clockAt += 10 * MINUTE;
+    serve('2026-05-09T00:00:00Z');
+    const doc = await page();
+    const before = asked.length;
+    doneToggle(doc).click();
+    await view.collect(doc, QUEUE_OPTIONS);
+    await table.walk(doc, parsed);
+    assert.deepStrictEqual(
+      asked.slice(before).filter((url) => !url.includes('?')),
+      [],
+      'the second page load read an advisory still fresh'
+    );
+    return { doc, parsed, published, closed, leave };
+  } catch (error) {
+    leave();
+    throw error;
+  }
+}
+
+/**
+ * @param {Document} doc
+ * @param {import('../src/common/parse-list.js').ParsedList} parsed
+ * @returns {Promise<void>} Presses the reload control and waits for its reads.
+ */
+async function reloaded(doc, parsed) {
+  reloadButton(doc).click();
+  const { queue } = table.queueFor(REF, QUEUE_OPTIONS);
+  await until(
+    'read the advisories the reload forced',
+    () => queue.forcing().length === 0 && !view.stateOf(doc).reading
+  );
+  await table.walk(doc, parsed);
+}
+
+test('the reload rereads the fresh advisories of the rows shown, and only those', async () => {
+  const { doc, parsed, closed, leave } = await cachedPage('ra');
+  try {
+    assert.deepStrictEqual(cachedChips(doc), ['3 loaded from cache']);
+    pick(doc, 'state', 'Closed');
+    assert.deepStrictEqual(cachedChips(doc), ['1 loaded from cache'], 'the chip ignored the filter');
+
+    const before = asked.length;
+    await reloaded(doc, parsed);
+    assert.deepStrictEqual(
+      asked.slice(before),
+      [detailUrl(closed)],
+      'the reload read something other than the fresh advisory of the row shown'
+    );
+    assert.deepStrictEqual(cachedChips(doc), [], 'the chip stands with nothing loaded from cache');
+
+    pick(doc, 'state', '');
+    assert.deepStrictEqual(
+      cachedChips(doc),
+      ['2 loaded from cache'],
+      'the chip counted a row read in this page load, or lost one read before it'
+    );
+  } finally {
+    leave();
+  }
+});
+
+test('the reload counts down, repaints each row as it lands, and reads each once', async () => {
+  const { doc, parsed, published, closed, leave } = await cachedPage('rb');
+  const ids = [...published, closed];
+  try {
+    const repainted = () =>
+      ids.filter((id) => textOf(doneRow(doc, id), '.bghsa-done-meta').includes('opened 2026-05-09'))
+        .length;
+    /** @type {string[]} */
+    const said = [];
+    const record = async () => {
+      const chip = textsOf(doc, `#${view.ROOT_ID} .bghsa-done-header span.Label`).join('+');
+      said.push(`${chip} | ${cachedChips(doc).join('+') || 'no chip'} | ${repainted()} repainted`);
+    };
+    let reads = 0;
+    for (const id of ids) {
+      during[detailUrl(id)] = async () => {
+        reads += 1;
+        // A second press after the first read landed.
+        if (reads === 2) reloadButton(doc).click();
+        await record();
+      };
+    }
+    const before = asked.length;
+    await reloaded(doc, parsed);
+    assert.deepStrictEqual(
+      asked.slice(before).sort(),
+      ids.map(detailUrl).sort(),
+      'the reload skipped an advisory or read one twice'
+    );
+    assert.deepStrictEqual(said, [
+      'Loading (3 left)... | 3 loaded from cache | 0 repainted',
+      'Loading (2 left)... | 2 loaded from cache | 1 repainted',
+      'Loading (1 left)... | 1 loaded from cache | 2 repainted',
+    ]);
+    assert.strictEqual(repainted(), 3, 'a row kept the data read before the reload');
+    assert.deepStrictEqual(cachedChips(doc), [], 'the chip stands with nothing loaded from cache');
+  } finally {
+    for (const id of ids) delete during[detailUrl(id)];
+    leave();
+  }
+});
+
+test('the reload control is held while no row shows, and unread rows are not counted', async () => {
+  const doc = await page(corpusOf([]));
+  try {
+    assert.strictEqual(reloadButton(doc).textContent, 'Reload cached advisories');
+    assert.ok(reloadButton(doc).hasAttribute('disabled'), 'the control stands ready over no rows');
+    assert.deepStrictEqual(cachedChips(doc), []);
+
+    const id = ghsa('rccc');
+    view.setState(doc, {
+      corpus: corpusOf([
+        member({ ghsaId: id, state: 'closed', advisory: ended(id, 'closed', null) }),
+        member({ ghsaId: ghsa('rddd'), state: 'closed' }),
+      ]),
+      ref: REF,
+    });
+    view.draw(doc);
+    assert.ok(!reloadButton(doc).hasAttribute('disabled'), 'the control is held over rows');
+    assert.deepStrictEqual(
+      cachedChips(doc),
+      ['1 loaded from cache'],
+      'the chip counted a row never read, or missed one read before the page load'
+    );
+  } finally {
+    view.setState(doc, { corpus: null, ref: null });
+  }
+});
+
+test('a reload pressed while the collection walks is read by that collection', async () => {
+  const { published, closed, leave } = await cachedPage('re');
+  try {
+    // A third page load, pressed while its walk reads the closed list, with
+    // the rows the lists held at the last page load shown.
+    clockAt += 10 * MINUTE;
+    const doc = await page();
+    const parsed = table.pageOf(doc);
+    assert.ok(parsed !== null, 'the page reads as a list');
+    /** @type {string[]} */
+    let shown = [];
+    during[listUrl(REF, 'closed')] = async () => {
+      shown = Array.from(doc.querySelectorAll(`#${view.ROOT_ID} [data-bghsa-ghsa]`)).map(
+        (row) => row.getAttribute('data-bghsa-ghsa') ?? ''
+      );
+      reloadButton(doc).click();
+      await settled();
+    };
+    const before = asked.length;
+    doneToggle(doc).click();
+    await view.collect(doc, QUEUE_OPTIONS);
+    await table.walk(doc, parsed);
+    const ids = [...published, closed].sort();
+    assert.deepStrictEqual(shown.sort(), ids, 'the press came with other rows shown');
+    assert.deepStrictEqual(
+      asked.slice(before).filter((url) => !url.includes('?')).sort(),
+      ids.map(detailUrl).sort(),
+      'the collection left a forced read unread, or read one twice'
+    );
+    assert.deepStrictEqual(cachedChips(doc), [], 'a row kept its data from cache');
+  } finally {
+    delete during[listUrl(REF, 'closed')];
+    leave();
+  }
+});
+
+test('a reload pressed as the collection ends its reads is read by the next one', async () => {
+  const { published, closed, leave } = await cachedPage('rf');
+  const storage = /** @type {import('../test-support/storage.js').FakeStorage} */ (
+    QUEUE_OPTIONS.storage
+  );
+  const get = storage.get;
+  try {
+    // A third page load, pressed once the collection's reads have ended. The
+    // collection's last look at the cached advisories waits until the press
+    // has been taken. The collection has not ended when it lands.
+    clockAt += 10 * MINUTE;
+    const doc = await page();
+    const parsed = table.pageOf(doc);
+    assert.ok(parsed !== null, 'the page reads as a list');
+    doneToggle(doc).click();
+    const collected = view.collect(doc, QUEUE_OPTIONS);
+    /** @type {() => void} */
+    let release = () => {};
+    const held = new Promise((resolve) => {
+      release = () => resolve(undefined);
+    });
+    let before = asked.length;
+    let reading = false;
+    const pressed = table.walk(doc, parsed, QUEUE_OPTIONS, {}, 'done').then(async () => {
+      storage.get = async (keys) => {
+        const named = Array.isArray(keys) ? keys : [keys];
+        if (named.some((key) => String(key).startsWith(cache.ADVISORY_PREFIX))) await held;
+        return get(keys);
+      };
+      before = asked.length;
+      reloadButton(doc).click();
+      await settled();
+      reading = view.stateOf(doc).reading;
+      storage.get = get;
+      release();
+    });
+    await Promise.all([collected, pressed]);
+    assert.ok(reading, 'the collection ended before the press was taken');
+    const { queue } = table.queueFor(REF, QUEUE_OPTIONS);
+    await until(
+      'read the advisories the reload forced',
+      () => queue.forcing().length === 0 && !view.stateOf(doc).reading
+    );
+    assert.deepStrictEqual(
+      asked.slice(before).filter((url) => !url.includes('?')).sort(),
+      [...published, closed].map(detailUrl).sort(),
+      'a forced read went unread, or one was read twice'
+    );
+  } finally {
+    storage.get = get;
+    leave();
+  }
+});
+
+test('a reload of a row reopened since the lists were last walked reads it', async () => {
+  const { published, closed, leave } = await cachedPage('rg');
+  try {
+    // GitHub moved the closed advisory back to triage before this page load.
+    clockAt += 10 * MINUTE;
+    const counts = { triage: 1, published: 2, closed: 0 };
+    pages[listUrl(REF, 'triage')] = listHtml({ state: 'triage', ids: [closed], counts });
+    pages[listUrl(REF, 'closed')] = listHtml({ state: 'closed', ids: [], counts });
+    pages[detailUrl(closed)] = detailHtml({
+      ghsaId: closed,
+      state: 'Triage',
+      reportedAt: '2026-05-09T00:00:00Z',
+    });
+    const doc = await page();
+    const parsed = table.pageOf(doc);
+    assert.ok(parsed !== null, 'the page reads as a list');
+    /** @type {string[]} */
+    let shown = [];
+    during[listUrl(REF, 'closed')] = async () => {
+      shown = Array.from(doc.querySelectorAll(`#${view.ROOT_ID} [data-bghsa-ghsa]`)).map(
+        (row) => row.getAttribute('data-bghsa-ghsa') ?? ''
+      );
+      reloadButton(doc).click();
+      await settled();
+    };
+    const before = asked.length;
+    doneToggle(doc).click();
+    await view.collect(doc, QUEUE_OPTIONS);
+    const ids = [...published, closed].sort();
+    assert.deepStrictEqual(shown.sort(), ids, 'the press came with other rows shown');
+    const { queue } = table.queueFor(REF, QUEUE_OPTIONS);
+    await until('ended the collection', () => !view.stateOf(doc).reading);
+    assert.deepStrictEqual(queue.forcing(), [], 'a forced read outlived the reload');
+    assert.deepStrictEqual(queue.progress().pending, [], 'a forced read stayed queued');
+    assert.deepStrictEqual(
+      asked.slice(before).filter((url) => !url.includes('?')).sort(),
+      ids.map(detailUrl).sort(),
+      'the reload left the reopened advisory unread, or read one twice'
+    );
+    await table.walk(doc, parsed);
+  } finally {
+    delete during[listUrl(REF, 'closed')];
+    leave();
+  }
+});

@@ -106,6 +106,16 @@ if (typeof require === 'function') {
 
   const UNREADABLE_MESSAGE = 'Error: cannot set reason';
 
+  const RELOAD_LABEL = 'Reload cached advisories';
+
+  /**
+   * @param {number} count
+   * @returns {string} The label of the chip counting rows drawn from cache.
+   */
+  function cachedTextOf(count) {
+    return `${count} loaded from cache`;
+  }
+
   const STYLE_TEXT = [
     '.bghsa-done-chips { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }',
     // Use the page text color as the fallback in both themes.
@@ -388,6 +398,126 @@ if (typeof require === 'function') {
         return wanted === '' || table.matchesFilter(facet, row, wanted);
       })
     );
+  }
+
+  /**
+   * @param {Document} doc
+   * @returns {DoneRow[]} The rows the view shows under its filters.
+   */
+  function shownRowsOf(doc) {
+    return applyFilters(rowsOf(current(doc).corpus), filtersOf(doc));
+  }
+
+  /**
+   * Count the rows whose advisory data comes from a read made before this
+   * page load began. A row never read is not counted. Without a page load,
+   * every read row counts.
+   *
+   * @param {Document} doc
+   * @param {readonly DoneRow[]} rows
+   * @returns {number}
+   */
+  function cachedCountOf(doc, rows) {
+    const ref = current(doc).ref;
+    const since = ref === null ? null : globalThis.bghsa.table.pageLoadAt(doc, ref);
+    return rows.filter(
+      (row) => row.read && row.observedAt !== null && (since === null || row.observedAt < since)
+    ).length;
+  }
+
+  /**
+   * The advisories each document's reload has forced, by repository key. A
+   * press while that reload has forced reads left adds only rows it lacks.
+   *
+   * @type {WeakMap<Document, { key: string, ids: Set<string> }>}
+   */
+  const reloads = new WeakMap();
+
+  /**
+   * Read the advisories of the rows shown again, whatever their cache
+   * freshness, through the shared queue. The collection counts the reads down
+   * and draws each row as its read lands. A press while a reload runs queues
+   * no advisory that reload already took.
+   *
+   * @param {Document} doc
+   * @param {CollectOptions} [options]
+   * @returns {Promise<string[]>} The advisories this press queued.
+   */
+  async function reloadCached(doc, options = {}) {
+    const table = globalThis.bghsa.table;
+    const ref = current(doc).ref;
+    if (ref === null) return [];
+    const key = table.refKey(ref);
+    const { queue } = table.queueFor(ref, options);
+    let held = reloads.get(doc);
+    if (
+      held === undefined ||
+      held.key !== key ||
+      !queue.forcing().some((ghsaId) => held?.ids.has(ghsaId))
+    ) {
+      held = { key, ids: new Set() };
+      reloads.set(doc, held);
+    }
+    const taken = held.ids;
+    const ids = shownRowsOf(doc)
+      .map((row) => row.ghsaId)
+      .filter((ghsaId) => !taken.has(ghsaId));
+    if (ids.length === 0) return [];
+    for (const ghsaId of ids) taken.add(ghsaId);
+    await queue.reread(ids);
+    const collecting = running.get(doc);
+    if (collecting === undefined || collecting.key !== key) {
+      void collect(doc, options);
+      return ids;
+    }
+    // A collection whose reads have ended leaves the forced reads to the next one.
+    void collecting.started.finally(() => {
+      if (running.get(doc) !== undefined) return;
+      if (!queue.forcing().some((ghsaId) => ids.includes(ghsaId))) return;
+      if (!names(doc, ref)) return;
+      void collect(doc, options);
+    });
+    return ids;
+  }
+
+  /**
+   * @param {Document} doc
+   * @param {readonly DoneRow[]} shown
+   * @returns {Element | null} The chip counting shown rows drawn from cache,
+   *   or null when none is.
+   */
+  function buildCached(doc, shown) {
+    const count = cachedCountOf(doc, shown);
+    if (count === 0) return null;
+    const chip = globalThis.bghsa.chips.buildChip(doc, { text: cachedTextOf(count) });
+    chip.classList.add('mb-1', 'bghsa-done-cached');
+    return chip;
+  }
+
+  /**
+   * Enable the reload control while rows show, and redraw the chip counting
+   * the rows drawn from cache.
+   *
+   * @param {Document} doc
+   * @param {Element} box The filter controls.
+   * @param {readonly DoneRow[]} shown
+   * @returns {void}
+   */
+  function syncReload(doc, box, shown) {
+    const button = box.querySelector('.bghsa-done-reload');
+    if (button !== null) {
+      if (shown.length === 0) button.setAttribute('disabled', '');
+      else button.removeAttribute('disabled');
+    }
+    const chip = box.querySelector('.bghsa-done-cached');
+    const wanted = buildCached(doc, shown);
+    if (chip === null) {
+      if (wanted !== null) box.append(wanted);
+    } else if (wanted === null) {
+      chip.remove();
+    } else {
+      chip.replaceWith(wanted);
+    }
   }
 
   /**
@@ -689,6 +819,14 @@ if (typeof require === 'function') {
       draw(doc);
     });
     box.append(reset);
+
+    const reload = element(doc, 'button', 'btn btn-sm mb-1 bghsa-done-reload', RELOAD_LABEL);
+    reload.setAttribute('type', 'button');
+    reload.addEventListener('click', () => {
+      void reloadCached(doc);
+    });
+    box.append(reload);
+    syncReload(doc, box, applyFilters(rows, held));
     return box;
   }
 
@@ -732,6 +870,7 @@ if (typeof require === 'function') {
       if (facet === null) return null;
       return filterItems(doc, facet, rows, held[key] ?? '');
     });
+    syncReload(doc, box, applyFilters(rows, held));
   }
 
   /**
@@ -1087,6 +1226,8 @@ if (typeof require === 'function') {
     EMPTY_TEXT,
     LOADING_TEXT,
     FAILED_TEXT,
+    RELOAD_LABEL,
+    cachedTextOf,
     STYLE_TEXT,
     notes,
     saving,
@@ -1103,6 +1244,7 @@ if (typeof require === 'function') {
     setReason,
     showUnreasoned,
     collect,
+    reloadCached,
     left,
   };
 

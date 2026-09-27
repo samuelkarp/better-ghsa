@@ -89,6 +89,24 @@ excluded whenever that filter is active.
 
 The list reads "No matches" when filters exclude every row.
 
+## Reloading cached advisories
+
+"Reload cached advisories" sits on the filter bar beside "Reset". It reads
+the advisory page of every row the filters keep, however recently the cache
+last read it. A reason another maintainer saved from another machine appears
+once its row's advisory is read again. The reads go through the queue shared
+with the open list, one request per second, and the chip beside the heading
+counts them down as "Loading (3 left)...". Each row updates as its read
+lands. A row whose advisory GitHub has reopened since the lists were last
+read is read with the rest. The button is disabled while no row shows. It
+stays enabled during a reload, and a second press queues only rows that
+reload has not taken.
+
+A chip beside the button counts the rows shown whose advisory data comes from
+a read made before this page load, as "56 loaded from cache". A row whose
+advisory has never been read is not counted. The count follows the filters,
+drops as reads land, and the chip disappears at zero.
+
 ## Recording a closure reason
 
 Each unpublished row has a "Closure reason" dropdown and a "Save" button.
