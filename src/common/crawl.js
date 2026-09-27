@@ -4,6 +4,7 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
 
 // The manifest orders content scripts; under Node the dependencies are named here.
 if (typeof require === 'function') {
+  require('./diag.js');
   require('./schema.js');
   require('./cache.js');
   require('./parse-list.js');
@@ -74,6 +75,9 @@ if (typeof require === 'function') {
  */
 
 (() => {
+  const diag = globalThis.bghsa.diag.log;
+  const diagCaught = globalThis.bghsa.diag.caught;
+
   /**
    * After repeated failures, abandon the stored page and restart from page one
    * on the next page load. An abandoned walk stays incomplete and preserves
@@ -448,7 +452,8 @@ if (typeof require === 'function') {
       if (options.onPage === undefined) return;
       try {
         options.onPage(list);
-      } catch {
+      } catch (error) {
+        diagCaught('crawl onPage listener', error);
         // Continue crawling after a listener failure.
       }
     }
@@ -463,13 +468,17 @@ if (typeof require === 'function') {
       if (options.onFailure === undefined) return;
       try {
         options.onFailure(state, url, reason);
-      } catch {
+      } catch (error) {
+        diagCaught('crawl onFailure listener', error);
         // Continue crawling after a listener failure.
       }
     }
 
     const held = await globalThis.bghsa.cache.getList(ref, { storage, at: clock() });
     const list = listFrom(held === null ? null : held.record);
+    diag(
+      () => `crawl start states=${states.join(',')} cachedList=${held !== null} rows=${Object.keys(list.rows).length} seed=${options.parsed !== undefined && options.parsed !== null} since=${since}`
+    );
 
     if (options.parsed !== undefined && options.parsed !== null) {
       seed(list, options.parsed, {
@@ -489,7 +498,10 @@ if (typeof require === 'function') {
 
     for (const state of states) {
       if (stopped) break;
-      if (!isDue(list, state, since)) continue;
+      if (!isDue(list, state, since)) {
+        diag(`crawl ${state} not-due (walked since page load)`);
+        continue;
+      }
       if (!resumable(list, state, since)) {
         list.walks[state] = {
           next: listUrl(ref, state),
@@ -513,10 +525,17 @@ if (typeof require === 'function') {
         const walk = walkOf(list, state);
         const url = walk.next;
         if (walk.complete || url === null) break;
-        if (seen.has(url)) break;
+        if (seen.has(url)) {
+          diag(`crawl ${state} cycle page=${walk.pages + 1}`);
+          break;
+        }
         seen.add(url);
 
+        diag(`crawl ${state} request page=${walk.pages + 1}`);
         const answer = await options.queue.page(url);
+        diag(
+          `crawl ${state} result page=${walk.pages + 1} stopped=${answer.stopped} status=${answer.status} body=${answer.body !== null} reason=${answer.reason === null ? null : String(answer.reason)}`
+        );
         if (answer.stopped) {
           // A stopped queue made no request. Preserve the page without counting
           // a failure.
@@ -559,12 +578,16 @@ if (typeof require === 'function') {
           abandonedAt: 0,
         };
         if (next === null) prune(list, state, walk.startedAt);
+        diag(`crawl ${state} page=${pages} rows=${page.rows.length} complete=${complete}`);
         await persist();
         report();
         if (complete) break;
       }
     }
 
+    diag(
+      () => `crawl end states=${states.join(',')} fetched=${fetched} failed=${failed} stopped=${stopped} complete=${states.every((state) => walkedSince(list, state, since))}`
+    );
     return {
       list,
       ids: idsIn(list, states),

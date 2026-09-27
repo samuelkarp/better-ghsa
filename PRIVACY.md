@@ -28,7 +28,7 @@ Web pages cannot read it.
 
 It does not store local data elsewhere or use its own cookies, `localStorage`,
 or IndexedDB.
-Local storage contains six kinds of entry.
+Local storage contains seven kinds of entry.
 
 **Repository settings**, under `allowlist`. This contains the lowercase
 `owner/repo` names you enter in settings. The list starts empty. Advisory data
@@ -69,6 +69,13 @@ suggestions and tracking-state trust decisions.
 **Observed release branches**, under `branches`. The extension records branch
 names beginning `release/` by repository for backport suggestions.
 
+**Diagnostics setting**, under `diagnostics`. This holds whether the `Log
+diagnostics to the browser console` checkbox in settings is checked. It starts
+unchecked. While it is checked, the extension prints advisory identifiers,
+counts, states, and error messages to the browser console on listed
+repositories' advisory pages. Those lines do not carry titles, logins, or
+comment text. The extension does not store or send them.
+
 ### Which repositories this covers
 
 The extension reads advisory data on the advisory pages of repositories listed
@@ -90,7 +97,8 @@ entries accumulate, and nothing ages them out.
 
 `Clear cache` in settings immediately removes advisory reads, list reads,
 refresh progress, observed members, and observed branches. It preserves your
-repository list. Later advisory reads rebuild the cleared data.
+repository list and the diagnostics setting. Later advisory reads rebuild the
+cleared data.
 
 Removing a repository clears its advisory reads, list read, refresh progress,
 and observed branches. Organization members remain while another listed

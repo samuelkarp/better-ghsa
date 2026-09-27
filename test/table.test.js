@@ -2238,6 +2238,62 @@ test('a walk the page left is not joined when the page comes back', async () => 
   }
 });
 
+test('a failed refresh goes unhandled only when nothing joined it, diagnostics on or off', async () => {
+  const env = process.env['BGHSA_DIAG'];
+  const info = console.info;
+  /** @type {unknown[]} */
+  const unhandled = [];
+  /** @type {(reason: unknown) => void} */
+  const onRejection = (reason) => {
+    unhandled.push(reason);
+  };
+  // The runner fails a test on any unhandled rejection; this test counts them.
+  const runner = process.listeners('unhandledRejection');
+  process.removeAllListeners('unhandledRejection');
+  process.on('unhandledRejection', onRejection);
+  console.info = () => {};
+  try {
+    for (const diagnostics of [false, true]) {
+      for (const joined of [false, true]) {
+        if (diagnostics) process.env['BGHSA_DIAG'] = '1';
+        else delete process.env['BGHSA_DIAG'];
+        const ref = { owner: `refresh-rejects-${diagnostics}-${joined}`, repo: 'repo' };
+        const base = `/${ref.owner}/${ref.repo}/security/advisories`;
+        const doc = pageOf(listHtml({ ...ref, state: 'triage', ids: ['GHSA-aaaa-aaaa-aaaa'] }));
+        const storage = fakeStorage();
+        cache.setStorage(storage);
+        const broken = new Error('the clock broke');
+        let asked = 0;
+        // The throttle check reads the clock once; the refresh's first read rejects.
+        const now = () => {
+          asked += 1;
+          if (asked > 1) throw broken;
+          return AT;
+        };
+        const options = { storage, now, href: `https://github.com${base}?state=triage` };
+        await allowing(ref, async () => {
+          assert.ok((await table.render(doc)) !== null, 'the list was not drawn');
+          unhandled.length = 0;
+          table.ensureRefresh(doc, options);
+          if (joined) await assert.rejects(table.refresh(doc, options), broken);
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        });
+        assert.deepStrictEqual(
+          unhandled,
+          joined ? [] : [broken],
+          `diagnostics ${diagnostics ? 'on' : 'off'}, ${joined ? 'joined' : 'not joined'}`
+        );
+      }
+    }
+  } finally {
+    process.removeListener('unhandledRejection', onRejection);
+    for (const listener of runner) process.on('unhandledRejection', listener);
+    console.info = info;
+    if (env === undefined) delete process.env['BGHSA_DIAG'];
+    else process.env['BGHSA_DIAG'] = env;
+  }
+});
+
 test('a walk starts only after the walk of the same lists before it settles', async () => {
   const ref = { owner: 'walk-serial', repo: 'repo' };
   const base = `/${ref.owner}/${ref.repo}/security/advisories`;

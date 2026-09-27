@@ -4,6 +4,7 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
 
 // The manifest orders content scripts; under Node the dependency is named here.
 if (typeof require === 'function') {
+  require('./diag.js');
   require('./storage.js');
   require('./schema.js');
 }
@@ -39,6 +40,8 @@ if (typeof require === 'function') {
  */
 
 (() => {
+  const diagCaught = globalThis.bghsa.diag.caught;
+
   const ADVISORY_PREFIX = 'adv:';
 
   const LIST_PREFIX = 'list:';
@@ -312,7 +315,8 @@ if (typeof require === 'function') {
     if (keys.length === 0) return;
     try {
       await storage.remove(keys);
-    } catch {
+    } catch (error) {
+      diagCaught('cache discard', error);
       // Leave the entry for a later removal attempt.
     }
   }
@@ -332,7 +336,8 @@ if (typeof require === 'function') {
     let held;
     try {
       held = (await storage.get(key))[key];
-    } catch {
+    } catch (error) {
+      diagCaught(`cache getEntry ${String(key).split(':')[0]}`, error);
       return null;
     }
     return entryFrom(held);
@@ -353,7 +358,8 @@ if (typeof require === 'function') {
     let held;
     try {
       held = await storage.get(wanted);
-    } catch {
+    } catch (error) {
+      diagCaught(`cache getEntries n=${wanted.length}`, error);
       return found;
     }
     for (const key of wanted) {
@@ -386,7 +392,8 @@ if (typeof require === 'function') {
     };
     try {
       await storage.set({ [key]: entry });
-    } catch {
+    } catch (error) {
+      diagCaught(`cache putEntry ${String(key).split(':')[0]}`, error);
       return null;
     }
     return entry;
@@ -456,7 +463,8 @@ if (typeof require === 'function') {
     let held;
     try {
       held = (await storage.get(key))[key];
-    } catch {
+    } catch (error) {
+      diagCaught('cache noteMissing get', error);
       return { misses: 0, evicted: false };
     }
     const entry = entryFrom(held);
@@ -468,7 +476,8 @@ if (typeof require === 'function') {
     }
     try {
       await storage.set({ [key]: { ...entry, misses } });
-    } catch {
+    } catch (error) {
+      diagCaught('cache noteMissing set', error);
       // A failed count update delays eviction until a later pass.
       return { misses, evicted: false };
     }
@@ -541,14 +550,16 @@ if (typeof require === 'function') {
     let all;
     try {
       all = await storage.get(null);
-    } catch {
+    } catch (error) {
+      diagCaught('cache clear get', error);
       return 0;
     }
     const keys = Object.keys(all).filter(isCacheKey);
     if (keys.length === 0) return 0;
     try {
       await storage.remove(keys);
-    } catch {
+    } catch (error) {
+      diagCaught('cache clear remove', error);
       return 0;
     }
     return keys.length;

@@ -4,6 +4,7 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
 
 // The manifest orders content scripts; under Node the dependencies are named here.
 if (typeof require === 'function') {
+  require('./common/diag.js');
   require('./common/allowlist.js');
   require('./common/settings-control.js');
   require('./common/pr-layout.js');
@@ -102,6 +103,8 @@ if (typeof require === 'function') {
     if (started.has(doc)) return false;
     started.add(doc);
     report();
+    // The diagnostics setting is read on a listed repository only.
+    void globalThis.bghsa.diag.load();
     for (const surface of surfaces()) {
       try {
         surface.start?.();
@@ -172,13 +175,15 @@ if (typeof require === 'function') {
 
   /**
    * Load the allowlist before starting surfaces, then reconsider the document
-   * after navigation and allowlist changes.
+   * after navigation and allowlist changes. A change to the diagnostics
+   * setting applies to the open page.
    *
    * @returns {void}
    */
   function start() {
     const allowlist = globalThis.bghsa.allowlist;
     watch();
+    globalThis.bghsa.diag.watch();
     allowlist.watch();
     allowlist.subscribe(() => {
       reconsider(globalThis.document, true);

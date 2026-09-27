@@ -19,6 +19,7 @@ const REPO = '/git-utensils/Spoon-Knife';
 
 const ALLOWED = 'git-utensils/spoon-knife';
 const ALLOWLIST_KEY = 'allowlist';
+const DIAG_KEY = 'diagnostics';
 
 const PULLS = `${REPO}/pulls`;
 
@@ -1030,4 +1031,40 @@ test('private-fork diff width follows navigation and the parent allowlist', asyn
   setAllowlist(sandbox, []);
   await settle();
   assert.strictEqual(hasStyle(), false, 'removing the parent left the override active');
+});
+
+test('a change to the diagnostics setting reaches a page already open', async () => {
+  const sandbox = contentScriptScope({
+    pathname: ADVISORY_LIST,
+    frame: fixture('list-page-triage.html'),
+  });
+  sandbox.stored[DIAG_KEY] = true;
+  /** @type {string[]} */
+  const lines = [];
+  sandbox.console.info = (/** @type {unknown[]} */ ...args) => {
+    const line = args.map(String).join(' ');
+    if (line.startsWith('[better-ghsa] diag ')) lines.push(line);
+  };
+  assert.deepStrictEqual(loadScripts(sandbox), []);
+  await settle();
+  assert.ok(lines.length > 0, 'a page started with the setting on printed no diagnostic line');
+
+  /**
+   * @param {boolean} on
+   * @returns {void}
+   */
+  const announce = (on) => {
+    sandbox.stored[DIAG_KEY] = on;
+    for (const listener of [...sandbox.changeListeners]) {
+      listener({ [DIAG_KEY]: { newValue: on } }, 'local');
+    }
+  };
+  announce(false);
+  lines.length = 0;
+  sandbox.bghsa.diag.log('queue add given=1');
+  assert.deepStrictEqual(lines, [], 'a line printed after the setting went off');
+
+  announce(true);
+  sandbox.bghsa.diag.log('queue add given=2');
+  assert.deepStrictEqual(lines, ['[better-ghsa] diag queue add given=2']);
 });

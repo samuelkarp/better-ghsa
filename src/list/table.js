@@ -4,6 +4,7 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
 
 // The manifest orders content scripts; under Node the dependencies are named here.
 if (typeof require === 'function') {
+  require('../common/diag.js');
   require('../common/dom.js');
   require('../common/text.js');
   require('../common/trust.js');
@@ -153,6 +154,10 @@ if (typeof require === 'function') {
  */
 
 (() => {
+  const diag = globalThis.bghsa.diag.log;
+  const diagCaught = globalThis.bghsa.diag.caught;
+  const diagWatch = globalThis.bghsa.diag.rejection;
+
   const ROOT_ID = 'bghsa-list';
 
   const STYLE_ID = 'bghsa-list-style';
@@ -1231,7 +1236,8 @@ if (typeof require === 'function') {
       let filters = null;
       try {
         filters = surface.controls(doc);
-      } catch {
+      } catch (error) {
+        diagCaught('table buildTable surface.controls', error);
         // Continue building the bar if a surface fails.
       }
       if (filters !== null) bar.append(filters);
@@ -1250,7 +1256,8 @@ if (typeof require === 'function') {
       let node = null;
       try {
         node = surface.control(doc);
-      } catch {
+      } catch (error) {
+        diagCaught('table buildTable surface.control', error);
         // Continue building the bar if a surface fails.
       }
       if (node !== null) {
@@ -1400,7 +1407,8 @@ if (typeof require === 'function') {
     for (const surface of [...surfaces]) {
       try {
         surface.show(doc, mode);
-      } catch {
+      } catch (error) {
+        diagCaught(`table applyVisibility surface.show mode=${mode}`, error);
         // Continue switching the remaining surfaces if one fails.
       }
     }
@@ -1585,21 +1593,30 @@ if (typeof require === 'function') {
     return async function pass() {
       visit(doc, globalThis.location?.pathname);
       if (running) {
+        diag(`render pass queued-again mode=${viewMode(doc)}`);
         again = true;
         return;
       }
       // Recheck the allowlist: GitHub can change repositories in this document
       // without a navigation event.
-      if (!globalThis.bghsa.content.enabled()) return;
+      if (!globalThis.bghsa.content.enabled()) {
+        diag(`render pass skipped not-enabled mode=${viewMode(doc)}`);
+        return;
+      }
+      diag(`render pass start mode=${viewMode(doc)}`);
       running = true;
       try {
         do {
           again = false;
           await render(doc);
         } while (again);
+      } catch (error) {
+        diagCaught('render pass render', error);
+        throw error;
       } finally {
         running = false;
       }
+      diag(`render pass end mode=${viewMode(doc)} root=${doc.getElementById(ROOT_ID) !== null}`);
       ensureRefresh(doc, options);
     };
   }
@@ -1673,7 +1690,8 @@ if (typeof require === 'function') {
         for (const listener of [...listening]) {
           try {
             listener(ghsaId, entry);
-          } catch {
+          } catch (error) {
+            diagCaught(`table queue listener ${ghsaId}`, error);
             // Continue notifying the remaining listeners if one fails.
           }
         }
@@ -1811,6 +1829,7 @@ if (typeof require === 'function') {
     const was = areas.get(doc);
     areas.set(doc, area);
     if (was === undefined || was === area) return;
+    diag(`visit area-changed was=${was === null ? 'outside' : 'repo'} now=${area === null ? 'outside' : 'repo'}`);
     loads.delete(doc);
     refreshed.delete(doc);
     depart(doc, area);
@@ -1880,6 +1899,9 @@ if (typeof require === 'function') {
    */
   const walks = new WeakMap();
 
+  /** Diagnostic walk counter. */
+  let walkSeq = 0;
+
   /**
    * The last walk of each repository, by repository key, settled either way.
    * Each walk saves its own copy of the repository's lists, so a walk starts
@@ -1914,7 +1936,14 @@ if (typeof require === 'function') {
     const key = refKey(ref);
     const since = loadedAt(doc, ref, options.now?.() ?? globalThis.bghsa.cache.now());
     const held = walks.get(doc);
-    if (held !== undefined && held.key === key && !held.stopped) return held;
+    if (held !== undefined && held.key === key && !held.stopped) {
+      diag(`walk begin joined id=${/** @type {any} */ (held).diagId} mode=${viewMode(doc)} since=${since}`);
+      return held;
+    }
+    const diagId = ++walkSeq;
+    diag(
+      `walk begin started id=${diagId} mode=${viewMode(doc)} since=${since} replaced=${held === undefined ? 'none' : held.stopped ? 'stopped' : 'other-repo'} after-previous=${walked.has(key)}`
+    );
     const crawl = globalThis.bghsa.crawl;
     const { queue } = queueFor(ref, options);
     const pass = passFor(doc, options);
@@ -1978,6 +2007,10 @@ if (typeof require === 'function') {
       if (held.settled) return;
       held.settled = true;
       const remaining = pendingOf(group);
+      diag(
+        () =>
+          `walk settle id=${diagId} group=${group} remaining=${remaining.length} failures=${failures[group].length} forced=${queue.forcing().length}`
+      );
       held.end({
         crawled: resultOf(),
         read: {
@@ -1997,7 +2030,8 @@ if (typeof require === 'function') {
       for (const each of [...watchers]) {
         try {
           each.onStep?.(step);
-        } catch {
+        } catch (error) {
+          diagCaught('walk notify onStep', error);
           // Continue notifying the remaining watchers if one fails.
         }
       }
@@ -2008,10 +2042,14 @@ if (typeof require === 'function') {
      * @returns {void} Hands the lists to the watchers.
      */
     const tell = (seen) => {
+      diag(
+        () => `walk tell id=${diagId} watchers=${watchers.size} open=${crawl.idsIn(seen, GROUPS.open).length} done=${crawl.idsIn(seen, GROUPS.done).length}`
+      );
       for (const each of [...watchers]) {
         try {
           each.onPage?.(seen);
-        } catch {
+        } catch (error) {
+          diagCaught('walk tell onPage', error);
           // Continue notifying the remaining watchers if one fails.
         }
       }
@@ -2049,12 +2087,18 @@ if (typeof require === 'function') {
       page: async (url) => {
         const step = next();
         if (fresh.stopped || step === null || !('walk' in step) || step.walk !== walking) {
+          diag(
+            () => `walk page set-aside id=${diagId} mode=${viewMode(doc)} walking=${walking} next=${JSON.stringify(step)} stopped=${fresh.stopped}`
+          );
           yielded = true;
           return { body: null, status: null, reason: 'Other work went first.', stopped: true };
         }
         notify(step);
         const answer = await queue.page(url);
-        if (answer.stopped) halted = true;
+        if (answer.stopped) {
+          diag(`walk page halted id=${diagId} (queue stopped)`);
+          halted = true;
+        }
         return answer;
       },
     };
@@ -2063,10 +2107,17 @@ if (typeof require === 'function') {
     const watchers = new Set();
     const before = walked.get(key) ?? Promise.resolve();
     const started = before.then(async () => {
+      diag(() => `walk run id=${diagId} mode=${viewMode(doc)} asked=${[...fresh.asked].join(',')}`);
       try {
         for (;;) {
-          if (fresh.stopped) break;
+          if (fresh.stopped) {
+            diag(`walk stop-flag id=${diagId}`);
+            break;
+          }
           const step = next();
+          diag(
+            () => `walk step id=${diagId} mode=${viewMode(doc)} step=${JSON.stringify(step)} asked=${[...fresh.asked].join(',')} finished=${[...finished].join(',')} queued=${[...queued].join(',')}`
+          );
           if (step === null) break;
           if ('walk' in step) {
             const state = /** @type {string} */ (
@@ -2089,7 +2140,7 @@ if (typeof require === 'function') {
               since,
               onPage: (seen) => {
                 // Redraw the table to include advisories discovered by this page.
-                void pass();
+                void diagWatch('walk onPage pass', pass());
                 list = seen;
                 known = true;
                 told = true;
@@ -2099,7 +2150,8 @@ if (typeof require === 'function') {
                 for (const each of [...watchers]) {
                   try {
                     each.onFailure?.(failing, url, reason);
-                  } catch {
+                  } catch (error) {
+                    diagCaught('walk onFailure watcher', error);
                     // Continue notifying the remaining watchers if one fails.
                   }
                 }
@@ -2109,6 +2161,9 @@ if (typeof require === 'function') {
             known = true;
             fetched += result.fetched;
             failed += result.failed;
+            diag(
+              `walk list-done id=${diagId} state=${state} seeded=${seed} halted=${halted} yielded=${yielded} told=${told} fetched=${result.fetched} failed=${result.failed}`
+            );
             if (halted) break;
             if (yielded) continue;
             finished.add(state);
@@ -2119,19 +2174,30 @@ if (typeof require === 'function') {
           const group = step.read;
           if (!queued.has(group)) {
             queued.add(group);
-            await queue.add(crawl.idsIn(list, GROUPS[group]));
+            const ids = crawl.idsIn(list, GROUPS[group]);
+            diag(`walk queue-add id=${diagId} group=${group} count=${ids.length}`);
+            await queue.add(ids);
+            diag(() => `walk queue-added id=${diagId} group=${group} pendingOfGroup=${pendingOf(group).length} pendingAll=${queue.progress().pending.length}`);
             continue;
           }
           if (pendingOf(group).length > 0) notify(step);
+          diag(() => `walk readNext id=${diagId} group=${group} pendingOfGroup=${pendingOf(group).length}`);
           const summary = await queue.readNext((ghsaId) => groupOf(ghsaId) === group);
           counts = { fetched: summary.fetched, skipped: summary.skipped };
           for (const ghsaId of summary.failed) {
             if (!failures[group].includes(ghsaId)) failures[group].push(ghsaId);
           }
-          if (queue.isStopped()) break;
+          if (queue.isStopped()) {
+            diag(`walk queue-stopped id=${diagId} group=${group}`);
+            break;
+          }
           if (pendingOf(group).length === 0) settle(group);
         }
+        diag(`walk end id=${diagId} mode=${viewMode(doc)} fetched=${fetched} failed=${failed}`);
         return resultOf();
+      } catch (error) {
+        diagCaught(`walk loop id=${diagId}`, error);
+        throw error;
       } finally {
         // Nothing is awaited between picking no work and here. A caller that
         // asks later starts a walk of its own.
@@ -2158,6 +2224,7 @@ if (typeof require === 'function') {
        *   advisories again once an earlier ask's reads have ended.
        */
       ask: (group) => {
+        diag(`walk ask id=${diagId} group=${group} wasSettled=${reads[group].settled} mode=${viewMode(doc)}`);
         fresh.asked.add(group);
         if (reads[group].settled) {
           reads[group] = readsOf();
@@ -2187,15 +2254,20 @@ if (typeof require === 'function') {
        */
       join: (watcher) => {
         watchers.add(watcher);
+        diag(
+          () => `walk join id=${diagId} known=${known} watchers=${watchers.size} done=${crawl.idsIn(list, GROUPS.done).length}`
+        );
         if (!known) return;
         try {
           watcher.onPage?.(list);
-        } catch {
+        } catch (error) {
+          diagCaught('walk join onPage', error);
           // A failing watcher still follows the rest of the walk.
         }
       },
       started,
       watchers,
+      diagId,
     };
     walks.set(doc, fresh);
     return fresh;
@@ -2227,6 +2299,7 @@ if (typeof require === 'function') {
    *   summary of those reads.
    */
   function walk(doc, parsed, options = {}, watcher = {}, group = undefined) {
+    diag(`walk() called group=${group} mode=${viewMode(doc)}`);
     const held = begin(doc, parsed, options);
     held.join(watcher);
     const settled =
@@ -2234,6 +2307,7 @@ if (typeof require === 'function') {
         ? held.started
         : held.ask(group).then(({ crawled, read }) => ({ ...crawled, read }));
     return settled.finally(() => {
+      diag(`walk() settled group=${group} id=${/** @type {any} */ (held).diagId} mode=${viewMode(doc)}`);
       held.watchers.delete(watcher);
     });
   }
@@ -2256,9 +2330,13 @@ if (typeof require === 'function') {
     const ref = { owner: parsed.owner, repo: parsed.repo };
     const key = refKey(ref);
     const held = running.get(doc);
-    if (held !== undefined && held.key === key) return held.started;
+    if (held !== undefined && held.key === key) {
+      diag(`refresh joined mode=${viewMode(doc)}`);
+      return held.started;
+    }
+    diag(`refresh started mode=${viewMode(doc)}`);
     const { queue } = queueFor(ref, options);
-    const started = fill(doc, parsed, options).finally(() => {
+    const started = diagWatch('refresh', fill(doc, parsed, options)).finally(() => {
       // A newer refresh may have replaced this document's entry.
       if (running.get(doc)?.started === started) running.delete(doc);
     });
@@ -2306,18 +2384,28 @@ if (typeof require === 'function') {
     let summary;
     try {
       setProgress(doc, { phase: 'walking', left: 0 });
+      diag('fill load');
       await queue.load();
       const walking = begin(doc, parsed, options);
       held = walking;
       work = () => walking.progress('open');
       walking.watchers.add(watcher);
+      diag(`fill ask open id=${/** @type {any} */ (walking).diagId}`);
       const { read } = await walking.ask('open');
+      diag(
+        `fill open settled remaining=${read.remaining.length} failed=${read.failed.length} updates=${updates.length}`
+      );
       setProgress(doc, { phase: 'walking', left: 0 });
       await Promise.all(updates);
       // Reapply sorting and filters after all row updates finish.
       await pass();
+      diag('fill await walk');
       const crawled = await walking.started;
+      diag(`fill walk ended complete=${crawled.complete}`);
       summary = { crawled, read };
+    } catch (error) {
+      diagCaught('fill', error);
+      throw error;
     } finally {
       held?.watchers.delete(watcher);
       listening.delete(listener);
@@ -2344,6 +2432,7 @@ if (typeof require === 'function') {
    * @returns {void}
    */
   function leave(doc, held) {
+    diag('leave refresh (queue stop)');
     void held.queue.stop();
     if (running.get(doc) === held) running.delete(doc);
     refreshed.delete(doc);
@@ -2363,7 +2452,8 @@ if (typeof require === 'function') {
       if (surface.left === undefined) continue;
       try {
         surface.left(doc, key);
-      } catch {
+      } catch (error) {
+        diagCaught('table depart surface.left', error);
         // Continue stopping the remaining surfaces if one fails.
       }
     }
@@ -2371,7 +2461,10 @@ if (typeof require === 'function') {
     if (left !== undefined && left.key !== key) leave(doc, left);
     const walking = walks.get(doc);
     // Leaving stopped the walk's queue, so a return starts or resumes a walk.
-    if (walking !== undefined && walking.key !== key) walking.stopped = true;
+    if (walking !== undefined && walking.key !== key) {
+      diag(`depart walk-stopped id=${/** @type {any} */ (walking).diagId} toRepo=${key !== null}`);
+      walking.stopped = true;
+    }
   }
 
   /**
@@ -2393,13 +2486,26 @@ if (typeof require === 'function') {
         : refKey({ owner: parsed.owner, repo: parsed.repo });
     // Notify each surface on every pass so it can stop work for other repositories.
     depart(doc, key);
-    if (parsed === null || key === null) return;
-    if (doc.getElementById(ROOT_ID) === null) return;
-    if (running.get(doc)?.key === key) return;
+    if (parsed === null || key === null) {
+      diag('ensureRefresh early: no parsed list');
+      return;
+    }
+    if (doc.getElementById(ROOT_ID) === null) {
+      diag('ensureRefresh early: no root');
+      return;
+    }
+    if (running.get(doc)?.key === key) {
+      diag('ensureRefresh early: refresh running');
+      return;
+    }
     const at = options.now?.() ?? globalThis.bghsa.cache.now();
     const held = refreshed.get(doc);
-    if (held?.key === key && at - held.at < globalThis.bghsa.cache.STALE_MS) return;
+    if (held?.key === key && at - held.at < globalThis.bghsa.cache.STALE_MS) {
+      diag(`ensureRefresh early: refreshed ${at - held.at}ms ago`);
+      return;
+    }
     refreshed.set(doc, { key, at });
+    diag(`ensureRefresh refresh mode=${viewMode(doc)}`);
     void refresh(doc, { ...options, parsed });
   }
 
@@ -2415,6 +2521,10 @@ if (typeof require === 'function') {
   function refreshShown(doc) {
     if (!globalThis.bghsa.content.enabled()) return;
     const parsed = pageOf(doc);
+    diag(
+      () =>
+        `refreshShown mode=${viewMode(doc)} parsed=${parsed !== null && parsed.owner !== null && parsed.repo !== null} root=${doc.getElementById(ROOT_ID) !== null}`
+    );
     if (parsed === null || parsed.owner === null || parsed.repo === null) return;
     if (doc.getElementById(ROOT_ID) === null) return;
     void refresh(doc, { ...settings.get(doc), parsed });
@@ -2442,7 +2552,8 @@ if (typeof require === 'function') {
   function start() {
     const doc = globalThis.document;
     const pass = passFor(doc);
-    void pass();
+    diag('table start');
+    void diagWatch('table start pass', pass());
     const observer = observe(doc, pass);
     attached.set(doc, observer);
     return observer;

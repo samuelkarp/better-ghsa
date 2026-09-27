@@ -547,6 +547,12 @@ The allowlist starts empty and is edited in settings. Apply allowlist changes
 to open pages without reloading. Every advisory list and detail page has one
 settings control, including repositories outside the allowlist.
 
+Settings carry a checkbox, off by default, that prints trace lines of the list
+walks, advisory reads, reloads, and passed-over errors to the browser console
+on listed repositories. Apply its changes to open pages without reloading. The
+lines carry advisory identifiers, counts, states, and error messages, and
+never titles, logins, or comment text.
+
 On a GHSA private fork's pull request diff page (`/pull/{number}/changes` or
 `/pull/{number}/files`), the extension removes the outer width limit and extra
 horizontal padding. The diff viewer retains its own padding. This layout change

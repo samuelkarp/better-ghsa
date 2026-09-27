@@ -4,6 +4,7 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
 
 // The manifest orders content scripts; under Node the dependencies are named here.
 if (typeof require === 'function') {
+  require('../common/diag.js');
   require('../common/dom.js');
   require('../common/text.js');
   require('../common/schema.js');
@@ -71,6 +72,8 @@ if (typeof require === 'function') {
  */
 
 (() => {
+  const diag = globalThis.bghsa.diag.log;
+  const diagWatch = globalThis.bghsa.diag.rejection;
 
   const ROOT_ID = 'bghsa-done';
 
@@ -147,6 +150,9 @@ if (typeof require === 'function') {
    * >}
    */
   const running = new WeakMap();
+
+  /** Diagnostic collection counter. */
+  let collectSeq = 0;
 
   /**
    * @param {Document} doc
@@ -462,19 +468,32 @@ if (typeof require === 'function') {
     const ids = shownRowsOf(doc)
       .map((row) => row.ghsaId)
       .filter((ghsaId) => !taken.has(ghsaId));
+    diag(() => `done reload pressed queued=${ids.join(',') || 'none'} taken=${taken.size}`);
     if (ids.length === 0) return [];
     for (const ghsaId of ids) taken.add(ghsaId);
     await queue.reread(ids);
     const collecting = running.get(doc);
     if (collecting === undefined || collecting.key !== key) {
+      diag('done reload collect start');
       void collect(doc, options);
       return ids;
     }
+    diag('done reload collect running');
     // A collection whose reads have ended leaves the forced reads to the next one.
     void collecting.started.finally(() => {
-      if (running.get(doc) !== undefined) return;
-      if (!queue.forcing().some((ghsaId) => ids.includes(ghsaId))) return;
-      if (!names(doc, ref)) return;
+      if (running.get(doc) !== undefined) {
+        diag('done reload after-collection another running');
+        return;
+      }
+      if (!queue.forcing().some((ghsaId) => ids.includes(ghsaId))) {
+        diag('done reload after-collection forced served');
+        return;
+      }
+      if (!names(doc, ref)) {
+        diag('done reload after-collection other-repo');
+        return;
+      }
+      diag(() => `done reload after-collection collect start forced=${queue.forcing().join(',')}`);
       void collect(doc, options);
     });
     return ids;
@@ -935,9 +954,15 @@ if (typeof require === 'function') {
    */
   function drawStatus(doc) {
     const header = doc.querySelector(`#${ROOT_ID} .bghsa-done-header`);
-    if (header === null) return;
+    if (header === null) {
+      diag('done drawStatus no-header');
+      return;
+    }
     const shown = header.querySelector('span.Label');
     const wanted = buildStatus(doc, current(doc));
+    diag(
+      () => `done drawStatus collecting=${running.get(doc) !== undefined} progress=${JSON.stringify(globalThis.bghsa.table.walkProgress(doc, 'done'))} chip=${JSON.stringify(wanted === null ? null : wanted.textContent)} had=${JSON.stringify(shown === null ? null : shown.textContent)}`
+    );
     if (shown === null) {
       if (wanted !== null) header.append(wanted);
       return;
@@ -963,9 +988,15 @@ if (typeof require === 'function') {
       if (state.corpus === null) empty = statusTextOf(state) ?? EMPTY_TEXT;
       else if (filtering(doc)) empty = globalThis.bghsa.table.EMPTY_TEXT;
       else if (state.reading) empty = LOADING_TEXT;
+      diag(
+        () => `done buildBody empty text=${JSON.stringify(empty)} corpus=${state.corpus !== null} reading=${state.reading} filtering=${filtering(doc)}`
+      );
       list.append(element(doc, 'li', 'Box-row bghsa-done-empty', empty));
       return list;
     }
+    diag(
+      () => `done buildBody rows=${rows.length} read=${rows.filter((row) => row.read).length} withReason=${rows.filter((row) => row.closureReason !== null).length} reading=${state.reading}`
+    );
     for (const row of rows) list.append(buildRow(doc, row, state));
     return list;
   }
@@ -1056,6 +1087,7 @@ if (typeof require === 'function') {
   function toggle(doc) {
     const table = globalThis.bghsa.table;
     const wanted = table.viewMode(doc) === MODE ? table.VIEW_TABLE : MODE;
+    diag(`done toggle to=${wanted}`);
     table.setViewMode(doc, wanted);
     table.applyVisibility(doc);
     if (wanted === MODE) void collect(doc);
@@ -1074,6 +1106,7 @@ if (typeof require === 'function') {
     table.setViewMode(doc, MODE);
     drawControls(doc);
     table.applyVisibility(doc);
+    diag('done showUnreasoned');
     void collect(doc);
   }
 
@@ -1117,17 +1150,26 @@ if (typeof require === 'function') {
     const key = table.refKey(ref);
     const already = running.get(doc);
     if (already !== undefined && already.key === key) {
+      diag('done collect joined');
       return /** @type {Promise<import('./corpus.js').Corpus | null>} */ (already.started);
     }
     const { queue, listening } = table.queueFor(ref, options);
+    const diagId = ++collectSeq;
+    diag(`done collect start id=${diagId} mode=${table.viewMode(doc)}`);
 
     /** @type {(ghsaId: string, entry: import('../common/cache.js').CacheEntry) => void} */
     const listener = (ghsaId, entry) => {
       // Update each member as its detail read arrives.
-      if (!names(doc, ref)) return;
+      if (!names(doc, ref)) {
+        diag(`done listener ${ghsaId} other-repo`);
+        return;
+      }
       const corpus = stateOf(doc).corpus;
       const member = corpus === null ? null : memberOf(corpus, ghsaId);
       const advisory = member === null ? null : globalThis.bghsa.record.advisoryFrom(entry.record);
+      diag(
+        `done listener id=${diagId} ${ghsaId} corpus=${corpus !== null} member=${member !== null} advisory=${advisory !== null}`
+      );
       if (corpus === null || member === null || advisory === null) {
         // Shared queue progress can change before this corpus has a matching row.
         drawStatus(doc);
@@ -1154,12 +1196,26 @@ if (typeof require === 'function') {
       draw(doc);
     };
 
-    const started = globalThis.bghsa.corpus
+    const gathered = globalThis.bghsa.corpus
       .collect({
         ref,
         queue,
-        walk: (watcher) =>
-          table.walk(doc, parsed, options, { ...watcher, onStep: () => drawStatus(doc) }, 'done'),
+        walk: (watcher) => {
+          diag(`done collect walk id=${diagId} mode=${table.viewMode(doc)}`);
+          return table.walk(
+            doc,
+            parsed,
+            options,
+            {
+              ...watcher,
+              onStep: (step) => {
+                diag(() => `done onStep id=${diagId} step=${JSON.stringify(step)}`);
+                drawStatus(doc);
+              },
+            },
+            'done'
+          );
+        },
         parsed,
         storage: options.storage,
         now: options.now,
@@ -1167,6 +1223,9 @@ if (typeof require === 'function') {
           noteFailure(`${FAILED_PREFIX} ${url}`);
         },
         onPage: (corpus) => {
+          diag(
+            () => `done onPage id=${diagId} members=${corpus.members.length} read=${corpus.members.filter((member) => member.advisory !== null).length} unread=${corpus.unread.length} sameRepo=${names(doc, ref)}`
+          );
           // Ignore results for a repository the document has left.
           if (!names(doc, ref)) return;
           setState(doc, { corpus });
@@ -1174,6 +1233,9 @@ if (typeof require === 'function') {
         },
       })
       .then((collected) => {
+        diag(
+          () => `done collect end id=${diagId} members=${collected.corpus.members.length} read=${collected.corpus.members.filter((member) => member.advisory !== null).length} complete=${collected.corpus.complete} readFailed=${collected.read.failed.length} readRemaining=${collected.read.remaining.length} readComplete=${collected.read.complete}`
+        );
         if (names(doc, ref)) {
           setState(doc, { corpus: collected.corpus });
           for (const ghsaId of collected.read.failed) {
@@ -1181,8 +1243,13 @@ if (typeof require === 'function') {
           }
         }
         return collected.corpus;
-      })
+      });
+    const started = diagWatch(`done collect id=${diagId}`, gathered)
       .finally(() => {
+        diag(
+          () =>
+            `done collect finally id=${diagId} current=${running.get(doc)?.started === started} forced=${queue.forcing().join(',') || 'none'}`
+        );
         listening.delete(listener);
         // Clear only this collection's entry; another repository's collection may
         // have replaced it while the request was pending.
@@ -1212,6 +1279,7 @@ if (typeof require === 'function') {
   function left(doc, key) {
     const collecting = running.get(doc);
     if (collecting === undefined || collecting.key === key) return;
+    diag(`done left toRepo=${key !== null} (queue stop)`);
     void collecting.queue.stop();
     running.delete(doc);
     setState(doc, { reading: false });

@@ -3,9 +3,10 @@
  * They run as classic scripts in the same isolated world.
  */
 interface BghsaNamespace {
+  storage: typeof import('../src/common/storage.js');
+  diag: typeof import('../src/common/diag.js');
   dom: typeof import('../src/common/dom.js');
   text: typeof import('../src/common/text.js');
-  storage: typeof import('../src/common/storage.js');
   allowlist: typeof import('../src/common/allowlist.js');
   settingsControl: typeof import('../src/common/settings-control.js');
   trust: typeof import('../src/common/trust.js');

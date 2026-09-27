@@ -9,6 +9,7 @@ const { parseHTML } = require('linkedom');
 const allowlist = require('../src/common/allowlist.js');
 const branches = require('../src/common/branches.js');
 const cache = require('../src/common/cache.js');
+const diag = require('../src/common/diag.js');
 const members = require('../src/common/members.js');
 const settings = require('../src/settings/settings.js');
 
@@ -151,6 +152,7 @@ async function pressClear(doc, window) {
 test.afterEach(() => {
   allowlist.setStorage(null);
   cache.setStorage(null);
+  diag.setStorage(null);
 });
 
 test('the manifest declares the settings page and no background script', () => {
@@ -398,4 +400,31 @@ test('the page loads every file its script reaches, in an order that works', () 
     }
     already.push(file);
   }
+});
+
+test('the diagnostics checkbox shows the setting and stores a change to it', async () => {
+  const store = memory([], { [diag.STORAGE_KEY]: true });
+  allowlist.setStorage(store);
+  diag.setStorage(store);
+  const { window, document } = page();
+  await settings.start(document);
+
+  const box = /** @type {HTMLInputElement | null} */ (document.getElementById('diag-input'));
+  assert.ok(box !== null, 'the page carries no diagnostics checkbox');
+  assert.strictEqual(box.getAttribute('type'), 'checkbox');
+  const label = box.closest('label');
+  assert.strictEqual(
+    (label?.textContent ?? '').replace(/\s+/g, ' ').trim(),
+    'Log diagnostics to the browser console'
+  );
+  assert.strictEqual(box.checked, true, 'the checkbox hides a setting that is on');
+
+  box.checked = false;
+  box.dispatchEvent(new window.Event('change', { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.strictEqual(store.entries[diag.STORAGE_KEY], false, 'unchecking stored nothing');
+
+  // Another settings tab turns it back on.
+  await diag.save(true);
+  assert.strictEqual(box.checked, true, 'a change made elsewhere left the checkbox behind');
 });

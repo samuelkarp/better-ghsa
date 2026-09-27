@@ -120,6 +120,18 @@ An entry is `owner/repo`, for example `containerd/containerd`. Case does not
 matter. Removing a repository stops the extension on its pages, including pages
 already open.
 
+## Logging diagnostics
+
+The settings page carries a `Log diagnostics to the browser console` checkbox,
+off on a fresh install. While it is checked, the extension prints lines
+beginning `[better-ghsa] diag` to the browser console of each tab showing a
+listed repository's advisory pages. The lines trace the list walks, the
+advisory reads, the cached-advisory reloads, and each error the extension
+passes over. A change to the checkbox applies to open tabs without a reload.
+The lines carry advisory identifiers, counts, states, and error messages, and
+no titles, logins, or comment text. They stay in the browser console. The
+extension does not send them anywhere.
+
 ## What it can reach
 
 - On unlisted repositories, it shows only the settings button on advisory

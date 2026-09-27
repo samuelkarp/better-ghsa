@@ -38,9 +38,17 @@
         <button id="clear-button" class="button" type="button">Clear cache</button>
         <p id="clear-status" class="status" role="status" hidden></p>
       </div>
+
+      <div class="diag">
+        <label class="diag-label">
+          <input id="diag-input" class="diag-input" type="checkbox" />
+          <span id="diag-text">Log diagnostics to the browser console</span>
+        </label>
+      </div>
     </main>
 
     <script src="../common/storage.js"></script>
+    <script src="../common/diag.js"></script>
     <script src="../common/allowlist.js"></script>
     <script src="../common/schema.js"></script>
     <script src="../common/members.js"></script>

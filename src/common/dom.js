@@ -2,7 +2,12 @@
 
 globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
 
+// The manifest orders content scripts; under Node the dependency is named here.
+if (typeof require === 'function') require('./diag.js');
+
 (() => {
+  const diagWatch = globalThis.bghsa.diag.rejection;
+
   /**
    * @param {Document} doc
    * @param {string} tag
@@ -78,7 +83,7 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
       scheduled = true;
       setTimeout(() => {
         scheduled = false;
-        void surface.pass();
+        void diagWatch('dom watch pass', surface.pass());
       }, RENDER_DELAY_MS);
     });
     observer.observe(target, { childList: true, subtree: true });

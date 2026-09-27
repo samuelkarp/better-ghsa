@@ -4,6 +4,7 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
 
 // The manifest orders content scripts; under Node the dependencies are named here.
 if (typeof require === 'function') {
+  require('./diag.js');
   require('./cache.js');
   require('./schema.js');
   require('./parse-detail.js');
@@ -68,6 +69,9 @@ if (typeof require === 'function') {
  */
 
 (() => {
+  const diag = globalThis.bghsa.diag.log;
+  const diagCaught = globalThis.bghsa.diag.caught;
+
   /**
    * List and advisory requests share this interval within a queue.
    */
@@ -330,7 +334,8 @@ if (typeof require === 'function') {
       if (options.onFailure === undefined) return;
       try {
         options.onFailure(ghsaId, reason);
-      } catch {
+      } catch (error) {
+        diagCaught(`queue onFailure listener ${ghsaId}`, error);
         // Continue processing other advisories after a listener failure.
       }
     }
@@ -345,6 +350,7 @@ if (typeof require === 'function') {
       try {
         options.onEntry(ghsaId, entry);
       } catch (error) {
+        diagCaught(`queue onEntry listener ${ghsaId}`, error);
         fail(ghsaId, error);
       }
     }
@@ -363,13 +369,21 @@ if (typeof require === 'function') {
      */
     function load() {
       return serially(async () => {
+        diag(`queue load start stopped=${stopped} memPending=${pending.length} inFlight=${inFlight}`);
         stopped = false;
         const held = progressFrom(
           await globalThis.bghsa.cache.getProgress(ref, { storage, at: clock() })
         );
-        if (held === null) return null;
+        if (held === null) {
+          diag(`queue load none-stored memPending=${pending.length}`);
+          return null;
+        }
         const stored = held.inFlight === null ? held.pending : [held.inFlight, ...held.pending];
+        const memPending = pending.length;
         pending = idsOf([...pending, ...stored]);
+        diag(
+          `queue load memPending=${memPending} storedPending=${held.pending.length} storedInFlight=${held.inFlight} merged=${pending.length} storedDone=${held.done.length} storedFailed=${held.failed.length}`
+        );
         inFlight = null;
         done = [...held.done];
         failed = [...held.failed];
@@ -388,6 +402,9 @@ if (typeof require === 'function') {
       const wanted = idsOf([...pending, ...ghsaIds]).filter((ghsaId) => ghsaId !== inFlight);
       const entries = await globalThis.bghsa.cache.getAdvisories(ref, wanted, { storage, at });
       const { order, fresh } = plan(wanted, entries, at, forced);
+      diag(
+        `queue add given=${ghsaIds.length} wanted=${wanted.length} cached=${entries.size} pending=${order.length} fresh=${fresh.length} inFlight=${inFlight}`
+      );
       pending = order;
       for (const ghsaId of fresh) {
         if (done.includes(ghsaId)) continue;
@@ -409,10 +426,15 @@ if (typeof require === 'function') {
      * @returns {Promise<void>}
      */
     async function reread(ghsaIds) {
-      for (const ghsaId of idsOf([...ghsaIds])) {
+      const given = idsOf([...ghsaIds]);
+      for (const ghsaId of given) {
         forced.add(ghsaId);
         if (!pending.includes(ghsaId)) pending.push(ghsaId);
       }
+      diag(
+        () =>
+          `queue forced queued ids=${given.join(',')} forced=${forced.size} pending=${pending.length} inFlight=${inFlight}`
+      );
       if (startedAt === null) startedAt = clock();
       await persist();
     }
@@ -467,7 +489,9 @@ if (typeof require === 'function') {
     async function read(ghsaId) {
       const advisory = { owner: ref.owner, repo: ref.repo, ghsaId };
       try {
+        diag(`queue read send ${ghsaId}`);
         const answered = await request(globalThis.bghsa.write.detailUrl(advisory));
+        diag(`queue read answer ${ghsaId} status=${answered.status} bytes=${answered.body.length}`);
         if (!(answered.status >= 200 && answered.status < 300)) {
           // Only 404 responses count toward eviction.
           if (answered.status === MISSING_STATUS) {
@@ -477,15 +501,18 @@ if (typeof require === 'function') {
           return null;
         }
         const record = parse(answered.body, advisory);
+        diag(`queue read parsed ${ghsaId} ok=${record !== null && record !== undefined}`);
         if (record === null || record === undefined) {
           fail(ghsaId, 'The page did not read as an advisory.');
           return null;
         }
         const at = clock();
         const held = await globalThis.bghsa.cache.putAdvisory(advisory, record, { storage, at });
+        diag(`queue read stored ${ghsaId} stored=${held !== null}`);
         // A storage failure still leaves a successful observation to display.
         return held ?? { record, observedAt: at, state: globalThis.bghsa.cache.stateOf(record) };
       } catch (error) {
+        diagCaught(`queue read ${ghsaId}`, error);
         fail(ghsaId, error);
         return null;
       }
@@ -525,8 +552,12 @@ if (typeof require === 'function') {
     async function fresh(ghsaId) {
       const at = clock();
       const held = await globalThis.bghsa.cache.getAdvisory({ ...ref, ghsaId }, { storage, at });
-      if (forced.has(ghsaId)) return false;
+      if (forced.has(ghsaId)) {
+        diag(`queue fresh-skip passed forced ${ghsaId}`);
+        return false;
+      }
       if (held === null || globalThis.bghsa.cache.isStale(held, at)) return false;
+      diag(`queue fresh-skip ${ghsaId}`);
       inFlight = null;
       if (!done.includes(ghsaId)) done.push(ghsaId);
       skipped += 1;
@@ -546,12 +577,14 @@ if (typeof require === 'function') {
       return serially(async () => {
         await throttle();
         if (stopped) {
+          diag(`queue page stopped-unsent`);
           return { body: null, status: null, reason: 'The queue was stopped.', stopped: true };
         }
         lastRequestAt = clock();
         await persist();
         try {
           const answered = await request(url);
+          diag(`queue page answer status=${answered.status} bytes=${answered.body.length}`);
           if (!(answered.status >= 200 && answered.status < 300)) {
             return {
               body: null,
@@ -562,6 +595,7 @@ if (typeof require === 'function') {
           }
           return { body: answered.body, status: answered.status, reason: null, stopped: false };
         } catch (error) {
+          diagCaught('queue page request', error);
           return { body: null, status: null, reason: error, stopped: false };
         }
       });
@@ -579,6 +613,9 @@ if (typeof require === 'function') {
       const failures = [];
       while (!stopped) {
         const at = wanted === null ? 0 : pending.findIndex(wanted);
+        if (wanted !== null) {
+          diag(`queue readNext pick index=${at} id=${at === -1 ? null : pending[at]} pending=${pending.length}`);
+        }
         if (at === -1) break;
         const ghsaId = pending.splice(at, 1)[0];
         if (ghsaId === undefined) break;
@@ -592,6 +629,7 @@ if (typeof require === 'function') {
         await throttle();
         // Preserve the unsent request for the next page load.
         if (stopped) {
+          diag(`queue pass stopped-before-send ${ghsaId}`);
           inFlight = null;
           pending.unshift(ghsaId);
           await persist();
@@ -603,8 +641,14 @@ if (typeof require === 'function') {
         await persist();
 
         const entry = await read(ghsaId);
+        diag(`queue read outcome ${ghsaId} ${entry === null ? 'failed' : 'fetched'}`);
         inFlight = null;
-        forced.delete(ghsaId);
+        if (forced.delete(ghsaId)) {
+          diag(
+            `queue forced served ${ghsaId} ${entry === null ? 'failed' : 'fetched'} forcedLeft=${forced.size}`
+          );
+          if (forced.size === 0) diag('queue forced cleared');
+        }
         if (entry === null) {
           if (!failed.includes(ghsaId)) failed.push(ghsaId);
           if (!failures.includes(ghsaId)) failures.push(ghsaId);
@@ -618,6 +662,9 @@ if (typeof require === 'function') {
       }
 
       const complete = pending.length === 0 && inFlight === null;
+      diag(
+        `queue pass end mode=${wanted === null ? 'run' : 'readNext'} stopped=${stopped} pending=${pending.length} complete=${complete} fetched=${fetched} skipped=${skipped} failures=${failures.length}`
+      );
       if (complete) {
         // Preserve the request timestamp for throttling across page loads.
         done = [];
@@ -635,7 +682,11 @@ if (typeof require === 'function') {
      * @returns {Promise<QueueSummary>}
      */
     function run() {
-      if (running !== null) return running;
+      if (running !== null) {
+        diag('queue run joined');
+        return running;
+      }
+      diag(`queue run start pending=${pending.length} stopped=${stopped}`);
       if (startedAt === null) startedAt = clock();
       running = serially(async () => {
         try {
@@ -665,6 +716,7 @@ if (typeof require === 'function') {
      *   request finishes; unsent advisories remain in persisted progress.
      */
     function stop() {
+      diag(`queue stop pending=${pending.length} inFlight=${inFlight}`);
       stopped = true;
       return queued.then(() => {});
     }

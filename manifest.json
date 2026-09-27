@@ -23,9 +23,10 @@
     {
       "matches": ["https://github.com/*"],
       "js": [
+        "src/common/storage.js",
+        "src/common/diag.js",
         "src/common/dom.js",
         "src/common/text.js",
-        "src/common/storage.js",
         "src/common/allowlist.js",
         "src/common/settings-control.js",
         "src/common/trust.js",

@@ -4,6 +4,7 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
 
 // Script tags order browser dependencies; Node loads them here.
 if (typeof require === 'function') {
+  require('../common/diag.js');
   require('../common/allowlist.js');
   require('../common/forget.js');
 }
@@ -17,6 +18,7 @@ if (typeof require === 'function') {
  * @property {Element | null} list
  * @property {Element | null} clear
  * @property {Element | null} status
+ * @property {HTMLInputElement | null} diag
  */
 
 (() => {
@@ -44,6 +46,7 @@ if (typeof require === 'function') {
       list: doc.getElementById('list'),
       clear: doc.getElementById('clear-button'),
       status: doc.getElementById('clear-status'),
+      diag: /** @type {HTMLInputElement | null} */ (doc.getElementById('diag-input')),
     };
   }
 
@@ -161,6 +164,27 @@ if (typeof require === 'function') {
   }
 
   /**
+   * @param {Document} doc
+   * @param {boolean} on
+   * @returns {void} Shows the diagnostics setting.
+   */
+  function showDiag(doc, on) {
+    const box = elementsOf(doc).diag;
+    if (box !== null) box.checked = on;
+  }
+
+  /**
+   * Store the diagnostics setting the checkbox shows.
+   *
+   * @param {Document} doc
+   * @returns {Promise<boolean>} The stored setting.
+   */
+  async function toggleDiag(doc) {
+    const box = elementsOf(doc).diag;
+    return globalThis.bghsa.diag.save(box?.checked === true);
+  }
+
+  /**
    * Subscribe to allowlist changes from other settings tabs as well as this page.
    *
    * @param {Document} [doc]
@@ -182,6 +206,15 @@ if (typeof require === 'function') {
     control?.addEventListener('click', () => {
       void clear(doc);
     });
+    elementsOf(doc).diag?.addEventListener('change', () => {
+      void toggleDiag(doc);
+    });
+    const diag = globalThis.bghsa.diag;
+    diag.watch();
+    diag.subscribe((on) => {
+      showDiag(doc, on);
+    });
+    showDiag(doc, await diag.load());
     const allowlist = globalThis.bghsa.allowlist;
     allowlist.watch();
     allowlist.subscribe((entries) => {
@@ -198,6 +231,7 @@ if (typeof require === 'function') {
     submit,
     drop,
     clear,
+    toggleDiag,
     start,
   };
 

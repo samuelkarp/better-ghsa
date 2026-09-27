@@ -4,6 +4,7 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
 
 // The manifest orders content scripts; under Node the dependencies are named here.
 if (typeof require === 'function') {
+  require('../common/diag.js');
   require('../common/cache.js');
   require('../common/parse-list.js');
   require('../common/crawl.js');
@@ -68,6 +69,10 @@ if (typeof require === 'function') {
  */
 
 (() => {
+  const diag = globalThis.bghsa.diag.log;
+  const diagCaught = globalThis.bghsa.diag.caught;
+  const diagWatch = globalThis.bghsa.diag.rejection;
+
   /**
    * GitHub state tabs are mutually exclusive. Collect both done states
    * regardless of the currently displayed tab (REQUIREMENTS.md section 10).
@@ -187,7 +192,9 @@ if (typeof require === 'function') {
     }
 
     // Restore saved progress before adding work to avoid repeating completed reads.
+    diag('corpus collect load');
     await options.queue.load();
+    diag('corpus collect loaded, walking');
 
     const crawled = await options.walk({
       onFailure: (state, url, reason) => {
@@ -196,12 +203,20 @@ if (typeof require === 'function') {
       onPage: (list) => {
         if (options.onPage === undefined) return;
         // Display each list page as it arrives.
-        void assemble(list, false, true).then(options.onPage, () => {});
+        void diagWatch(
+          'corpus onPage handler',
+          assemble(list, false, true).then(options.onPage, (error) => {
+            diagCaught('corpus onPage assemble', error);
+          })
+        );
       },
     });
 
     const crawl = globalThis.bghsa.crawl;
     let read = crawled.read;
+    diag(
+      `corpus collect walked read=${read !== undefined} remaining=${read?.remaining.length} failed=${read?.failed.length}`
+    );
     if (read === undefined) {
       await options.queue.add(crawl.idsIn(crawled.list, DONE_STATES));
       read = await options.queue.run();
