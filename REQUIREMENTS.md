@@ -423,7 +423,7 @@ stops.
 Update the originating row after saving a closure reason.
 
 The statistics view covers all open and completed advisories. It uses the page
-load's list walk and the reads of the other views, and sends no requests.
+load's list walk and the reads of the other views, and does not send requests.
 
 Show counts and ratios by outcome, closure reason, open state, and severity.
 Show report counts by month in a table of years, and publication counts by

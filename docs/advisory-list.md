@@ -186,10 +186,10 @@ Each list is walked once per page load. A page load starts when a page shows
 the repository's advisory list. Moving between the list's tabs and the
 repository's advisories keeps it. Moving to another repository or to any other
 page ends it, and coming back to the list starts a new one, as does reloading
-the page. Within a page load, later refreshes walk no finished list again.
-They finish a list walk that stopped part way, and a list page that fails
-three times in a row abandons its walk until the next page load. A list walk
-an earlier page load left part way starts over from its first page.
+the page. Within a page load, later refreshes do not walk a finished list
+again. They finish a list walk that stopped part way, and a list page that
+fails three times in a row abandons its walk until the next page load. A list
+walk an earlier page load left part way starts over from its first page.
 
 Triage and draft advisories are reread when their observations are more than
 five minutes old. Within a page load, refreshes start at least five minutes

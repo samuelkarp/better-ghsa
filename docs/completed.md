@@ -213,12 +213,12 @@ response", "Time to accept", "Time to close", and "Time to publish".
 
 "Reports by month" is a table across the full width of the view, at the top of
 the statistics. Its columns are "Year", "Jan" through "Dec", and "Total". The table ends
-at the later of the current UTC month and the month of the latest report, so a
+at the later of the current UTC month and the month of the latest report. A
 report dated ahead of the browser's clock counts. Each row is a year, from the
 year of the earliest report to the year the table ends, oldest first. A cell
 counts open and completed advisories reported in that month, read in UTC: a
 report at 23:30 on December 31 in New York (UTC-5) counts in January. An
-advisory whose detail read supplies no report time, because it is not loaded yet
+advisory whose detail read lacks a report time, because it is not loaded yet
 or its page shows none, uses the time its list row shows. Months without reports
 show 0, months after the end of the table are blank, and "Total" sums the row. A
 year without reports between two with them appears with all zeros. A last row,
@@ -244,8 +244,8 @@ publication show 0, and months after the end of the table are blank.
 
 The sample size counts the published advisories whose page is loaded and shows
 a publication, out of all published advisories: with 4 published advisories, 1
-of them not loaded yet and 1 whose page shows no publication, it reads "2 of
-4". With no publication counted, the table reads "Nothing counted".
+of them not loaded yet and 1 whose page does not show a publication, it reads
+"2 of 4". With no publication counted, the table reads "Nothing counted".
 
 ### Counts
 
@@ -254,7 +254,7 @@ reports its sample size as "N of M". Rows show a value, its count, and its
 percentage of the sample. Missing values appear as "None" with a count.
 
 "Outcome" counts completed advisories as "Published" or "Closed". The list page
-supplies both, so advisories not loaded yet are counted. Open advisories are
+supplies both. Advisories not loaded yet are counted. Open advisories are
 excluded from this section.
 
 "Closure reason" counts closed advisories: each stored closure reason, and
@@ -302,18 +302,18 @@ collaborator is not a response. Email responses are outside this measurement.
 Advisories a maintainer filed are included.
 
 "Time to first response" reports its sample size as the read advisories out of
-all advisories, so advisories not loaded yet show only as the difference: with
+all advisories. Advisories not loaded yet show only as the difference: with
 52 advisories, 5 of them not loaded yet, it reads "47 of 52". "Min", "Median",
 "Mean", and "Max" cover the read advisories with a response at or after the
-report time. "No response" shows no count. It shows the longest current wait:
-among read triage and draft advisories without a response, the longest time
-since the report. It appears only when there is such an advisory. Completed
-advisories without a response are outside this row.
+report time. "No response" does not show a count. It shows the longest
+current wait: among read triage and draft advisories without a response, the
+longest time since the report. It appears only when there is such an
+advisory. Completed advisories without a response are outside this row.
 
 "Time to accept" also reports its sample size as the read advisories out of
 all advisories. "Min", "Median", "Mean", and "Max" cover the read advisories
-with an acceptance event, whatever their state. "Never accepted" shows no
-count. It shows the longest current wait: among read triage advisories
+with an acceptance event, whatever their state. "Never accepted" does not
+show a count. It shows the longest current wait: among read triage advisories
 without an acceptance event, the longest time since the report. It appears
 only when there is such an advisory. Draft, published, and closed advisories
 without an acceptance event are outside this row.
@@ -328,9 +328,10 @@ other. No row appears beside the spread.
 "Time to publish" covers published advisories only. Its sample size counts the
 read published advisories out of all published advisories. "Min", "Median",
 "Mean", and "Max" cover the read published advisories with a publication on
-their timeline. "Never published" shows no count. It shows the longest current
-wait: among read drafts, the longest time since the report. It appears only
-when there is such a draft. Triage and closed advisories are outside this row.
+their timeline. "Never published" does not show a count. It shows the
+longest current wait: among read drafts, the longest time since the report. It
+appears only when there is such a draft. Triage and closed advisories are
+outside this row.
 
 Acceptance, closure, and publication use the first matching timeline event. An
 advisory that is closed, reopened, and closed again is measured to its first
