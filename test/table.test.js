@@ -3086,12 +3086,14 @@ function shownIds(doc) {
 
 /**
  * @param {readonly import('../src/list/table.js').TableRow[]} rows
+ * @param {import('../src/list/table.js').ViewState} [state] The view the
+ *   table is drawn under.
  * @returns {{ doc: Document, root: Element }}
  */
-function tableOver(rows) {
+function tableOver(rows, state = table.defaultViewState()) {
   const doc = listPage('list-page-triage.html');
   cache.setStorage(fakeStorage());
-  table.setViewState(doc, table.defaultViewState());
+  table.setViewState(doc, state);
   /** @type {Map<string, import('../src/list/table.js').RowSource>} */
   const sources = new Map();
   for (const row of rows) {
@@ -3268,6 +3270,31 @@ test('a filter that keeps nothing says so', () => {
   assert.ok(empty === 'No matches', `the wording: ${empty}`);
   const count = textOf(doc, `#${table.ROOT_ID} .bghsa-list-count`);
   assert.ok(count === '0 of 2 advisories', `the count: ${count}`);
+});
+
+test('the reload control is held while the filters keep no row', () => {
+  const rows = [
+    sortRow('GHSA-aaaa-aaaa-aaaa', { read: true, owners: ['ada'], severityLabel: 'High' }),
+    sortRow('GHSA-bbbb-bbbb-bbbb', { read: true, owners: ['zoe'], severityLabel: 'Low' }),
+  ];
+  const { doc } = tableOver(rows);
+  /** @returns {boolean} */
+  const held = () => one(doc, `#${table.ROOT_ID} .bghsa-list-reload`).hasAttribute('disabled');
+  assert.ok(!held(), 'the control is held over rows');
+  press(filterIn(doc, 'owner'), 'ada');
+  press(filterIn(doc, 'severity'), 'Low');
+  assert.ok(held(), 'the control stands ready over no rows');
+  press(filterIn(doc, 'severity'), '');
+  assert.ok(!held(), 'the control stayed held once a row showed again');
+
+  const drawn = tableOver(rows, {
+    ...table.defaultViewState(),
+    filters: { owner: 'ada', severity: 'Low' },
+  }).doc;
+  assert.ok(
+    one(drawn, `#${table.ROOT_ID} .bghsa-list-reload`).hasAttribute('disabled'),
+    'a table drawn under filters that keep no row offers the control'
+  );
 });
 
 test('a table holding no advisory at all says nothing about a filter', () => {

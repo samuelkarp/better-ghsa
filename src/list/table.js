@@ -185,6 +185,17 @@ if (typeof require === 'function') {
 
   const RESET_LABEL = 'Reset';
 
+  const RELOAD_LABEL = 'Reload cached advisories';
+
+  /**
+   * @param {number} count
+   * @returns {string} The label of the chip counting advisories whose data
+   *   was read before this page load.
+   */
+  function cachedTextOf(count) {
+    return `${count} loaded from cache`;
+  }
+
   const EMPTY_TEXT = 'No matches';
 
   /**
@@ -1023,7 +1034,7 @@ if (typeof require === 'function') {
       box.append(control);
     }
 
-    const reset = element(doc, 'button', 'btn btn-sm mb-1 bghsa-list-reset', RESET_LABEL);
+    const reset = element(doc, 'button', 'btn btn-sm mr-2 mb-1 bghsa-list-reset', RESET_LABEL);
     reset.setAttribute('type', 'button');
     if (isDefaultView(state)) reset.setAttribute('disabled', '');
     reset.addEventListener('click', () => {
@@ -1032,6 +1043,14 @@ if (typeof require === 'function') {
       refreshBody(doc);
     });
     box.append(reset);
+
+    const reload = element(doc, 'button', 'btn btn-sm mr-2 mb-1 bghsa-list-reload', RELOAD_LABEL);
+    reload.setAttribute('type', 'button');
+    if (applyView(rows, state).length === 0) reload.setAttribute('disabled', '');
+    reload.addEventListener('click', () => {
+      void reloadCached(doc);
+    });
+    box.append(reload);
     return box;
   }
 
@@ -1171,6 +1190,56 @@ if (typeof require === 'function') {
   }
 
   /**
+   * Count the rows drawn whose advisory data comes from a read made before
+   * this page load began. A row never read is not counted. Without a page
+   * load, every read row drawn counts.
+   *
+   * @param {Document} doc
+   * @param {readonly TableRow[]} rows The table's rows, drawn or not.
+   * @param {ParentNode | null} list The element holding the rows drawn.
+   * @returns {Element | null} The chip counting those rows, or null when the count is zero.
+   */
+  function cachedChip(doc, rows, list) {
+    const ref = refOf(doc);
+    const since = ref === null ? null : pageLoadAt(doc, ref);
+    const byId = new Map(rows.map((row) => [row.ghsaId, row]));
+    const count = drawnIds(list).filter((ghsaId) => {
+      const row = byId.get(ghsaId);
+      return row !== undefined && row.read && (since === null || row.observedAt < since);
+    }).length;
+    if (count === 0) return null;
+    const chip = globalThis.bghsa.chips.buildChip(doc, { text: cachedTextOf(count) });
+    chip.classList.add('bghsa-list-cached');
+    return chip;
+  }
+
+  /**
+   * Redraw the chip counting the rows drawn that were read before this page
+   * load, in place beside the count.
+   *
+   * @param {Document} doc
+   * @returns {void}
+   */
+  function syncCached(doc) {
+    const root = doc.getElementById(ROOT_ID);
+    const view = views.get(doc);
+    const status = root?.querySelector('.bghsa-list-status') ?? null;
+    if (status === null || view === undefined) return;
+    const wanted = cachedChip(doc, view.rows, root?.querySelector('.bghsa-list-rows') ?? null);
+    const shown = status.querySelector('.bghsa-list-cached');
+    if (shown === null) {
+      if (wanted === null) return;
+      const count = status.querySelector('.bghsa-list-count');
+      if (count === null) status.prepend(wanted);
+      else count.after(wanted);
+    } else if (wanted === null) {
+      shown.remove();
+    } else {
+      shown.replaceWith(wanted);
+    }
+  }
+
+  /**
    * Show an empty-result message when filters exclude every row.
    *
    * @param {Document} doc
@@ -1207,6 +1276,7 @@ if (typeof require === 'function') {
     const held = root.querySelector('.bghsa-list-rows');
     if (held === null) box.append(body);
     else held.replaceWith(body);
+    syncCached(doc);
   }
 
   /**
@@ -1285,11 +1355,14 @@ if (typeof require === 'function') {
         viewCountText(shown.length, view.rows.length)
       )
     );
+    const body = buildBody(doc, shown, view.rows.length);
+    const cached = cachedChip(doc, view.rows, body);
+    if (cached !== null) status.append(cached);
     const held = progressChip(doc, progressOf(doc));
     if (held !== null) status.append(held);
     header.append(status);
     box.append(header);
-    box.append(buildBody(doc, shown, view.rows.length));
+    box.append(body);
     root.append(box);
     return root;
   }
@@ -1547,6 +1620,17 @@ if (typeof require === 'function') {
   }
 
   /**
+   * @param {ParentNode | null} list The element holding a view's rows.
+   * @returns {string[]} The advisories of the rows drawn in it, in order.
+   */
+  function drawnIds(list) {
+    if (list === null) return [];
+    return Array.from(list.querySelectorAll('[data-bghsa-ghsa]'), (item) =>
+      item.getAttribute('data-bghsa-ghsa') ?? ''
+    ).filter((ghsaId) => ghsaId !== '');
+  }
+
+  /**
    * Update one row in place. Defer sorting and filtering until the refresh
    * finishes to keep visible rows stable. Update filter options immediately.
    * Hidden rows still receive data updates.
@@ -1569,6 +1653,7 @@ if (typeof require === 'function') {
     const item = rowNode(doc, ghsaId);
     if (item === null) return false;
     item.replaceWith(buildRow(doc, row));
+    syncCached(doc);
     return true;
   }
 
@@ -1972,11 +2057,12 @@ if (typeof require === 'function') {
      * @param {string} ghsaId
      * @returns {WalkGroup} The group of the list the advisory was last seen
      *   on. One no list holds is read with the open advisories. A forced read
-     *   belongs to the completed view's reload that forced it, and is read
-     *   with the completed advisories whatever list now holds it.
+     *   a view's reload named a group for is read with that group whatever
+     *   list now holds it.
      */
     const groupOf = (ghsaId) => {
-      if (queue.isForced(ghsaId)) return 'done';
+      const forced = queue.isForced(ghsaId) ? forcedGroups.get(key)?.get(ghsaId) : undefined;
+      if (forced !== undefined) return forced;
       const row = list.rows[ghsaId];
       return row !== undefined && GROUPS.done.includes(row.state) ? 'done' : 'open';
     };
@@ -2531,6 +2617,126 @@ if (typeof require === 'function') {
   }
 
   /**
+   * The group each forced read is read with, by repository key and advisory,
+   * for each advisory a view's reload named a group for.
+   *
+   * @type {Map<string, Map<string, WalkGroup>>}
+   */
+  const forcedGroups = new Map();
+
+  /**
+   * The advisories each document's reloads have forced, by view mode: the
+   * repository and the advisories. A press while that view's reload still
+   * has forced reads queued adds only advisories not already in its set.
+   *
+   * @type {WeakMap<Document, Map<string, { key: string, ids: Set<string> }>>}
+   */
+  const reloads = new WeakMap();
+
+  /**
+   * Queue advisories to be read over the network whatever their cache
+   * freshness, for one view's reload. An advisory that view's reload still
+   * has forced and unread is not queued again.
+   *
+   * @param {Document} doc
+   * @param {string} mode The view mode whose reload forces the reads.
+   * @param {{ owner: string, repo: string }} ref
+   * @param {readonly string[]} ghsaIds
+   * @param {WalkGroup | null} group The group to read them with, or null to
+   *   read each with the group of the list that holds it.
+   * @param {RefreshOptions} [options]
+   * @returns {Promise<string[]>} The advisories this call queued.
+   */
+  async function force(doc, mode, ref, ghsaIds, group, options = {}) {
+    const key = refKey(ref);
+    const { queue } = queueFor(ref, options);
+    let byMode = reloads.get(doc);
+    if (byMode === undefined) {
+      byMode = new Map();
+      reloads.set(doc, byMode);
+    }
+    let held = byMode.get(mode);
+    if (
+      held === undefined ||
+      held.key !== key ||
+      !queue.forcing().some((ghsaId) => held?.ids.has(ghsaId))
+    ) {
+      held = { key, ids: new Set() };
+      byMode.set(mode, held);
+    }
+    const taken = held.ids;
+    const ids = [...new Set(ghsaIds)].filter((ghsaId) => !taken.has(ghsaId));
+    if (ids.length === 0) return [];
+    for (const ghsaId of ids) taken.add(ghsaId);
+    let groups = forcedGroups.get(key);
+    if (groups === undefined) {
+      groups = new Map();
+      forcedGroups.set(key, groups);
+    }
+    for (const ghsaId of ids) {
+      if (group === null) groups.delete(ghsaId);
+      else groups.set(ghsaId, group);
+    }
+    diag(`force mode=${mode} group=${group} count=${ids.length}`);
+    await queue.reread(ids);
+    return ids;
+  }
+
+  /**
+   * Read forced advisories through a refresh: the one running, or a new one.
+   * A refresh whose reads of their group had ended leaves them to one more
+   * refresh, started once it ends.
+   *
+   * @param {Document} doc
+   * @param {{ owner: string, repo: string }} ref
+   * @param {readonly string[]} ids The advisories forced.
+   * @param {RefreshOptions} [options]
+   * @returns {void}
+   */
+  function readForced(doc, ref, ids, options = {}) {
+    const key = refKey(ref);
+    const { queue } = queueFor(ref, options);
+    /** @param {Promise<unknown>} started @returns {void} */
+    const after = (started) => {
+      void started.finally(() => {
+        if (running.get(doc) !== undefined) return;
+        if (!queue.forcing().some((ghsaId) => ids.includes(ghsaId))) return;
+        const here = refOf(doc);
+        if (here === null || refKey(here) !== key) return;
+        diag('readForced refresh again');
+        void refresh(doc, options);
+      });
+    };
+    const held = running.get(doc);
+    if (held !== undefined && held.key === key) {
+      after(held.started);
+      return;
+    }
+    after(refresh(doc, options));
+  }
+
+  /**
+   * Read the advisories of the open rows drawn again, whatever their cache
+   * freshness, through the shared queue. A row a read has taken out of the
+   * filters stays drawn until the table is drawn again, and is read with the
+   * rest. The refresh counts the reads down and draws each row as its read
+   * lands.
+   *
+   * @param {Document} doc
+   * @param {RefreshOptions} [options]
+   * @returns {Promise<string[]>} The advisories this press queued.
+   */
+  async function reloadCached(doc, options = settings.get(doc) ?? {}) {
+    const ref = refOf(doc);
+    const root = doc.getElementById(ROOT_ID);
+    if (ref === null || root === null || !views.has(doc)) return [];
+    const shown = drawnIds(root.querySelector('.bghsa-list-rows'));
+    const ids = await force(doc, VIEW_TABLE, ref, shown, 'open', options);
+    if (ids.length > 0) readForced(doc, ref, ids, options);
+    return ids;
+  }
+
+  /**
    * Watch child mutations for list changes or a displaced table. Visibility
    * class changes do not trigger a render.
    *
@@ -2622,6 +2828,8 @@ if (typeof require === 'function') {
     applyView,
     filterOptions,
     RESET_LABEL,
+    RELOAD_LABEL,
+    cachedTextOf,
     EMPTY_TEXT,
     WALKING_TEXT,
     FACET_ATTRIBUTE,
@@ -2649,6 +2857,7 @@ if (typeof require === 'function') {
     refOf,
     render,
     applyEntry,
+    drawnIds,
     refKey,
     queueFor,
     loadedAt,
@@ -2659,6 +2868,9 @@ if (typeof require === 'function') {
     refresh,
     ensureRefresh,
     refreshShown,
+    force,
+    readForced,
+    reloadCached,
     renderLoop,
     passFor,
     observe,

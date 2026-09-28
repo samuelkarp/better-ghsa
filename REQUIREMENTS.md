@@ -313,6 +313,11 @@ Rows are filterable on waiting, severity, owner, state, patch, backports, and
 embargo, with a control that clears every filter. They are sortable by the
 default order, by severity, and by longest waiting.
 
+Provide a control on the filter bar that reads the advisory pages of the rows
+shown again, whatever their cache freshness, through the shared queue, with
+the refresh status counting those reads. Beside the row count, count the rows
+shown whose advisory data predates the page load, and omit the count at zero.
+
 The default order places draft advisories before triage advisories.
 
 Within draft:
@@ -411,8 +416,8 @@ Provide a control on the filter bar that reads the advisory pages of the rows
 shown again, whatever their cache freshness, through the shared queue, with
 the collection status counting those reads. A cached entry changes only on a
 read, and the advisory list does not show anything that changes when a
-comment is posted. Beside it, count the rows shown whose advisory data
-predates the page load, and omit the count at zero.
+comment is posted. Beside the row count, count the rows shown whose advisory
+data predates the page load, and omit the count at zero.
 
 Show collection status from the moment collection is requested, including
 while the page load's list walk is still running. Identify the walk of the
@@ -423,7 +428,14 @@ stops.
 Update the originating row after saving a closure reason.
 
 The statistics view covers all open and completed advisories. It uses the page
-load's list walk and the reads of the other views, and does not send requests.
+load's list walk and the reads of the other views, and sends requests only for
+its reload control.
+
+Provide a control beside the export controls that reads the advisory pages of
+every advisory the statistics cover, open and completed, again, whatever their
+cache freshness, through the shared queue. Draw the statistics again as each
+read lands. Among the coverage chips, count the covered advisories whose
+advisory data predates the page load, and omit the count at zero.
 
 Show counts and ratios by outcome, closure reason, open state, and severity.
 Show report counts by month in a table of years, and publication counts by

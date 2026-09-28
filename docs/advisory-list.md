@@ -143,6 +143,22 @@ when the view already has those settings.
 
 The table reads "No matches" when filters exclude every row.
 
+## Reloading cached advisories
+
+"Reload cached advisories" sits on the filter bar beside "Reset". It reads
+the advisory page of every row the table shows, however recently the cache
+last read it. The reads go through the queue shared with the other views, one
+request per second, and the chip beside the heading counts them down as
+"Loading (2 left)...". Each row updates as its read lands. The button is
+disabled while no row shows. It stays enabled during a reload, and a second
+press queues only rows that reload has not taken.
+
+A chip beside the row count in the heading counts the rows shown whose
+advisory data comes from a read made before this page load, as "12 loaded
+from cache". A row whose advisory has never been read is not counted. The
+count follows the filters, drops as reads land, and the chip disappears at
+zero.
+
 ## Reading and refreshing
 
 The table initially displays cached data and the list markup already on the
@@ -171,9 +187,10 @@ advisories. A refresh that starts while the completed view shows does not read
 a completed advisory, and opening that view again reads the stale ones.
 
 The list walk and the reads share one request queue per repository within a
-tab. The statistics view does not send a request of its own. Background
-requests are throttled to one per second within each queue. Requests from
-separate tabs can occur closer together.
+tab. The statistics view sends a request of its own only for its "Reload
+cached advisories" button, through the same queue. Background requests are
+throttled to one per second within each queue. Requests from separate tabs
+can occur closer together.
 
 The heading shows "Loading (12 left)..." while open advisories remain to be
 read, the one being requested included, and keeps that count while the walk

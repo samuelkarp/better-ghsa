@@ -36,7 +36,9 @@ Saving posts or edits a comment. Posting notifies the advisory's participants,
 including the reporter.
 
 A local cache lets pages display data immediately. It is not authoritative
-and can be rebuilt by rereading the advisories.
+and can be rebuilt by rereading the advisories. Each view of the advisory list
+has a "Reload cached advisories" button that reads the advisories it shows
+again.
 
 ## The three surfaces
 

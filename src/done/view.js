@@ -109,15 +109,9 @@ if (typeof require === 'function') {
 
   const UNREADABLE_MESSAGE = 'Error: cannot set reason';
 
-  const RELOAD_LABEL = 'Reload cached advisories';
+  const RELOAD_LABEL = globalThis.bghsa.table.RELOAD_LABEL;
 
-  /**
-   * @param {number} count
-   * @returns {string} The label of the chip counting rows drawn from cache.
-   */
-  function cachedTextOf(count) {
-    return `${count} loaded from cache`;
-  }
+  const cachedTextOf = globalThis.bghsa.table.cachedTextOf;
 
   const STYLE_TEXT = [
     '.bghsa-done-chips { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }',
@@ -407,40 +401,33 @@ if (typeof require === 'function') {
   }
 
   /**
-   * @param {Document} doc
-   * @returns {DoneRow[]} The rows the view shows under its filters.
-   */
-  function shownRowsOf(doc) {
-    return applyFilters(rowsOf(current(doc).corpus), filtersOf(doc));
-  }
-
-  /**
-   * Count the rows whose advisory data comes from a read made before this
-   * page load began. A row never read is not counted. Without a page load,
-   * every read row counts.
+   * Count the rows drawn whose advisory data comes from a read made before
+   * this page load began. A row never read is not counted. Without a page
+   * load, every read row drawn counts.
    *
    * @param {Document} doc
-   * @param {readonly DoneRow[]} rows
+   * @param {readonly DoneRow[]} rows The view's rows, drawn or not.
+   * @param {ParentNode} list The element holding the rows drawn.
    * @returns {number}
    */
-  function cachedCountOf(doc, rows) {
+  function cachedCountOf(doc, rows, list) {
+    const table = globalThis.bghsa.table;
     const ref = current(doc).ref;
-    const since = ref === null ? null : globalThis.bghsa.table.pageLoadAt(doc, ref);
-    return rows.filter(
-      (row) => row.read && row.observedAt !== null && (since === null || row.observedAt < since)
-    ).length;
+    const since = ref === null ? null : table.pageLoadAt(doc, ref);
+    const byId = new Map(rows.map((row) => [row.ghsaId, row]));
+    return table.drawnIds(list).filter((ghsaId) => {
+      const row = byId.get(ghsaId);
+      return (
+        row !== undefined &&
+        row.read &&
+        row.observedAt !== null &&
+        (since === null || row.observedAt < since)
+      );
+    }).length;
   }
 
   /**
-   * The advisories each document's reload has forced, by repository key. A
-   * press while that reload has forced reads left adds only rows it lacks.
-   *
-   * @type {WeakMap<Document, { key: string, ids: Set<string> }>}
-   */
-  const reloads = new WeakMap();
-
-  /**
-   * Read the advisories of the rows shown again, whatever their cache
+   * Read the advisories of the rows drawn again, whatever their cache
    * freshness, through the shared queue. The collection counts the reads down
    * and draws each row as its read lands. A press while a reload runs queues
    * no advisory that reload already took.
@@ -455,23 +442,10 @@ if (typeof require === 'function') {
     if (ref === null) return [];
     const key = table.refKey(ref);
     const { queue } = table.queueFor(ref, options);
-    let held = reloads.get(doc);
-    if (
-      held === undefined ||
-      held.key !== key ||
-      !queue.forcing().some((ghsaId) => held?.ids.has(ghsaId))
-    ) {
-      held = { key, ids: new Set() };
-      reloads.set(doc, held);
-    }
-    const taken = held.ids;
-    const ids = shownRowsOf(doc)
-      .map((row) => row.ghsaId)
-      .filter((ghsaId) => !taken.has(ghsaId));
-    diag(() => `done reload pressed queued=${ids.join(',') || 'none'} taken=${taken.size}`);
+    const shown = table.drawnIds(doc.querySelector(`#${ROOT_ID} .bghsa-done-rows`));
+    const ids = await table.force(doc, MODE, ref, shown, 'done', options);
+    diag(() => `done reload pressed queued=${ids.join(',') || 'none'}`);
     if (ids.length === 0) return [];
-    for (const ghsaId of ids) taken.add(ghsaId);
-    await queue.reread(ids);
     const collecting = running.get(doc);
     if (collecting === undefined || collecting.key !== key) {
       diag('done reload collect start');
@@ -501,41 +475,31 @@ if (typeof require === 'function') {
 
   /**
    * @param {Document} doc
-   * @param {readonly DoneRow[]} shown
-   * @returns {Element | null} The chip counting shown rows drawn from cache,
+   * @param {readonly DoneRow[]} rows The view's rows, drawn or not.
+   * @param {ParentNode} list The element holding the rows drawn.
+   * @returns {Element | null} The chip counting the rows drawn from cache,
    *   or null when none is.
    */
-  function buildCached(doc, shown) {
-    const count = cachedCountOf(doc, shown);
+  function buildCached(doc, rows, list) {
+    const count = cachedCountOf(doc, rows, list);
     if (count === 0) return null;
     const chip = globalThis.bghsa.chips.buildChip(doc, { text: cachedTextOf(count) });
-    chip.classList.add('mb-1', 'bghsa-done-cached');
+    chip.classList.add('bghsa-done-cached');
     return chip;
   }
 
   /**
-   * Enable the reload control while rows show, and redraw the chip counting
-   * the rows drawn from cache.
+   * Enable the reload control while rows show.
    *
-   * @param {Document} doc
    * @param {Element} box The filter controls.
    * @param {readonly DoneRow[]} shown
    * @returns {void}
    */
-  function syncReload(doc, box, shown) {
+  function syncReload(box, shown) {
     const button = box.querySelector('.bghsa-done-reload');
     if (button !== null) {
       if (shown.length === 0) button.setAttribute('disabled', '');
       else button.removeAttribute('disabled');
-    }
-    const chip = box.querySelector('.bghsa-done-cached');
-    const wanted = buildCached(doc, shown);
-    if (chip === null) {
-      if (wanted !== null) box.append(wanted);
-    } else if (wanted === null) {
-      chip.remove();
-    } else {
-      chip.replaceWith(wanted);
     }
   }
 
@@ -829,7 +793,12 @@ if (typeof require === 'function') {
       box.append(control);
     }
 
-    const reset = element(doc, 'button', 'btn btn-sm mb-1 bghsa-done-reset', table.RESET_LABEL);
+    const reset = element(
+      doc,
+      'button',
+      'btn btn-sm mr-2 mb-1 bghsa-done-reset',
+      table.RESET_LABEL
+    );
     reset.setAttribute('type', 'button');
     if (!filtering(doc)) reset.setAttribute('disabled', '');
     reset.addEventListener('click', () => {
@@ -839,13 +808,13 @@ if (typeof require === 'function') {
     });
     box.append(reset);
 
-    const reload = element(doc, 'button', 'btn btn-sm mb-1 bghsa-done-reload', RELOAD_LABEL);
+    const reload = element(doc, 'button', 'btn btn-sm mr-2 mb-1 bghsa-done-reload', RELOAD_LABEL);
     reload.setAttribute('type', 'button');
     reload.addEventListener('click', () => {
       void reloadCached(doc);
     });
     box.append(reload);
-    syncReload(doc, box, applyFilters(rows, held));
+    syncReload(box, applyFilters(rows, held));
     return box;
   }
 
@@ -889,7 +858,7 @@ if (typeof require === 'function') {
       if (facet === null) return null;
       return filterItems(doc, facet, rows, held[key] ?? '');
     });
-    syncReload(doc, box, applyFilters(rows, held));
+    syncReload(box, applyFilters(rows, held));
   }
 
   /**
@@ -958,7 +927,7 @@ if (typeof require === 'function') {
       diag('done drawStatus no-header');
       return;
     }
-    const shown = header.querySelector('span.Label');
+    const shown = header.querySelector('span.Label:not(.bghsa-done-cached)');
     const wanted = buildStatus(doc, current(doc));
     diag(
       () => `done drawStatus collecting=${running.get(doc) !== undefined} progress=${JSON.stringify(globalThis.bghsa.table.walkProgress(doc, 'done'))} chip=${JSON.stringify(wanted === null ? null : wanted.textContent)} had=${JSON.stringify(shown === null ? null : shown.textContent)}`
@@ -1017,6 +986,9 @@ if (typeof require === 'function') {
     const shown = applyFilters(rows, filtersOf(doc));
     const countText = globalThis.bghsa.table.viewCountText(shown.length, rows.length);
     header.append(element(doc, 'span', 'ml-2 text-normal bghsa-done-count', countText));
+    const body = buildBody(doc, shown, state);
+    const cached = buildCached(doc, rows, body);
+    if (cached !== null) header.append(cached);
 
     const status = buildStatus(doc, state);
     if (status !== null) header.append(status);
@@ -1025,7 +997,7 @@ if (typeof require === 'function') {
     const banner = buildBanner(doc, state.failures);
     if (banner !== null) root.append(banner);
 
-    root.append(buildBody(doc, shown, state));
+    root.append(body);
     return root;
   }
 

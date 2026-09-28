@@ -403,6 +403,27 @@ if (typeof require === 'function') {
   }
 
   /**
+   * Count the covered advisories whose data comes from a read made before
+   * this page load began. An advisory never read is not counted. Without a
+   * page load, every read advisory counts.
+   *
+   * @param {Document} doc
+   * @param {import('../done/corpus.js').Corpus} corpus
+   * @returns {number}
+   */
+  function cachedCountOf(doc, corpus) {
+    const table = globalThis.bghsa.table;
+    const ref = current(doc).ref;
+    const since = ref === null ? null : table.pageLoadAt(doc, ref);
+    return corpus.members.filter(
+      (member) =>
+        member.advisory !== null &&
+        member.observedAt !== null &&
+        (since === null || member.observedAt < since)
+    ).length;
+  }
+
+  /**
    * Show coverage for each corpus group before displaying statistics. An
    * uncrawled group covers the visible page; an unfinished crawl covers only
    * part of the repository.
@@ -428,6 +449,12 @@ if (typeof require === 'function') {
     }
     if (corpus.unread.length > 0) {
       box.append(chips.buildChip(doc, { text: `${corpus.unread.length} not loaded yet` }));
+    }
+    const cached = cachedCountOf(doc, corpus);
+    if (cached > 0) {
+      const node = chips.buildChip(doc, { text: globalThis.bghsa.table.cachedTextOf(cached) });
+      node.classList.add('bghsa-stats-cached');
+      box.append(node);
     }
     const total = expectedTotal(corpus.expected);
     if (total !== null && total !== corpus.members.length) {
@@ -723,8 +750,21 @@ if (typeof require === 'function') {
     jsonControl.addEventListener('click', () => {
       exportJson(doc);
     });
+    const reload = element(
+      doc,
+      'button',
+      'btn btn-sm bghsa-stats-reload',
+      globalThis.bghsa.table.RELOAD_LABEL
+    );
+    reload.setAttribute('type', 'button');
+    if (state.ref === null || corpus.members.length === 0) {
+      reload.setAttribute('disabled', '');
+    }
+    reload.addEventListener('click', () => {
+      void reloadCached(doc);
+    });
     const exports = element(doc, 'div', 'bghsa-stats-exports');
-    exports.append(exportControl, jsonControl);
+    exports.append(exportControl, jsonControl, reload);
     header.append(exports);
     box.append(header);
 
@@ -906,6 +946,34 @@ if (typeof require === 'function') {
   }
 
   /**
+   * Read every advisory the statistics cover again, open and completed,
+   * whatever their cache freshness, through the shared queue. The statistics
+   * are drawn again as each read lands.
+   *
+   * @param {Document} doc
+   * @param {import('../list/table.js').RefreshOptions} [options]
+   * @returns {Promise<string[]>} The advisories this press queued.
+   */
+  async function reloadCached(doc, options = {}) {
+    const table = globalThis.bghsa.table;
+    const state = current(doc);
+    const ref = state.ref;
+    if (ref === null) return [];
+    const covered = whole(state.halves).members.map((member) => member.ghsaId);
+    const ids = await table.force(doc, MODE, ref, covered, null, options);
+    if (ids.length === 0) return [];
+    const { queue, listening } = table.queueFor(ref, options);
+    /** @type {(ghsaId: string) => void} */
+    const listener = (ghsaId) => {
+      if (ids.includes(ghsaId) && table.viewMode(doc) === MODE) void load(doc);
+      if (!queue.forcing().some((each) => ids.includes(each))) listening.delete(listener);
+    };
+    listening.add(listener);
+    table.readForced(doc, ref, ids, options);
+    return ids;
+  }
+
+  /**
    * @param {Document} doc
    * @returns {Element}
    */
@@ -969,6 +1037,7 @@ if (typeof require === 'function') {
     exportCsv,
     statisticsOf,
     exportJson,
+    reloadCached,
     ensureStyle,
     draw,
     load,

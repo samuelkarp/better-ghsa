@@ -3387,10 +3387,11 @@ function reloadButton(doc) {
 
 /**
  * @param {Document} doc
- * @returns {string[]} the texts of the chip counting rows loaded from cache.
+ * @returns {string[]} the texts of the chip counting rows loaded from cache,
+ *   in the completed view's status line.
  */
 function cachedChips(doc) {
-  return textsOf(doc, `#${table.ROOT_ID} .bghsa-done-controls .bghsa-done-cached`);
+  return textsOf(doc, `#${view.ROOT_ID} .bghsa-done-header .bghsa-done-cached`);
 }
 
 /**
@@ -3500,6 +3501,40 @@ test('the reload rereads the fresh advisories of the rows shown, and only those'
   }
 });
 
+test('a completed reload rereads a row a saved reason took out of the filters', async () => {
+  const { doc, parsed, closed, leave } = await cachedPage('rg');
+  const held = view.stateOf(doc).corpus;
+  const read = held === null ? null : (view.memberOf(held, closed)?.advisory ?? null);
+  assert.ok(read !== null, 'the closed advisory was not read');
+  const key = edit.keyOf(read);
+  try {
+    pick(doc, 'reason', 'None');
+    const drawn = () =>
+      Array.from(
+        doc.querySelectorAll(`#${view.ROOT_ID} .bghsa-done-rows [data-bghsa-ghsa]`),
+        (item) => item.getAttribute('data-bghsa-ghsa')
+      );
+    assert.deepStrictEqual(drawn(), [closed]);
+    // A save records the reason it wrote, then writes the cache and only
+    // then draws the view again. The press lands between the two.
+    edit.written.set(
+      key,
+      globalThis.bghsa.merge.mergeSnapshots(ended(closed, 'closed', 'out of scope').comments)
+    );
+    assert.deepStrictEqual(drawn(), [closed], 'the row left the view before the press');
+    const before = asked.length;
+    await reloaded(doc, parsed);
+    assert.deepStrictEqual(
+      asked.slice(before),
+      [detailUrl(closed)],
+      'the reload read something other than the row drawn'
+    );
+  } finally {
+    edit.written.delete(key);
+    leave();
+  }
+});
+
 test('the reload counts down, repaints each row as it lands, and reads each once', async () => {
   const { doc, parsed, published, closed, leave } = await cachedPage('rb');
   const ids = [...published, closed];
@@ -3510,7 +3545,10 @@ test('the reload counts down, repaints each row as it lands, and reads each once
     /** @type {string[]} */
     const said = [];
     const record = async () => {
-      const chip = textsOf(doc, `#${view.ROOT_ID} .bghsa-done-header span.Label`).join('+');
+      const chip = textsOf(
+        doc,
+        `#${view.ROOT_ID} .bghsa-done-header span.Label:not(.bghsa-done-cached)`
+      ).join('+');
       said.push(`${chip} | ${cachedChips(doc).join('+') || 'no chip'} | ${repainted()} repainted`);
     };
     let reads = 0;
@@ -3702,5 +3740,571 @@ test('a reload of a row reopened since the lists were last walked reads it', asy
   } finally {
     delete during[listUrl(REF, 'closed')];
     leave();
+  }
+});
+
+/**
+ * @param {Document} doc
+ * @param {string} selector
+ * @returns {HTMLElement} the element that selector finds.
+ */
+function button(doc, selector) {
+  return /** @type {HTMLElement} */ (/** @type {unknown} */ (one(doc, selector)));
+}
+
+/**
+ * @param {Element} node
+ * @returns {string[]} the classes it carries, sorted.
+ */
+function classesOf(node) {
+  return (node.getAttribute('class') ?? '').split(/\s+/).filter((name) => name !== '').sort();
+}
+
+/**
+ * Serve two triage advisories, one draft, one published, and one closed.
+ * Read all five in one page load on the open table, then start a second page
+ * load two minutes later, on the open table, whose rows all come from the
+ * first one's reads. The location stays on the repository's list until
+ * `leave` runs.
+ *
+ * @param {string} prefix Two letters that make the advisories' IDs.
+ * @returns {Promise<{
+ *   doc: Document,
+ *   triage: string[],
+ *   draft: string,
+ *   done: string[],
+ *   leave: () => void,
+ * }>}
+ */
+async function cachedOnTable(prefix) {
+  const triage = [TRIAGE_ID, ghsa(`${prefix}tt`)];
+  const draft = ghsa(`${prefix}dd`);
+  const published = ghsa(`${prefix}pp`);
+  const closed = ghsa(`${prefix}cc`);
+  const counts = { triage: 2, draft: 1, published: 1, closed: 1 };
+  pages[listUrl(REF, 'triage')] = listHtml({ state: 'triage', ids: triage, counts });
+  pages[listUrl(REF, 'draft')] = listHtml({ state: 'draft', ids: [draft], counts });
+  pages[listUrl(REF, 'published')] = listHtml({ state: 'published', ids: [published], counts });
+  pages[listUrl(REF, 'closed')] = listHtml({ state: 'closed', ids: [closed], counts });
+  /** @type {[string, string][]} */
+  const read = [
+    ...triage.map((id) => /** @type {[string, string]} */ ([id, 'Triage'])),
+    [draft, 'Draft'],
+    [published, 'Published'],
+    [closed, 'Closed'],
+  ];
+  /** @param {string} reportedAt @returns {void} */
+  const serve = (reportedAt) => {
+    for (const [id, state] of read) {
+      pages[detailUrl(id)] = detailHtml({ ghsaId: id, state, reportedAt });
+    }
+  };
+  const location = globalThis.location;
+  globalThis.location = /** @type {Location} */ (
+    /** @type {unknown} */ ({ pathname: `/${REF.owner}/${REF.repo}/security/advisories` })
+  );
+  const leave = () => {
+    globalThis.location = location;
+    for (const [id] of read) delete pages[detailUrl(id)];
+  };
+  try {
+    serve('2026-03-02T00:00:00Z');
+    await cache.clear();
+    const first = await page();
+    const parsed = table.pageOf(first);
+    assert.ok(parsed !== null, 'the page reads as a list');
+    await table.passFor(first, QUEUE_OPTIONS)();
+    await table.refresh(first, QUEUE_OPTIONS);
+    await table.walk(first, parsed, QUEUE_OPTIONS, {}, 'done');
+
+    // Open advisories go stale after five minutes.
+    clockAt += 2 * MINUTE;
+    serve('2026-05-09T00:00:00Z');
+    const doc = await page();
+    const before = asked.length;
+    await table.passFor(doc, QUEUE_OPTIONS)();
+    await table.refresh(doc, QUEUE_OPTIONS);
+    assert.deepStrictEqual(
+      asked.slice(before).filter((url) => !url.includes('?')),
+      [],
+      'the second page load read an advisory still fresh'
+    );
+    return { doc, triage, draft, done: [published, closed], leave };
+  } catch (error) {
+    leave();
+    throw error;
+  }
+}
+
+/**
+ * @param {Document} doc
+ * @returns {string[]} the texts of the open table's chip counting rows loaded
+ *   from cache, in its status line.
+ */
+function openCachedChips(doc) {
+  return textsOf(doc, `#${table.ROOT_ID} .bghsa-list-status .bghsa-list-cached`);
+}
+
+/**
+ * @param {Document} doc
+ * @param {string} facet
+ * @param {string} value The selected value, or an empty string for any.
+ * @returns {void} Picks the value in the open table's filter.
+ */
+function pickOpen(doc, facet, value) {
+  const control = one(
+    doc,
+    `#${table.ROOT_ID} .bghsa-list-controls [${table.FACET_ATTRIBUTE}="${facet}"]`
+  );
+  for (const item of itemNodes(control)) {
+    if ((item.getAttribute(table.VALUE_ATTRIBUTE) ?? '') !== value) continue;
+    /** @type {HTMLElement} */ (/** @type {unknown} */ (item)).click();
+    return;
+  }
+  throw new Error(`the open ${facet} filter offers no ${value === '' ? 'reset item' : value}`);
+}
+
+test('the open table reload sits beside Reset and rereads the open rows shown once', async () => {
+  const { doc, triage, leave } = await cachedOnTable('oa');
+  try {
+    const reload = () => button(doc, `#${table.ROOT_ID} .bghsa-list-controls .bghsa-list-reload`);
+    const reset = one(doc, `#${table.ROOT_ID} .bghsa-list-controls .bghsa-list-reset`);
+    assert.strictEqual(reload().textContent, 'Reload cached advisories');
+    assert.ok(reload().previousElementSibling === reset, 'the control does not follow Reset');
+    assert.ok(reset.classList.contains('mr-2'), 'Reset sits flush against the control');
+    assert.deepStrictEqual(classesOf(reload()), [
+      'bghsa-list-reload',
+      'btn',
+      'btn-sm',
+      'mb-1',
+      'mr-2',
+    ]);
+
+    assert.deepStrictEqual(openCachedChips(doc), ['3 loaded from cache']);
+    const chip = one(doc, `#${table.ROOT_ID} .bghsa-list-cached`);
+    assert.ok(
+      chip.previousElementSibling?.classList.contains('bghsa-list-count'),
+      'the chip does not sit beside the count in the status line'
+    );
+    pickOpen(doc, 'state', 'Triage');
+    assert.deepStrictEqual(
+      openCachedChips(doc),
+      ['2 loaded from cache'],
+      'the chip ignored the filter'
+    );
+
+    /** @type {string[]} */
+    const said = [];
+    let reads = 0;
+    for (const id of triage) {
+      during[detailUrl(id)] = async () => {
+        reads += 1;
+        // A second press while the first one's reads go on.
+        if (reads === 2) reload().click();
+        await settled();
+        const progress = textsOf(doc, `#${table.ROOT_ID} .bghsa-list-status .bghsa-list-progress`);
+        said.push(`${progress.join('+')} | ${openCachedChips(doc).join('+') || 'no chip'}`);
+      };
+    }
+    const before = asked.length;
+    reload().click();
+    const { queue } = table.queueFor(REF, QUEUE_OPTIONS);
+    await until(
+      'read the advisories the reload forced',
+      () => queue.forcing().length === 0 && table.progressOf(doc) === null
+    );
+    assert.deepStrictEqual(
+      asked.slice(before).filter((url) => !url.includes('?')).sort(),
+      triage.map(detailUrl).sort(),
+      'the reload read something other than the open rows shown, or read one twice'
+    );
+    assert.deepStrictEqual(said, [
+      'Loading (2 left)... | 2 loaded from cache',
+      'Loading (1 left)... | 1 loaded from cache',
+    ]);
+    assert.deepStrictEqual(
+      openCachedChips(doc),
+      [],
+      'the chip stands with nothing loaded from cache'
+    );
+    pickOpen(doc, 'state', '');
+    assert.deepStrictEqual(
+      openCachedChips(doc),
+      ['1 loaded from cache'],
+      'the chip counted a row read in this page load, or lost the draft read before it'
+    );
+  } finally {
+    for (const id of triage) delete during[detailUrl(id)];
+    leave();
+  }
+});
+
+test('an open table reload pressed after its reads ended is read in that page load', async () => {
+  const { triage, draft, leave } = await cachedOnTable('oc');
+  const open = [...triage, draft];
+  try {
+    // A third page load, within five minutes of the reads, pressed while its
+    // walk reads the completed lists. The open table reads the open
+    // advisories before it walks the completed lists.
+    clockAt += MINUTE;
+    const doc = await page();
+    /** @type {string[] | null} */
+    let chips = null;
+    during[listUrl(REF, 'published')] = async () => {
+      chips = openCachedChips(doc);
+      button(doc, `#${table.ROOT_ID} .bghsa-list-controls .bghsa-list-reload`).click();
+      await settled();
+    };
+    const before = asked.length;
+    await table.passFor(doc, QUEUE_OPTIONS)();
+    await table.refresh(doc, QUEUE_OPTIONS);
+    assert.deepStrictEqual(
+      chips,
+      ['3 loaded from cache'],
+      'the press came before the published list, or with other rows shown'
+    );
+    const { queue } = table.queueFor(REF, QUEUE_OPTIONS);
+    await until(
+      'read the advisories the reload forced',
+      () => queue.forcing().length === 0 && table.progressOf(doc) === null
+    );
+    assert.deepStrictEqual(
+      asked.slice(before).filter((url) => !url.includes('?')).sort(),
+      open.map(detailUrl).sort(),
+      'the page load left a forced read unread, or read one twice'
+    );
+    assert.deepStrictEqual(openCachedChips(doc), [], 'a row kept its data from cache');
+  } finally {
+    delete during[listUrl(REF, 'published')];
+    leave();
+  }
+});
+
+test('the open chip returns beside the count while the loading chip shows', async () => {
+  const { doc, triage, draft, leave } = await cachedOnTable('od');
+  const open = [...triage, draft];
+  try {
+    /** @type {string[]} */
+    let cleared = [];
+    /** @type {string[]} */
+    let order = [];
+    let reads = 0;
+    for (const id of open) {
+      during[detailUrl(id)] = async () => {
+        reads += 1;
+        if (reads < open.length) return;
+        await settled();
+        // Keep only rows read in this page load, then show every row again,
+        // the one in flight still loaded from cache.
+        pickOpen(doc, 'state', id === draft ? 'Triage' : 'Draft');
+        cleared = openCachedChips(doc);
+        pickOpen(doc, 'state', '');
+        const status = one(doc, `#${table.ROOT_ID} .bghsa-list-status`);
+        order = Array.from(status.children).map((node) => {
+          if (node.classList.contains('bghsa-list-count')) return 'count';
+          if (node.classList.contains('bghsa-list-cached')) return node.textContent ?? '';
+          if (node.classList.contains('bghsa-list-progress')) return node.textContent ?? '';
+          return node.outerHTML;
+        });
+      };
+    }
+    button(doc, `#${table.ROOT_ID} .bghsa-list-controls .bghsa-list-reload`).click();
+    const { queue } = table.queueFor(REF, QUEUE_OPTIONS);
+    await until(
+      'read the advisories the reload forced',
+      () => queue.forcing().length === 0 && table.progressOf(doc) === null
+    );
+    assert.deepStrictEqual(cleared, [], 'the filter kept a row loaded from cache');
+    assert.deepStrictEqual(order, ['count', '1 loaded from cache', 'Loading (1 left)...']);
+  } finally {
+    for (const id of open) delete during[detailUrl(id)];
+    leave();
+  }
+});
+
+/**
+ * @param {Document} doc
+ * @param {string} list The class of the element holding a view's rows.
+ * @returns {string[]} the advisories of the rows drawn in it, in order.
+ */
+function drawnRows(doc, list) {
+  return Array.from(
+    doc.querySelectorAll(`.${list} [data-bghsa-ghsa]`),
+    (item) => item.getAttribute('data-bghsa-ghsa') ?? ''
+  );
+}
+
+test('an open reload rereads a row a read took out of the filters while it shows', async () => {
+  const { doc, triage, draft, leave } = await cachedOnTable('of');
+  const open = [...triage, draft];
+  try {
+    pickOpen(doc, 'state', 'Draft');
+    assert.deepStrictEqual(drawnRows(doc, 'bghsa-list-rows'), [draft]);
+    // The draft is back in triage when it is next read.
+    pages[detailUrl(draft)] = detailHtml({
+      ghsaId: draft,
+      state: 'Triage',
+      reportedAt: '2026-05-09T00:00:00Z',
+    });
+    const { queue } = table.queueFor(REF, QUEUE_OPTIONS);
+    const before = asked.length;
+    /**
+     * @type {{ drawn: string[], state: string[], held: boolean, forced: string[] } | null}
+     */
+    let pressed = null;
+    for (const id of triage) {
+      during[detailUrl(id)] = async () => {
+        if (pressed !== null || !asked.slice(before).includes(detailUrl(draft))) return;
+        await settled();
+        const reload = button(doc, `#${table.ROOT_ID} .bghsa-list-controls .bghsa-list-reload`);
+        pressed = {
+          drawn: drawnRows(doc, 'bghsa-list-rows'),
+          state: textsOf(doc, `#${table.ROOT_ID} .bghsa-list-rows .bghsa-list-state`),
+          held: reload.hasAttribute('disabled'),
+          forced: [],
+        };
+        reload.click();
+        await settled();
+        pressed.forced = queue.forcing();
+      };
+    }
+    // Open advisories go stale after five minutes, and the refresh reads
+    // them all again.
+    clockAt += 6 * MINUTE;
+    await table.refresh(doc, QUEUE_OPTIONS);
+    await until(
+      'read the advisories the reload forced',
+      () => queue.forcing().length === 0 && table.progressOf(doc) === null
+    );
+    assert.deepStrictEqual(
+      pressed,
+      { drawn: [draft], state: ['Triage'], held: false, forced: [draft] },
+      'the press came with other rows drawn, or queued other than the row drawn'
+    );
+    assert.strictEqual(
+      asked.slice(before).filter((url) => url === detailUrl(draft)).length,
+      2,
+      'the reload did not read the row drawn again'
+    );
+  } finally {
+    for (const id of open) delete during[detailUrl(id)];
+    leave();
+  }
+});
+
+test('an open reload with the completed view drawn rereads only the open rows', async () => {
+  const { doc, triage, draft, done, leave } = await cachedOnTable('og');
+  const open = [...triage, draft];
+  try {
+    const { queue } = table.queueFor(REF, QUEUE_OPTIONS);
+    doneToggle(doc).click();
+    await until(
+      'drew the completed rows',
+      () =>
+        drawnRows(doc, 'bghsa-done-rows').length === done.length &&
+        table.progressOf(doc) === null &&
+        queue.forcing().length === 0
+    );
+    doneToggle(doc).click();
+    assert.deepStrictEqual(
+      [drawnRows(doc, 'bghsa-list-rows').sort(), drawnRows(doc, 'bghsa-done-rows').sort()],
+      [open.sort(), done.sort()],
+      'the two views were not both drawn'
+    );
+    const before = asked.length;
+    button(doc, `#${table.ROOT_ID} .bghsa-list-controls .bghsa-list-reload`).click();
+    await until(
+      'read the advisories the reload forced',
+      () => queue.forcing().length === 0 && table.progressOf(doc) === null
+    );
+    assert.deepStrictEqual(
+      asked.slice(before).filter((url) => !url.includes('?')).sort(),
+      open.map(detailUrl).sort(),
+      'the open reload read other than the open rows drawn'
+    );
+  } finally {
+    leave();
+  }
+});
+
+test('the open chip counts the rows drawn while a read takes one out of the filters', async () => {
+  const { doc, draft, leave } = await cachedOnTable('oj');
+  try {
+    await settled();
+    pickOpen(doc, 'state', 'Draft');
+    await settled();
+    assert.deepStrictEqual(drawnRows(doc, 'bghsa-list-rows'), [draft]);
+    assert.deepStrictEqual(openCachedChips(doc), ['1 loaded from cache']);
+    const held = await cache.getAdvisory({ ...REF, ghsaId: draft });
+    assert.ok(held !== null, 'the draft was not cached');
+    // The draft is back in triage, as read before this page load.
+    const read = parseDetail.parseDetail(
+      document(detailHtml({ ghsaId: draft, state: 'Triage', reportedAt: '2026-05-09T00:00:00Z' }))
+    );
+    assert.ok(read !== null, 'the page reads as an advisory');
+    assert.ok(
+      await table.applyEntry(doc, draft, {
+        record: read,
+        observedAt: held.observedAt,
+        state: 'triage',
+      }),
+      'the drawn row was not replaced'
+    );
+    assert.deepStrictEqual(
+      [
+        drawnRows(doc, 'bghsa-list-rows'),
+        textsOf(doc, `#${table.ROOT_ID} .bghsa-list-rows .bghsa-list-state`),
+      ],
+      [[draft], ['Triage']],
+      'the row left the table or kept its old state'
+    );
+    assert.deepStrictEqual(
+      openCachedChips(doc),
+      ['1 loaded from cache'],
+      'the chip stopped counting a row drawn from cache'
+    );
+    // Read again in this page load.
+    await table.applyEntry(doc, draft, { record: read, observedAt: clockAt, state: 'triage' });
+    assert.deepStrictEqual(openCachedChips(doc), [], 'the chip kept a row read in this page load');
+  } finally {
+    leave();
+  }
+});
+
+test('the statistics reload sits with the exports and rereads all it covers once', async () => {
+  const { doc, triage, draft, done, leave } = await cachedOnTable('ob');
+  const ids = [...triage, draft, ...done];
+  try {
+    const over = () => textsOf(doc, `#${statistics.ROOT_ID} .bghsa-stats-over span.Label`);
+    const cached = () =>
+      textsOf(doc, `#${statistics.ROOT_ID} .bghsa-stats-over .bghsa-stats-cached`);
+    statsToggle(doc).click();
+    await until(
+      'drew the statistics',
+      () => !over().includes('Loading...') && cached().length > 0
+    );
+    assert.deepStrictEqual(cached(), ['5 loaded from cache']);
+
+    const reload = () =>
+      button(doc, `#${statistics.ROOT_ID} .bghsa-stats-exports .bghsa-stats-reload`);
+    assert.strictEqual(reload().textContent, 'Reload cached advisories');
+    const exporting = one(doc, `#${statistics.ROOT_ID} .bghsa-stats-exports .bghsa-stats-export`);
+    assert.deepStrictEqual(
+      classesOf(reload()).filter((name) => name !== 'bghsa-stats-reload'),
+      classesOf(exporting).filter((name) => name !== 'bghsa-stats-export'),
+      'the control is styled unlike the exports beside it'
+    );
+
+    /** @type {string[]} */
+    const said = [];
+    let reads = 0;
+    for (const id of ids) {
+      during[detailUrl(id)] = async () => {
+        reads += 1;
+        // A second press while the first one's reads go on.
+        if (reads === 2) reload().click();
+        await settled();
+        said.push(cached().join('+') || 'no chip');
+      };
+    }
+    const before = asked.length;
+    reload().click();
+    const { queue } = table.queueFor(REF, QUEUE_OPTIONS);
+    await until(
+      'read the advisories the reload forced',
+      () => queue.forcing().length === 0 && table.progressOf(doc) === null
+    );
+    await statistics.load(doc);
+    assert.deepStrictEqual(
+      asked.slice(before).filter((url) => !url.includes('?')).sort(),
+      ids.map(detailUrl).sort(),
+      'the reload left a covered advisory unread, or read one twice'
+    );
+    assert.deepStrictEqual(said, [
+      '5 loaded from cache',
+      '4 loaded from cache',
+      '3 loaded from cache',
+      '2 loaded from cache',
+      '1 loaded from cache',
+    ]);
+    assert.deepStrictEqual(cached(), [], 'the chip stands with nothing loaded from cache');
+  } finally {
+    for (const id of ids) delete during[detailUrl(id)];
+    leave();
+  }
+});
+
+test('the open table shown during a statistics reload counts down only open reads', async () => {
+  const { doc, triage, draft, done, leave } = await cachedOnTable('oe');
+  const ids = [...triage, draft, ...done];
+  try {
+    statsToggle(doc).click();
+    await until('drew the statistics', () =>
+      textsOf(doc, `#${statistics.ROOT_ID} .bghsa-stats-over .bghsa-stats-cached`).includes(
+        '5 loaded from cache'
+      )
+    );
+    /** @type {string[]} */
+    const said = [];
+    for (const id of ids) {
+      during[detailUrl(id)] = async () => {
+        // The table is shown once the first read goes out.
+        if (said.length === 0) statsToggle(doc).click();
+        await settled();
+        const progress = textsOf(doc, `#${table.ROOT_ID} .bghsa-list-status .bghsa-list-progress`);
+        said.push(`${done.includes(id) ? 'completed' : 'open'} | ${progress.join('+')}`);
+      };
+    }
+    button(doc, `#${statistics.ROOT_ID} .bghsa-stats-exports .bghsa-stats-reload`).click();
+    const { queue } = table.queueFor(REF, QUEUE_OPTIONS);
+    await until(
+      'read the advisories the reload forced',
+      () => queue.forcing().length === 0 && table.progressOf(doc) === null
+    );
+    assert.deepStrictEqual(said, [
+      'open | Loading (3 left)...',
+      'open | Loading (2 left)...',
+      'open | Loading (1 left)...',
+      'completed | Loading...',
+      'completed | Loading...',
+    ]);
+  } finally {
+    for (const id of ids) delete during[detailUrl(id)];
+    leave();
+  }
+});
+
+test('the completed reload sits beside Reset and its chip in the status line', async () => {
+  const id = ghsa('rhhh');
+  const doc = await page(
+    corpusOf([member({ ghsaId: id, state: 'closed', advisory: ended(id, 'closed', null) })])
+  );
+  try {
+    const reset = one(doc, `#${table.ROOT_ID} .bghsa-done-controls .bghsa-done-reset`);
+    assert.ok(
+      reloadButton(doc).previousElementSibling === reset,
+      'the control does not follow Reset'
+    );
+    assert.ok(reset.classList.contains('mr-2'), 'Reset sits flush against the control');
+    assert.deepStrictEqual(classesOf(reloadButton(doc)), [
+      'bghsa-done-reload',
+      'btn',
+      'btn-sm',
+      'mb-1',
+      'mr-2',
+    ]);
+    assert.deepStrictEqual(
+      textsOf(doc, `#${table.ROOT_ID} .bghsa-done-controls .bghsa-done-cached`),
+      [],
+      'the chip sits among the controls'
+    );
+    const chip = one(doc, `#${view.ROOT_ID} .bghsa-done-header .bghsa-done-cached`);
+    assert.strictEqual(chip.textContent, '1 loaded from cache');
+    assert.ok(
+      chip.previousElementSibling?.classList.contains('bghsa-done-count'),
+      'the chip does not sit beside the count in the status line'
+    );
+  } finally {
+    view.setState(doc, { corpus: null, ref: null });
   }
 });

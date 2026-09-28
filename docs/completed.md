@@ -92,7 +92,7 @@ The list reads "No matches" when filters exclude every row.
 ## Reloading cached advisories
 
 "Reload cached advisories" sits on the filter bar beside "Reset". It reads
-the advisory page of every row the filters keep, however recently the cache
+the advisory page of every row the view shows, however recently the cache
 last read it. A reason another maintainer saved from another machine appears
 once its row's advisory is read again. The reads go through the queue shared
 with the open list, one request per second, and the chip beside the heading
@@ -102,10 +102,11 @@ read is read with the rest. The button is disabled while no row shows. It
 stays enabled during a reload, and a second press queues only rows that
 reload has not taken.
 
-A chip beside the button counts the rows shown whose advisory data comes from
-a read made before this page load, as "56 loaded from cache". A row whose
-advisory has never been read is not counted. The count follows the filters,
-drops as reads land, and the chip disappears at zero.
+A chip beside the row count in the heading counts the rows shown whose
+advisory data comes from a read made before this page load, as "56 loaded
+from cache". A row whose advisory has never been read is not counted. The
+count follows the filters, drops as reads land, and the chip disappears at
+zero.
 
 ## Recording a closure reason
 
@@ -178,7 +179,8 @@ coverage limited to what has been read. While this view shows, the walk takes
 all four lists, then reads the open and the completed advisories' pages.
 Opening the view asks for those reads at once, and the walk starts if none is
 running. Calculations run locally in the page. The statistics view does not
-send data, and its only requests are those of the walk.
+send data, and its only requests are those of the walk and of its "Reload
+cached advisories" button.
 
 A repository without collected data shows "Nothing has been read on this
 repository".
@@ -192,6 +194,18 @@ earlier one. While this view shows, the walk takes the triage and draft lists
 first. The open group reads as loaded first. "4 on GitHub" shows the sum of
 GitHub's tab counts when it differs from the total. "Loading..." appears while
 the list walk and the reads run; the numbers can change as results arrive.
+"56 loaded from cache" counts the covered advisories whose data comes from a
+read made before this page load. An advisory never read is not counted. The
+count drops as reads land, and the chip disappears at zero.
+
+"Reload cached advisories" sits in the statistics heading beside the export
+buttons. It reads the advisory page of every advisory the statistics cover,
+open and completed, however recently the cache last read it. The reads go
+through the queue shared with the other views, one request per second, and
+"Loading..." shows while they run. The statistics are drawn again as each read
+lands. The button is disabled while the collected lists do not hold any
+advisory of the repository, and a second press during a reload queues only
+advisories that reload has not taken.
 
 Below the chips, "Reports by month" and then "Published advisories by month"
 span the full width of the view. The four count boxes follow, then the four
