@@ -484,6 +484,25 @@ the same columns, the same range rule over publication months, and the same
 totals row. It shows its sample size as the published advisories whose detail
 page is read and shows a publication event, out of all published advisories.
 
+Give each of the two month boxes two tabs, "Graph" and "Data". "Data" holds the
+table. "Graph" holds a bar graph of the same months, one bar per month, from
+January of the table's first year through its last month. A month with a count
+of zero keeps its place and does not have a visible bar. The graph fills the
+width of the box and keeps every month in view at every width. Its text keeps
+its size. Each year's number appears once, under the year's January. Numbers
+down the left edge count from 0 at the base of the bars to a top at or above the
+tallest count. The step between two numbers is the smallest value in the series
+1, 2, 5, 10, 20, 50, 100, and so on, with which six steps or fewer reach the
+tallest count. The top is the smallest multiple of the step at or above the
+tallest count. A tallest count of 24 gives 0, 5, 10, 15, 20, 25. A tallest count
+of 5 gives 0, 1, 2, 3, 4, 5. A faint line crosses the graph at the height of
+each number. Each bar stands as high as its count on those numbers. Hovering a
+month shows its name, its year, and its count, as "March 2025: 4". The graph
+takes its colors from GitHub's theme. A box whose table reads "Nothing counted"
+shows only that text, with no tabs. Each box opens on "Graph" at every page load
+and keeps the tab chosen in it for the rest of the page load, through every
+redraw. The arrow keys, Home, and End move between the tabs.
+
 Timing, reconstructed from page-observable events:
 
 - Time to first response, measured to the earlier of the first comment by an

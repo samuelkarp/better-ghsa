@@ -158,6 +158,58 @@ if (typeof require === 'function') {
     'Dec',
   ];
 
+  /** Month names for a bar's hover text, January first. */
+  const MONTH_NAMES = [
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
+  ];
+
+  /**
+   * The two tabs of a months box. `key` names the tab and its panel on the
+   * page. A box shows its graph until another tab is chosen.
+   *
+   * @type {readonly { key: MonthTab, name: string }[]}
+   */
+  const MONTH_TABS = [
+    { key: 'graph', name: 'Graph' },
+    { key: 'data', name: 'Data' },
+  ];
+
+  /** @typedef {'graph' | 'data'} MonthTab */
+
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+
+  /**
+   * The graph's height in pixels, and within it the top of the axis and the
+   * line the bars stand on. The year numbers sit below that line. Widths are
+   * shares of the graph's width. The bars take the width of the box, and
+   * text keeps its size. The 120 pixels between the top and the base divide
+   * evenly into any count of steps up to `AXIS_STEPS`.
+   */
+  const GRAPH_HEIGHT = 160;
+  const GRAPH_TOP = 16;
+  const GRAPH_BASE = 136;
+
+  /** The most steps the axis takes from 0 to its top. */
+  const AXIS_STEPS = 6;
+
+  /** The pixels an axis number takes per digit, and between it and its line. */
+  const AXIS_DIGIT = 8;
+  const AXIS_GAP = 6;
+
+  /** The share of a month's slot its bar takes, centered in the slot. */
+  const BAR_SHARE = 0.7;
+
   /**
    * @type {readonly { key: 'min' | 'median' | 'mean' | 'max', name: string }[]}
    */
@@ -224,6 +276,17 @@ if (typeof require === 'function') {
       ' border-top: 2px solid var(--borderColor-muted, currentColor); }',
     '.bghsa-stats-table th[scope="row"], .bghsa-stats-table thead th:first-child' +
       ' { text-align: left; }',
+    '.bghsa-stats-tabs { margin-bottom: 0; }',
+    '.bghsa-stats-plot { display: flex; }',
+    '.bghsa-stats-axis { display: block; flex: none; overflow: visible; }',
+    '.bghsa-stats-graph { display: block; flex: 1 1 0; min-width: 0; width: 100%;' +
+      ' overflow: visible; }',
+    '.bghsa-stats-bar { fill: var(--bgColor-accent-emphasis, currentColor); }',
+    // A month's slot takes the pointer over its whole height, bar or no bar.
+    '.bghsa-stats-slot { fill: transparent; }',
+    '.bghsa-stats-gridline { stroke: var(--borderColor-muted, currentColor);' +
+      ' stroke-width: 1; }',
+    '.bghsa-stats-plot text { fill: var(--fgColor-muted, currentColor); font-size: 12px; }',
   ].join('\n');
 
   /** What the view holds for each document. @type {WeakMap<Document, Held>} */
@@ -583,9 +646,256 @@ if (typeof require === 'function') {
   }
 
   /**
+   * The tab each months box shows in a document, by the box's hook, for the
+   * page load it was chosen in. A redraw keeps the choice, and a new page
+   * load starts every box on its first tab.
+   *
+   * @type {WeakMap<Document, { load: string | null, tabs: Map<string, MonthTab> }>}
+   */
+  const chosen = new WeakMap();
+
+  /**
+   * @param {Document} doc
+   * @returns {Map<string, MonthTab>} The tabs chosen during this page load.
+   */
+  function chosenOf(doc) {
+    const table = globalThis.bghsa.table;
+    const ref = current(doc).ref;
+    const at = ref === null ? null : table.pageLoadAt(doc, ref);
+    const load = ref === null || at === null ? null : `${table.refKey(ref)} ${at}`;
+    const found = chosen.get(doc);
+    if (found !== undefined && found.load === load) return found.tabs;
+    /** @type {Map<string, MonthTab>} */
+    const tabs = new Map();
+    chosen.set(doc, { load, tabs });
+    return tabs;
+  }
+
+  /**
+   * @param {string} hook
+   * @param {string} part
+   * @returns {string} The id of one part of a months box.
+   */
+  function monthsIdOf(hook, part) {
+    return `bghsa-stats-${hook}-${part}`;
+  }
+
+  /**
+   * @param {number} share
+   * @returns {string} A share of the graph's width as a length.
+   */
+  function widthOf(share) {
+    return `${Number((share * 100).toFixed(4))}%`;
+  }
+
+  /**
+   * @param {Document} doc
+   * @param {string} tag
+   * @param {Record<string, string | number>} attributes
+   * @returns {Element}
+   */
+  function svgElement(doc, tag, attributes) {
+    const node = doc.createElementNS(SVG_NS, tag);
+    for (const [name, value] of Object.entries(attributes)) {
+      node.setAttribute(name, String(value));
+    }
+    return node;
+  }
+
+  /**
+   * The axis of a graph whose busiest month counts `tallest`. The step is the
+   * smallest of 1, 2, 5, 10, 20, 50, and so on that reaches `tallest` in
+   * `AXIS_STEPS` steps or fewer, and the top is the smallest multiple of the
+   * step at or above `tallest`. A graph of nothing but zeros runs to 1.
+   *
+   * @param {number} tallest
+   * @returns {{ step: number, top: number }}
+   */
+  function axisOf(tallest) {
+    const most = Math.max(1, Math.ceil(tallest));
+    for (let scale = 1; ; scale *= 10) {
+      for (const base of [1, 2, 5]) {
+        const step = base * scale;
+        if (most <= step * AXIS_STEPS) return { step, top: Math.ceil(most / step) * step };
+      }
+    }
+  }
+
+  /**
+   * One bar per month of the table, January of its first year through its
+   * last month, beside an axis numbered from 0 at the base to its top at
+   * round steps, with a line across the graph at each number. Each bar
+   * stands as high as its count on the axis. A month without a count keeps
+   * its slot, and each year's number sits under its January.
+   *
+   * @param {Document} doc
+   * @param {ReturnType<import('../done/stats.js')['yearsOf']>} rows
+   * @param {string} labelledBy The id of the box's name.
+   * @returns {Element}
+   */
+  function buildGraph(doc, rows, labelledBy) {
+    const months = rows.flatMap((row) =>
+      row.months.flatMap((count, month) =>
+        count === null ? [] : [{ year: row.year, month, count }]
+      )
+    );
+    const { step, top } = axisOf(Math.max(0, ...months.map((each) => each.count)));
+    const span = GRAPH_BASE - GRAPH_TOP;
+    const slot = 1 / months.length;
+    const gutter = AXIS_DIGIT * String(top).length + AXIS_GAP;
+    const plot = doc.createElement('div');
+    plot.className = 'bghsa-stats-plot';
+    const axis = svgElement(doc, 'svg', {
+      class: 'bghsa-stats-axis',
+      width: gutter,
+      height: GRAPH_HEIGHT,
+      'aria-hidden': 'true',
+    });
+    const svg = svgElement(doc, 'svg', {
+      class: 'bghsa-stats-graph',
+      width: '100%',
+      height: GRAPH_HEIGHT,
+      role: 'img',
+      'aria-labelledby': labelledBy,
+    });
+    plot.append(axis, svg);
+    // A line half a pixel below a whole pixel fills that pixel's row, the
+    // row just under the top of a bar of the same count.
+    for (let value = 0; value <= top; value += step) {
+      const y = GRAPH_BASE - (span * value) / top + 0.5;
+      const number = svgElement(doc, 'text', {
+        class: 'bghsa-stats-tick',
+        x: gutter - AXIS_GAP,
+        y,
+        'text-anchor': 'end',
+        'dominant-baseline': 'central',
+      });
+      number.textContent = String(value);
+      axis.append(number);
+      svg.append(
+        svgElement(doc, 'line', { class: 'bghsa-stats-gridline', x1: 0, x2: '100%', y1: y, y2: y })
+      );
+    }
+    months.forEach((each, index) => {
+      const key = `${each.year}-${String(each.month + 1).padStart(2, '0')}`;
+      const group = svgElement(doc, 'g', { class: 'bghsa-stats-month', 'data-bghsa-month': key });
+      const title = svgElement(doc, 'title', {});
+      title.textContent = `${MONTH_NAMES[each.month]} ${each.year}: ${each.count}`;
+      group.append(title);
+      group.append(
+        svgElement(doc, 'rect', {
+          class: 'bghsa-stats-slot',
+          x: widthOf(index * slot),
+          width: widthOf(slot),
+          y: GRAPH_TOP,
+          height: GRAPH_BASE - GRAPH_TOP,
+        })
+      );
+      if (each.count > 0) {
+        const height = Math.max(1, (span * each.count) / top);
+        group.append(
+          svgElement(doc, 'rect', {
+            class: 'bghsa-stats-bar',
+            x: widthOf((index + (1 - BAR_SHARE) / 2) * slot),
+            width: widthOf(BAR_SHARE * slot),
+            y: GRAPH_BASE - height,
+            height,
+          })
+        );
+      }
+      svg.append(group);
+      if (each.month === 0) {
+        const year = svgElement(doc, 'text', {
+          class: 'bghsa-stats-year',
+          x: widthOf(index * slot),
+          y: GRAPH_HEIGHT - 6,
+        });
+        year.textContent = String(each.year);
+        svg.append(year);
+      }
+    });
+    return plot;
+  }
+
+  /**
+   * Show one tab of a months box and hide the other's panel.
+   *
+   * @param {Element} box
+   * @param {MonthTab} key
+   * @returns {void}
+   */
+  function selectTab(box, key) {
+    for (const tab of box.querySelectorAll('[role="tab"]')) {
+      const on = tab.getAttribute('data-bghsa-tab') === key;
+      tab.setAttribute('aria-selected', String(on));
+      tab.setAttribute('tabindex', on ? '0' : '-1');
+      tab.classList.toggle('selected', on);
+    }
+    for (const panel of box.querySelectorAll('[role="tabpanel"]')) {
+      if (panel.getAttribute('data-bghsa-panel') === key) panel.removeAttribute('hidden');
+      else panel.setAttribute('hidden', '');
+    }
+  }
+
+  /**
+   * The tabs of a months box, with the arrow keys, Home, and End moving
+   * between them.
+   *
+   * @param {Document} doc
+   * @param {Element} box
+   * @param {string} hook
+   * @returns {Element}
+   */
+  function buildTabs(doc, box, hook) {
+    const nav = element(doc, 'div', 'tabnav px-3 pt-2 bghsa-stats-tabs');
+    const list = element(doc, 'div', 'tabnav-tabs');
+    list.setAttribute('role', 'tablist');
+    list.setAttribute('aria-labelledby', monthsIdOf(hook, 'title'));
+    /** @param {MonthTab} key */
+    const choose = (key) => {
+      chosenOf(doc).set(hook, key);
+      selectTab(box, key);
+    };
+    for (const each of MONTH_TABS) {
+      const tab = element(doc, 'button', 'tabnav-tab', each.name);
+      tab.setAttribute('type', 'button');
+      tab.setAttribute('role', 'tab');
+      tab.id = monthsIdOf(hook, `${each.key}-tab`);
+      tab.setAttribute('aria-controls', monthsIdOf(hook, each.key));
+      tab.setAttribute('data-bghsa-tab', each.key);
+      tab.addEventListener('click', () => {
+        choose(each.key);
+      });
+      list.append(tab);
+    }
+    list.addEventListener('keydown', (event) => {
+      const on = list.querySelector('[aria-selected="true"]')?.getAttribute('data-bghsa-tab');
+      const from = Math.max(0, MONTH_TABS.findIndex((each) => each.key === on));
+      const last = MONTH_TABS.length - 1;
+      /** @type {Record<string, number>} */
+      const moves = {
+        ArrowRight: from === last ? 0 : from + 1,
+        ArrowLeft: from === 0 ? last : from - 1,
+        Home: 0,
+        End: last,
+      };
+      const to = moves[/** @type {KeyboardEvent} */ (event).key];
+      const next = to === undefined ? undefined : MONTH_TABS[to];
+      if (next === undefined) return;
+      event.preventDefault();
+      choose(next.key);
+      const tab = list.querySelector(`[data-bghsa-tab="${next.key}"]`);
+      if (tab !== null && 'focus' in tab && typeof tab.focus === 'function') tab.focus();
+    });
+    nav.append(list);
+    return nav;
+  }
+
+  /**
    * Count a month tally in a grid of years by months, through the later of
    * the current month and the latest counted month. A footer row sums each
-   * column.
+   * column. A graph of the same months shows first, and a tab switches to
+   * the grid.
    *
    * @param {Document} doc
    * @param {typeof MONTH_TABLES[number]} table
@@ -597,12 +907,17 @@ if (typeof require === 'function') {
     const box = element(doc, 'div', 'Box mb-3 bghsa-stats-months');
     box.setAttribute('data-bghsa-months', table.hook);
     const counted = tally?.counted ?? 0;
-    box.append(buildHeader(doc, table.name, `${counted} of ${tally?.corpus ?? 0}`));
+    const header = buildHeader(doc, table.name, `${counted} of ${tally?.corpus ?? 0}`);
+    box.append(header);
     const rows = globalThis.bghsa.stats.yearsOf(tally?.counts ?? {}, at);
     if (rows.length === 0) {
       box.append(element(doc, 'div', 'Box-body bghsa-stats-empty', NOTHING_TEXT));
       return box;
     }
+    const titleId = monthsIdOf(table.hook, 'title');
+    header.querySelector('strong')?.setAttribute('id', titleId);
+    const selected = chosenOf(doc).get(table.hook) ?? 'graph';
+    box.append(buildTabs(doc, box, table.hook));
     const grid = element(doc, 'table', 'bghsa-stats-table');
     const head = element(doc, 'thead', '');
     const names = element(doc, 'tr', '');
@@ -638,7 +953,22 @@ if (typeof require === 'function') {
     grid.append(foot);
     const scroll = element(doc, 'div', 'bghsa-stats-scroll');
     scroll.append(grid);
-    box.append(scroll);
+    /** @type {Record<MonthTab, Element>} */
+    const shown = {
+      graph: buildGraph(doc, rows, titleId),
+      data: scroll,
+    };
+    for (const each of MONTH_TABS) {
+      const panel = element(doc, 'div', each.key === 'graph' ? 'p-3' : '');
+      panel.id = monthsIdOf(table.hook, each.key);
+      panel.setAttribute('role', 'tabpanel');
+      panel.setAttribute('aria-labelledby', monthsIdOf(table.hook, `${each.key}-tab`));
+      panel.setAttribute('tabindex', '0');
+      panel.setAttribute('data-bghsa-panel', each.key);
+      panel.append(shown[each.key]);
+      box.append(panel);
+    }
+    selectTab(box, selected);
     return box;
   }
 
@@ -909,8 +1239,14 @@ if (typeof require === 'function') {
     if (surface === null) return null;
     const root = buildView(doc);
     const existing = doc.getElementById(ROOT_ID);
+    // Focus on a tab moves to the same tab in the view drawn over it.
+    const focused = doc.activeElement ?? null;
+    const kept =
+      existing !== null && focused !== null && existing.contains(focused) ? focused.id : '';
     if (existing !== null) existing.replaceWith(root);
     else surface.append(root);
+    const again = kept === '' ? null : root.querySelector(`[role="tab"][id="${kept}"]`);
+    if (again !== null && 'focus' in again && typeof again.focus === 'function') again.focus();
     ensureStyle(doc);
     setHidden(root, table.viewMode(doc) !== MODE);
     return root;
@@ -1029,6 +1365,7 @@ if (typeof require === 'function') {
     SHOW_OPEN,
     EMPTY_TEXT,
     STYLE_TEXT,
+    axisOf,
     stateOf,
     current,
     totalTextOf,

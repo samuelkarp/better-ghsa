@@ -13,6 +13,9 @@ const view = require('../src/done/view.js');
 const statistics = require('../src/stats/statistics.js');
 const allowlist = require('../src/common/allowlist.js');
 
+// Leaving a repository's advisories ends a page load, which reads the location.
+require('../src/content.js');
+
 const { fakeStorage } = require('../test-support/storage.js');
 
 globalThis.DOMParser = /** @type {typeof globalThis.DOMParser} */ (
@@ -822,6 +825,14 @@ test('reports without a time leave the table empty', async () => {
     'Nothing counted'
   );
   assert.strictEqual(doc.querySelector(`#${statistics.ROOT_ID} [data-bghsa-months="reports"] table`), null);
+  for (const hook of ['reports', 'published']) {
+    const box = one(doc, `#${statistics.ROOT_ID} [data-bghsa-months="${hook}"]`);
+    assert.deepStrictEqual(
+      [box.querySelector('[role="tablist"]') !== null, box.querySelector('svg') !== null],
+      [false, false],
+      `the ${hook} box without a count offers tabs or a graph`
+    );
+  }
   const published = `#${statistics.ROOT_ID} [data-bghsa-months="published"]`;
   assert.deepStrictEqual(
     textsOf(doc, `${published} .Box-header > *`),
@@ -901,6 +912,663 @@ test('published advisories are counted by the month of their first publication',
     ]
   );
   assert.deepStrictEqual(textsOf(doc, `${box} tfoot th`), ['Total'], 'the totals row is the footer');
+});
+
+/**
+ * Draw the statistics over reports in March 2024 (two), January 2026, and
+ * August 2026, the month the clock reads, and one publication, in February
+ * 2025.
+ *
+ * @param {string} owner
+ * @returns {Promise<Document>}
+ */
+async function graphed(owner) {
+  const published = ghsa('gaaa');
+  const unread = ghsa('gbbb');
+  const crossing = ghsa('gccc');
+  const current = ghsa('gddd');
+  const { doc } = await repository({
+    owner,
+    states: {
+      triage: [{ ghsaId: crossing }, { ghsaId: current, openedAt: '2026-08-01T00:00:00Z' }],
+      published: [{ ghsaId: published }],
+      closed: [{ ghsaId: unread, openedAt: '2024-03-20T00:00:00Z' }],
+    },
+    reads: [
+      { ghsaId: crossing, state: 'Triage', reportedAt: '2026-01-01T00:00:00Z' },
+      {
+        ghsaId: published,
+        state: 'Published',
+        reportedAt: '2024-03-10T00:00:00Z',
+        timeline: [{ at: '2025-02-01T00:00:00Z', text: 'samuelkarp published this' }],
+      },
+    ],
+    crawl: ['open', 'done'],
+  });
+  statsToggle(doc).click();
+  await statistics.load(doc);
+  return doc;
+}
+
+/**
+ * @param {Document} doc
+ * @param {string} hook
+ * @returns {Element} The months box the hook names.
+ */
+function monthsBox(doc, hook) {
+  return one(doc, `#${statistics.ROOT_ID} [data-bghsa-months="${hook}"]`);
+}
+
+/**
+ * @param {Element} box
+ * @returns {{ tab: string, selected: string | null, shown: boolean }[]} Each
+ *   tab's name, whether it is selected, and whether its panel shows.
+ */
+function tabsOf(box) {
+  return Array.from(box.querySelectorAll('[role="tablist"] [role="tab"]'), (tab) => {
+    const panel = one(box, `#${tab.getAttribute('aria-controls')}`);
+    return {
+      tab: (tab.textContent ?? '').trim(),
+      selected: tab.getAttribute('aria-selected'),
+      shown: !panel.hasAttribute('hidden'),
+    };
+  });
+}
+
+const ON_GRAPH = [
+  { tab: 'Graph', selected: 'true', shown: true },
+  { tab: 'Data', selected: 'false', shown: false },
+];
+
+const ON_DATA = [
+  { tab: 'Graph', selected: 'false', shown: false },
+  { tab: 'Data', selected: 'true', shown: true },
+];
+
+/**
+ * @param {Element} box
+ * @param {string} name
+ * @returns {HTMLElement} The tab of that name.
+ */
+function tabNamed(box, name) {
+  const found = Array.from(box.querySelectorAll('[role="tab"]')).find(
+    (tab) => (tab.textContent ?? '').trim() === name
+  );
+  if (found === undefined) throw new Error(`no tab ${name}`);
+  return /** @type {HTMLElement} */ (/** @type {unknown} */ (found));
+}
+
+/**
+ * @param {Element} scope
+ * @param {Element} element
+ * @returns {string | null} The element's accessible name from
+ *   `aria-labelledby` or `aria-label`, or null when it carries neither.
+ */
+function nameOf(scope, element) {
+  const labelledBy = element.getAttribute('aria-labelledby');
+  if (labelledBy !== null) {
+    return labelledBy
+      .split(/\s+/)
+      .filter((id) => id !== '')
+      .map((id) => textOf(scope, `#${id}`))
+      .join(' ');
+  }
+  const label = element.getAttribute('aria-label');
+  return label === null ? null : label.replace(/\s+/g, ' ').trim();
+}
+
+test('each months box opens on its graph and switches on its own', async () => {
+  const doc = await graphed('stats-tabs');
+
+  for (const hook of ['reports', 'published']) {
+    const box = monthsBox(doc, hook);
+    assert.deepStrictEqual(tabsOf(box), ON_GRAPH, `the ${hook} box opens on its table`);
+    const list = one(box, '[role="tablist"]');
+    assert.strictEqual(
+      textOf(box, `#${list.getAttribute('aria-labelledby')}`),
+      textOf(box, '.Box-header strong'),
+      `the ${hook} tabs are not named by their box`
+    );
+    const graph = one(box, 'svg.bghsa-stats-graph');
+    assert.strictEqual(graph.getAttribute('role'), 'img');
+    assert.strictEqual(
+      nameOf(box, graph),
+      textOf(box, '.Box-header strong'),
+      `the ${hook} graph is not named by its box`
+    );
+    for (const tab of box.querySelectorAll('[role="tab"]')) {
+      const panel = one(box, `#${tab.getAttribute('aria-controls')}`);
+      assert.strictEqual(panel.getAttribute('role'), 'tabpanel');
+      assert.strictEqual(panel.getAttribute('aria-labelledby'), tab.id);
+    }
+  }
+  assert.ok(
+    one(monthsBox(doc, 'reports'), '[role="tabpanel"]:not([hidden])').querySelector('svg'),
+    'the shown panel holds no graph'
+  );
+
+  tabNamed(monthsBox(doc, 'reports'), 'Data').click();
+  assert.deepStrictEqual(tabsOf(monthsBox(doc, 'reports')), ON_DATA);
+  assert.ok(
+    one(monthsBox(doc, 'reports'), '[role="tabpanel"]:not([hidden])').querySelector('table'),
+    'the shown panel holds no table'
+  );
+  assert.deepStrictEqual(
+    tabsOf(monthsBox(doc, 'published')),
+    ON_GRAPH,
+    'the other box followed the switch'
+  );
+
+  tabNamed(monthsBox(doc, 'reports'), 'Graph').click();
+  assert.deepStrictEqual(tabsOf(monthsBox(doc, 'reports')), ON_GRAPH);
+});
+
+test('the arrow keys, Home, and End move between the tabs', async () => {
+  const doc = await graphed('stats-tab-keys');
+  const box = monthsBox(doc, 'reports');
+  /** @type {Element[]} */
+  const focused = [];
+  const proto = Object.getPrototypeOf(tabNamed(box, 'Graph'));
+  const had = Object.getOwnPropertyDescriptor(proto, 'focus');
+  proto.focus = function focus() {
+    focused.push(this);
+  };
+  /** @param {string} key */
+  const press = (key) => {
+    const event = new (/** @type {any} */ (doc.defaultView).Event)('keydown', { bubbles: true });
+    Object.defineProperty(event, 'key', { value: key });
+    tabNamed(box, 'Graph').dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+  try {
+    assert.deepStrictEqual(
+      Array.from(box.querySelectorAll('[role="tab"]'), (tab) => tab.getAttribute('tabindex')),
+      ['0', '-1'],
+      'Tab reaches a tab other than the selected one'
+    );
+    assert.ok(press('ArrowRight'));
+    assert.deepStrictEqual(tabsOf(box), ON_DATA, 'ArrowRight');
+    assert.deepStrictEqual(
+      focused.map((node) => node.id),
+      [tabNamed(box, 'Data').id],
+      'focus stayed behind'
+    );
+    press('ArrowRight');
+    assert.deepStrictEqual(tabsOf(box), ON_GRAPH, 'ArrowRight past the last tab');
+    press('End');
+    assert.deepStrictEqual(tabsOf(box), ON_DATA, 'End');
+    press('Home');
+    assert.deepStrictEqual(tabsOf(box), ON_GRAPH, 'Home');
+    press('ArrowLeft');
+    assert.deepStrictEqual(tabsOf(box), ON_DATA, 'ArrowLeft past the first tab');
+    assert.strictEqual(press('a'), false, 'a key the tabs do not use was taken');
+    assert.deepStrictEqual(tabsOf(box), ON_DATA);
+  } finally {
+    if (had === undefined) delete proto.focus;
+    else Object.defineProperty(proto, 'focus', had);
+  }
+});
+
+test('a chosen tab holds through the redraws of its page load', async () => {
+  const doc = await graphed('stats-tab-redraw');
+  tabNamed(monthsBox(doc, 'reports'), 'Data').click();
+
+  await statistics.load(doc);
+  assert.deepStrictEqual(tabsOf(monthsBox(doc, 'reports')), ON_DATA, 'a load redraw');
+  statistics.draw(doc);
+  assert.deepStrictEqual(tabsOf(monthsBox(doc, 'reports')), ON_DATA, 'a plain redraw');
+  assert.deepStrictEqual(tabsOf(monthsBox(doc, 'published')), ON_GRAPH);
+
+  // Leaving the repository's advisories and coming back is a new page load.
+  const base = '/stats-tab-redraw/Spoon-Knife/security/advisories';
+  table.visit(doc, base);
+  table.visit(doc, '/stats-tab-redraw');
+  table.visit(doc, base);
+  clockAt += 1000;
+  await statistics.load(doc);
+  assert.deepStrictEqual(tabsOf(monthsBox(doc, 'reports')), ON_GRAPH, 'a new page load');
+});
+
+test('focus on a tab stays on it through a redraw', async () => {
+  const doc = await graphed('stats-tab-focus');
+  const data = tabNamed(monthsBox(doc, 'reports'), 'Data');
+  data.click();
+  /** @type {Element[]} */
+  const focused = [];
+  const proto = Object.getPrototypeOf(data);
+  const had = Object.getOwnPropertyDescriptor(proto, 'focus');
+  proto.focus = function focus() {
+    focused.push(this);
+  };
+  Object.defineProperty(doc, 'activeElement', { configurable: true, get: () => data });
+  try {
+    statistics.draw(doc);
+  } finally {
+    delete (/** @type {any} */ (doc)).activeElement;
+    if (had === undefined) delete proto.focus;
+    else Object.defineProperty(proto, 'focus', had);
+  }
+  const again = tabNamed(monthsBox(doc, 'reports'), 'Data');
+  assert.ok(again !== data, 'the view was not drawn again');
+  assert.ok(focused.length === 1 && focused[0] === again, 'focus left the tab');
+});
+
+/**
+ * @param {Element} box
+ * @returns {Map<string, Element>} The graph's months by their YYYY-MM key, in
+ *   drawing order.
+ */
+function barsOf(box) {
+  return new Map(
+    Array.from(box.querySelectorAll('svg [data-bghsa-month]'), (group) => [
+      group.getAttribute('data-bghsa-month') ?? '',
+      group,
+    ])
+  );
+}
+
+test('a graph has a slot per month of its table, each named on hover', async () => {
+  const doc = await graphed('stats-graph-months');
+
+  const reports = barsOf(monthsBox(doc, 'reports'));
+  const keys = Array.from(reports.keys());
+  // January 2024 through August 2026, the month the clock reads.
+  assert.strictEqual(keys.length, 12 + 12 + 8);
+  assert.strictEqual(keys[0], '2024-01', 'the graph does not start in January');
+  assert.strictEqual(keys[keys.length - 1], '2026-08', 'the graph runs past its table');
+  assert.deepStrictEqual(
+    ['2024-03', '2025-06', '2026-08'].map((key) =>
+      (reports.get(key)?.querySelector('title')?.textContent ?? '').trim()
+    ),
+    ['March 2024: 2', 'June 2025: 0', 'August 2026: 1']
+  );
+  assert.deepStrictEqual(
+    keys.filter((key) => reports.get(key)?.querySelector('.bghsa-stats-bar')),
+    ['2024-03', '2026-01', '2026-08'],
+    'a month without a count shows a bar, or one with a count shows none'
+  );
+
+  const published = barsOf(monthsBox(doc, 'published'));
+  const months = Array.from(published.keys());
+  assert.deepStrictEqual([months[0], months[months.length - 1]], ['2025-01', '2026-08']);
+  assert.strictEqual(
+    (published.get('2025-02')?.querySelector('title')?.textContent ?? '').trim(),
+    'February 2025: 1'
+  );
+});
+
+test('each month and its bar stand in that month\'s share of the width', async () => {
+  const doc = await graphed('stats-graph-slots');
+  const bars = barsOf(monthsBox(doc, 'reports'));
+  // January 2024 through August 2026 is 32 equal shares of the width.
+  const shares = 32;
+  assert.strictEqual(bars.size, shares);
+  /**
+   * @param {Element | null | undefined} node
+   * @param {string} name
+   */
+  const percent = (node, name) => {
+    const value = node?.getAttribute(name) ?? '';
+    assert.match(value, /^[\d.]+%$/, `${name} is not a share of the width`);
+    return Number(value.slice(0, -1));
+  };
+  let drawn = 0;
+  for (const [key, group] of bars) {
+    const [year, month] = key.split('-').map(Number);
+    const index = ((year ?? 0) - 2024) * 12 + (month ?? 0) - 1;
+    const left = (index * 100) / shares;
+    const right = ((index + 1) * 100) / shares;
+    const slot = group.querySelector('.bghsa-stats-slot');
+    assert.ok(Math.abs(percent(slot, 'x') - left) < 0.001, `the slot of ${key} is misplaced`);
+    assert.ok(
+      Math.abs(percent(slot, 'width') - (right - left)) < 0.001,
+      `the slot of ${key} is not one share wide`
+    );
+    const bar = group.querySelector('.bghsa-stats-bar');
+    if (bar === null) continue;
+    drawn += 1;
+    const from = percent(bar, 'x');
+    const to = from + percent(bar, 'width');
+    assert.ok(
+      from >= left - 0.001 && to <= right + 0.001,
+      `the bar of ${key} runs from ${from}% to ${to}%, outside ${left}% to ${right}%`
+    );
+  }
+  assert.strictEqual(drawn, 3, 'the months with a count do not all show a bar');
+});
+
+test('each year is named once, under its January', async () => {
+  const doc = await graphed('stats-graph-years');
+  const box = monthsBox(doc, 'reports');
+  const bars = barsOf(box);
+  const years = Array.from(box.querySelectorAll('svg text.bghsa-stats-year'));
+  assert.deepStrictEqual(
+    years.map((node) => node.textContent),
+    ['2024', '2025', '2026']
+  );
+  for (const year of years) {
+    const january = bars.get(`${year.textContent}-01`)?.querySelector('.bghsa-stats-slot');
+    assert.strictEqual(year.getAttribute('x'), january?.getAttribute('x'), `${year.textContent}`);
+    const base = Number(january?.getAttribute('y')) + Number(january?.getAttribute('height'));
+    assert.ok(Number(year.getAttribute('y')) > base, `${year.textContent} is not under its bars`);
+  }
+});
+
+test('the axis runs from 0 to a round top at round steps', () => {
+  // The step is the smallest of 1, 2, 5, 10, 20, 50, and so on that climbs
+  // from 0 past the busiest month in six steps or fewer, and the top is the
+  // first multiple of the step at or above that month.
+  const cases = [
+    { tallest: 0, step: 1, top: 1 },
+    { tallest: 1, step: 1, top: 1 },
+    { tallest: 5, step: 1, top: 5 },
+    { tallest: 6, step: 1, top: 6 },
+    { tallest: 7, step: 2, top: 8 },
+    { tallest: 13, step: 5, top: 15 },
+    { tallest: 24, step: 5, top: 25 },
+    { tallest: 60, step: 10, top: 60 },
+    { tallest: 61, step: 20, top: 80 },
+    { tallest: 116, step: 20, top: 120 },
+  ];
+  for (const { tallest, step, top } of cases) {
+    assert.deepStrictEqual(statistics.axisOf(tallest), { step, top }, `busiest month ${tallest}`);
+  }
+});
+
+/**
+ * @param {Element} box
+ * @returns {{ numbers: { text: string, y: number }[] }} The axis numbers from
+ *   the top down.
+ */
+function axisOfBox(box) {
+  const numbers = Array.from(box.querySelectorAll('svg text:not(.bghsa-stats-year)'), (node) => ({
+    text: node.textContent ?? '',
+    y: Number(node.getAttribute('y')),
+  })).sort((a, b) => a.y - b.y);
+  return { numbers };
+}
+
+/**
+ * @param {Element} element
+ * @returns {Map<string, string>} The declarations of every rule outside a
+ *   container query whose selector matches the element, later rules winning.
+ */
+function matchedStyleOf(element) {
+  /** @type {Map<string, string>} */
+  const style = new Map();
+  for (const rule of rulesOf(statistics.STYLE_TEXT)) {
+    if (rule.query !== null || !element.matches(rule.selector)) continue;
+    for (const [property, value] of rule.declarations) style.set(property, value);
+  }
+  return style;
+}
+
+/**
+ * @param {Element} element
+ * @param {string} name
+ * @returns {string | undefined} The attribute, or else the matched style.
+ */
+function presented(element, name) {
+  return element.getAttribute(name) ?? matchedStyleOf(element).get(name);
+}
+
+/** @type {Map<number, Promise<Document>>} */
+const axisGraphs = new Map();
+
+/**
+ * Draw the statistics over `tallest` reports in March 2026, once per count.
+ *
+ * @param {number} tallest
+ * @returns {Promise<Document>}
+ */
+function axisGraph(tallest) {
+  let drawn = axisGraphs.get(tallest);
+  if (drawn === undefined) {
+    const triage = Array.from({ length: tallest }, (_, index) => ({
+      ghsaId: ghsa(`x${String(index).padStart(3, '0')}`),
+      openedAt: '2026-03-05T00:00:00Z',
+    }));
+    drawn = repository({
+      owner: `stats-graph-axis-${tallest}`,
+      states: { triage },
+      crawl: ['open', 'done'],
+    }).then(async ({ doc }) => {
+      statsToggle(doc).click();
+      await statistics.load(doc);
+      return doc;
+    });
+    axisGraphs.set(tallest, drawn);
+  }
+  return drawn;
+}
+
+// Busiest months that take the axis through one, four, five, and six steps,
+// and to tops of one, two, and three digits.
+const AXIS_CASES = [1, 4, 5, 6, 60, 101];
+
+/**
+ * @param {Element} box
+ * @returns {{ plot: Element, axis: Element, graph: Element, numbers: Element[] }}
+ *   The graph's two pictures, the one holding the axis numbers and the one
+ *   holding the lines across the graph, and the numbers.
+ */
+function axisParts(box) {
+  const plot = one(box, '.bghsa-stats-plot');
+  const numbers = Array.from(plot.querySelectorAll('svg text:not(.bghsa-stats-year)'));
+  const axis = numbers[0]?.closest('svg');
+  const graph = plot.querySelector('svg line')?.closest('svg');
+  if (axis === null || axis === undefined) throw new Error('the graph has no axis numbers');
+  if (graph === null || graph === undefined) throw new Error('the graph has no lines');
+  assert.ok(
+    numbers.every((number) => number.closest('svg') === axis),
+    'the axis numbers are split across pictures'
+  );
+  return { plot, axis, graph, numbers };
+}
+
+test('the axis numbers stand in their own column, left of the graph', async () => {
+  for (const tallest of AXIS_CASES) {
+    const { plot, axis, graph } = axisParts(monthsBox(await axisGraph(tallest), 'reports'));
+    const context = `busiest month ${tallest}`;
+    const children = Array.from(plot.children);
+    assert.notStrictEqual(axis, graph, `${context}: the numbers share the graph's picture`);
+    assert.ok(
+      children.indexOf(axis) >= 0 && children.indexOf(axis) < children.indexOf(graph),
+      `${context}: the axis does not come before the graph`
+    );
+    const row = matchedStyleOf(plot);
+    assert.match(
+      row.get('display') ?? '',
+      /^(inline-)?flex$/,
+      `${context}: the two do not share a row`
+    );
+  }
+});
+
+test('the axis and the graph share their top and their height', async () => {
+  for (const tallest of AXIS_CASES) {
+    const { axis, graph } = axisParts(monthsBox(await axisGraph(tallest), 'reports'));
+    const context = `busiest month ${tallest}`;
+    // A number and its line are compared by their heights inside two
+    // pictures, which holds only if the pictures start at the same top and
+    // are equally tall.
+    const heights = [axis, graph].map((part) => presented(part, 'height'));
+    assert.match(heights[0] ?? '', /^\d+(px)?$/, `${context}: the axis has no height in pixels`);
+    assert.strictEqual(
+      heights[1],
+      heights[0],
+      `${context}: the axis and the graph differ in height`
+    );
+  }
+});
+
+test('each axis number is centered on its line, and the steps are even whole pixels', async () => {
+  for (const tallest of AXIS_CASES) {
+    const { numbers, graph } = axisParts(monthsBox(await axisGraph(tallest), 'reports'));
+    const context = `busiest month ${tallest}`;
+    for (const number of numbers) {
+      assert.ok(
+        ['central', 'middle'].includes(presented(number, 'dominant-baseline') ?? ''),
+        `${context}: the number ${number.textContent} is not centered on its height`
+      );
+    }
+    const heights = numbers.map((number) => Number(number.getAttribute('y'))).sort((a, b) => a - b);
+    const lines = Array.from(graph.querySelectorAll('line'));
+    for (const line of lines) {
+      assert.deepStrictEqual(
+        [line.getAttribute('x1'), line.getAttribute('x2'), line.getAttribute('y2')],
+        ['0', '100%', line.getAttribute('y1')],
+        `${context}: a line is not level across the graph`
+      );
+    }
+    assert.deepStrictEqual(
+      lines.map((line) => Number(line.getAttribute('y1'))).sort((a, b) => a - b),
+      heights,
+      `${context}: a number is not at the height of its line`
+    );
+    const downward = [...numbers]
+      .sort((a, b) => Number(a.getAttribute('y')) - Number(b.getAttribute('y')))
+      .map((number) => Number(number.textContent));
+    assert.deepStrictEqual(
+      downward,
+      [...downward].sort((a, b) => b - a),
+      `${context}: the axis does not count up from 0 at the bottom`
+    );
+    const steps = heights.slice(1).map((height, index) => height - (heights[index] ?? 0));
+    assert.ok(steps.length > 0, `${context}: the axis has one number`);
+    for (const step of steps) {
+      // A step of a fraction of a pixel puts some lines a pixel further apart
+      // than others on the screen.
+      assert.ok(Number.isInteger(step), `${context}: a step of ${step} pixels`);
+      assert.strictEqual(step, steps[0], `${context}: the steps are not evenly spaced`);
+    }
+  }
+});
+
+test('the axis numbers are right-aligned and fit inside their column', async () => {
+  // A digit takes at most 0.6 of the font size in the fonts GitHub asks for,
+  // whose digits all take one width.
+  const DIGIT_EM = 0.6;
+  for (const tallest of AXIS_CASES) {
+    const { axis, numbers } = axisParts(monthsBox(await axisGraph(tallest), 'reports'));
+    const context = `busiest month ${tallest}`;
+    const top = Math.max(...numbers.map((number) => Number(number.textContent)));
+    assert.ok(top >= tallest, `${context}: the axis stops at ${top}`);
+    const width = presented(axis, 'width') ?? '';
+    assert.match(width, /^\d+(px)?$/, `${context}: the axis column has no width in pixels`);
+    const column = Number.parseFloat(width);
+    const rights = numbers.map((number) => {
+      const text = number.textContent ?? '';
+      const size = Number.parseFloat(presented(number, 'font-size') ?? '');
+      assert.ok(size > 0, `${context}: the number ${text} has no font size`);
+      const width = text.length * DIGIT_EM * size;
+      const at = Number(number.getAttribute('x') ?? '0');
+      const anchor = presented(number, 'text-anchor') ?? 'start';
+      const left = anchor === 'end' ? at - width : anchor === 'middle' ? at - width / 2 : at;
+      assert.ok(left >= 0, `${context}: the number ${text} runs out the left of its column`);
+      assert.ok(
+        left + width <= column,
+        `${context}: the number ${text} runs into the graph, to ${left + width} of ${column}`
+      );
+      return left + width;
+    });
+    for (const right of rights) {
+      assert.ok(
+        Math.abs(right - (rights[0] ?? 0)) < 1e-9,
+        `${context}: the numbers are not right-aligned`
+      );
+    }
+  }
+});
+
+test('a screen reader hears the graph by its name and not the axis numbers', async () => {
+  const { numbers } = axisParts(monthsBox(await axisGraph(2), 'reports'));
+  for (const number of numbers) {
+    assert.ok(
+      number.closest('[aria-hidden="true"]') !== null,
+      `the axis number ${number.textContent} is read aloud`
+    );
+  }
+});
+
+/**
+ * Draw the statistics over seven reports in March 2026 and two in May 2026.
+ *
+ * @param {string} owner
+ * @returns {Promise<Document>}
+ */
+async function steppedGraph(owner) {
+  const triage = Array.from('cfghjmpqr', (letter, index) => ({
+    ghsaId: ghsa(`j${letter}${letter}${letter}`),
+    openedAt: index < 7 ? '2026-03-05T00:00:00Z' : '2026-05-05T00:00:00Z',
+  }));
+  const { doc } = await repository({ owner, states: { triage }, crawl: ['open', 'done'] });
+  statsToggle(doc).click();
+  await statistics.load(doc);
+  return doc;
+}
+
+test('each bar stands as high as its count on the axis', async () => {
+  const doc = await steppedGraph('stats-graph-height');
+  const box = monthsBox(doc, 'reports');
+  const { numbers } = axisOfBox(box);
+  // The busiest month counts 7, so the axis runs to 8 in steps of 2.
+  const zero = numbers[numbers.length - 1]?.y ?? 0;
+  const eight = numbers[0]?.y ?? 0;
+  /** @param {number} count The height of that count on the axis. */
+  const heightOf = (count) => zero + ((eight - zero) * count) / 8;
+  const bars = barsOf(box);
+  for (const [key, count] of [
+    ['2026-03', 7],
+    ['2026-05', 2],
+  ]) {
+    const bar = bars.get(String(key))?.querySelector('.bghsa-stats-bar');
+    if (bar === undefined || bar === null) throw new Error(`no bar for ${key}`);
+    const top = Number(bar.getAttribute('y'));
+    const base = top + Number(bar.getAttribute('height'));
+    assert.ok(Math.abs(base - zero) <= 0.5, `the bar of ${key} does not stand on 0`);
+    assert.ok(
+      Math.abs(top - heightOf(Number(count))) <= 0.5,
+      `the bar of ${key} reaches ${top}, not its count ${count} at ${heightOf(Number(count))}`
+    );
+  }
+});
+
+test('a graph takes its colors from the GitHub theme', async () => {
+  const doc = await graphed('stats-graph-colors');
+  const plot = one(monthsBox(doc, 'reports'), '.bghsa-stats-plot');
+  const svg = one(plot, 'svg.bghsa-stats-graph');
+  const texts = Array.from(plot.querySelectorAll('text'));
+  assert.ok(texts.length > 0, 'the graph carries no text');
+  const lines = Array.from(svg.querySelectorAll('line'));
+  assert.ok(lines.length > 0, 'the graph carries no line');
+  const colors = [
+    ['bar', matchedStyleOf(one(svg, '.bghsa-stats-bar')).get('fill')],
+    ...lines.map((node, index) => [`line ${index}`, matchedStyleOf(node).get('stroke')]),
+    ...texts.map((node) => [`text ${node.textContent}`, matchedStyleOf(node).get('fill')]),
+  ];
+  // GitHub's Primer theme names its colors --fgColor-*, --bgColor-*, and
+  // --borderColor-*.
+  const primer = /^var\(--(?:fgColor|bgColor|borderColor)-[a-zA-Z]+(?:-[a-zA-Z]+)*\s*[,)]/;
+  for (const [part, color] of colors) {
+    assert.match(color ?? '', primer, `the ${part} color is not the theme's`);
+  }
+});
+
+test('a graph takes the width of its box without scaling its text', async () => {
+  const doc = await graphed('stats-graph-width');
+  const plot = one(monthsBox(doc, 'reports'), '.bghsa-stats-plot');
+  for (const each of plot.querySelectorAll('svg')) {
+    assert.strictEqual(each.getAttribute('viewBox'), null, 'a view box scales the text with it');
+  }
+  const svg = one(plot, 'svg.bghsa-stats-graph');
+  assert.strictEqual(svg.getAttribute('width'), '100%');
+  // The graph takes what the axis numbers leave of the row, and no more.
+  const graphRule = rulesOf(statistics.STYLE_TEXT).find(
+    (rule) => rule.query === null && rule.selector === '.bghsa-stats-graph'
+  );
+  assert.strictEqual(graphRule?.declarations.get('min-width'), '0', 'the graph cannot shrink');
+  assert.strictEqual(graphRule?.declarations.get('flex'), '1 1 0');
 });
 
 test('closure reasons count a close with no reason and list the unread apart', async () => {

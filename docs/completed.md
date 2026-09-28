@@ -225,32 +225,33 @@ response", "Time to accept", "Time to close", and "Time to publish".
 
 ### Reports by month
 
-"Reports by month" is a table across the full width of the view, at the top of
-the statistics. Its columns are "Year", "Jan" through "Dec", and "Total". The table ends
-at the later of the current UTC month and the month of the latest report. A
-report dated ahead of the browser's clock counts. Each row is a year, from the
-year of the earliest report to the year the table ends, oldest first. A cell
-counts open and completed advisories reported in that month, read in UTC: a
-report at 23:30 on December 31 in New York (UTC-5) counts in January. An
-advisory whose detail read lacks a report time, because it is not loaded yet
-or its page shows none, uses the time its list row shows. Months without reports
-show 0, months after the end of the table are blank, and "Total" sums the row. A
-year without reports between two with them appears with all zeros. A last row,
-"Total", sums each month across the years, a blank month adding nothing. Its
-last cell sums the whole table and equals the sample size's first number.
+"Reports by month" is a box across the full width of the view, at the top of the
+statistics, holding a graph and a table. The table's columns are "Year", "Jan"
+through "Dec", and "Total". The table ends at the later of the current UTC month
+and the month of the latest report. A report dated ahead of the browser's clock
+counts. Each row is a year, from the year of the earliest report to the year the
+table ends, oldest first. A cell counts open and completed advisories reported
+in that month, read in UTC: a report at 23:30 on December 31 in New York (UTC-5)
+counts in January. An advisory whose detail read lacks a report time, because it
+is not loaded yet or its page shows none, uses the time its list row shows.
+Months without reports show 0, months after the end of the table are blank, and
+"Total" sums the row. A year without reports between two with them appears with
+all zeros. A last row, "Total", sums each month across the years, a blank month
+adding nothing. Its last cell sums the whole table and equals the sample size's
+first number.
 
 The sample size counts advisories with a report time out of all advisories.
 With no report time at all, the table reads "Nothing counted".
 
 ### Published advisories by month
 
-"Published advisories by month" is a table across the full width of the view,
-directly below "Reports by month", with the same columns and the same "Total"
-row. A cell counts published advisories first published in that UTC month: the
-month of the earliest publication on the advisory's timeline, the event "Time
-to publish" measures to. An advisory published in November 2024 and published
-again in February 2025 counts in November 2024 alone. Triage, draft, and closed
-advisories are outside the table.
+"Published advisories by month" is a box across the full width of the view,
+directly below "Reports by month", holding a graph and a table with the same
+columns and the same "Total" row. A cell counts published advisories first
+published in that UTC month: the month of the earliest publication on the
+advisory's timeline, the event "Time to publish" measures to. An advisory
+published in November 2024 and published again in February 2025 counts in
+November 2024 alone. Triage, draft, and closed advisories are outside the table.
 
 The table runs from the year of the earliest publication to the later of the
 current UTC month and the month of the latest publication. Months without a
@@ -260,6 +261,39 @@ The sample size counts the published advisories whose page is loaded and shows
 a publication, out of all published advisories: with 4 published advisories, 1
 of them not loaded yet and 1 whose page does not show a publication, it reads
 "2 of 4". With no publication counted, the table reads "Nothing counted".
+
+### Graph and Data
+
+Each of the two month boxes has two tabs under its heading, "Graph" and
+"Data". "Data" holds the table. "Graph" holds a bar graph of the same months,
+one bar per month from January of the table's first year through its last
+month, and is the tab each box opens on. The two boxes switch apart: choosing
+"Data" in one leaves the other on its graph.
+
+A month with a count of 0 keeps its place in the graph and does not have a
+visible bar. The months after the end of the table are not drawn. The graph
+fills the width of the box and keeps every month in view at every width. Its
+text keeps its size. Each year's number appears once, under that year's
+January. The bars are unlabeled.
+
+Numbers down the left edge of the graph count from 0 at the base of the bars to
+a round top at or above the busiest month. The step between two numbers is 1, 2,
+or 5, or 10, 20, or 50, and so on, the smallest of these with which six steps or
+fewer reach the busiest month. A busiest month of 24 gives 0, 5, 10, 15, 20, 25.
+A busiest month of 7 gives 0, 2, 4, 6, 8. A faint line crosses the graph at each
+number. Each bar stands as high as its count on those numbers: a month of 7
+beside a top of 8 stops short of the top line. Hovering a month shows its name,
+year, and count, like "March 2025: 4", in both graphs and for a month of 0 too.
+
+The bars, the lines, and the text take their colors from GitHub's theme,
+light, dark, or high contrast. A box whose table reads "Nothing counted" shows
+only that text, with no tabs and no graph.
+
+A chosen tab holds while the statistics are drawn again, as each read of
+"Reload cached advisories" lands, and when the statistics view is shown again.
+Every page load opens both boxes on "Graph". The chosen tab is not stored.
+With the keyboard, Tab reaches the chosen tab, and the left and right arrow
+keys, Home, and End choose another.
 
 ### Counts
 
