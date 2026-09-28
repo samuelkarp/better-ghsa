@@ -923,7 +923,7 @@ test('a summary says whether it is over the whole corpus', async () => {
 
 /**
  * Run `body` with the process's local time zone set to `zone`, which Node
- * applies at once, so a check does not depend on the host's zone.
+ * applies at once. A check then does not depend on the host's zone.
  *
  * @param {string} zone
  * @param {() => void} body
@@ -985,7 +985,7 @@ test('the years of reports run through the later of now and the latest report', 
 });
 
 test('the month totals sum each month across the years', () => {
-  // August 2026, so September to December of 2026 are blank.
+  // The instant is in August 2026. September to December of 2026 are blank.
   const at = Date.parse('2026-08-15T00:00:00Z');
   const rows = stats.yearsOf({ '2025-03': 1, '2025-11': 2, '2026-03': 3 }, at);
   assert.deepStrictEqual(stats.monthTotalsOf(rows), {

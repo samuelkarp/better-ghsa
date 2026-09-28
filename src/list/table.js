@@ -1904,7 +1904,7 @@ if (typeof require === 'function') {
 
   /**
    * The last walk of each repository, by repository key, settled either way.
-   * Each walk saves its own copy of the repository's lists, so a walk starts
+   * Each walk saves its own copy of the repository's lists. A walk starts
    * after the one before it settles.
    *
    * @type {Map<string, Promise<unknown>>}
@@ -2460,7 +2460,7 @@ if (typeof require === 'function') {
     const left = running.get(doc);
     if (left !== undefined && left.key !== key) leave(doc, left);
     const walking = walks.get(doc);
-    // Leaving stopped the walk's queue, so a return starts or resumes a walk.
+    // Leaving stopped the walk's queue. A return starts or resumes a walk.
     if (walking !== undefined && walking.key !== key) {
       diag(`depart walk-stopped id=${/** @type {any} */ (walking).diagId} toRepo=${key !== null}`);
       walking.stopped = true;
@@ -2472,7 +2472,7 @@ if (typeof require === 'function') {
    * Stop work for the previous repository and allow one active refresh for
    * the current repository. Throttle new refreshes with the cache threshold.
    * A refresh after the first rereads stale advisories and continues a list
-   * walk that has not finished, and walks no list again.
+   * walk that has not finished, and does not walk a finished list again.
    *
    * @param {Document} doc
    * @param {RefreshOptions} [options]

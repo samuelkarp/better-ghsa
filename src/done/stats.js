@@ -158,7 +158,7 @@ if (typeof require === 'function') {
    * Arrange a month tally into years, ascending. The range runs from the
    * year of the earliest month to its end, the later of the UTC month of `at`
    * and the latest month. Every month through the end holds its count, zero
-   * when absent, so the totals sum to the tally.
+   * when absent. The totals sum to the tally.
    *
    * @param {Readonly<Record<string, number>>} counts Counts keyed by YYYY-MM.
    * @param {number} at The current instant in milliseconds.
@@ -600,7 +600,7 @@ if (typeof require === 'function') {
       complete: held.complete,
       expected: held.expected,
       counts: {
-        // The outcome needs no detail read, so no member of it is unread.
+        // The outcome does not need a detail read. None of its members is unread.
         outcome: tally(outcomes, { corpus: outcomes.length, unread: 0 }),
         reason: tally(reasons, { corpus: reasons.length, unread: unreadReasons }),
         open: tally(opens, { corpus: opens.length, unread: 0 }),

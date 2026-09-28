@@ -514,7 +514,7 @@ test('reports are counted by month in a table of years', async () => {
     ['Reports by month', '4 of 5'],
     'the advisory without a report time is outside the table and inside the total'
   );
-  // The clock reads August 2026, so September to December are blank.
+  // The clock reads August 2026. September to December are blank.
   assert.deepStrictEqual(monthCells(doc), [
     [
       ...['Year', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
@@ -882,7 +882,7 @@ test('published advisories are counted by the month of their first publication',
     ['Published advisories by month', '2 of 4'],
     'the unread one and the one without a publication are in the total alone'
   );
-  // The clock reads August 2026, so September to December are blank. The
+  // The clock reads August 2026. September to December are blank. The
   // closed advisory's publication counts nowhere, and the advisory published
   // twice counts in November 2024 alone.
   assert.deepStrictEqual(
@@ -1262,7 +1262,7 @@ test('a half whose crawl stopped short says its list is partly loaded', async ()
     owner: 'stats-partly',
     states: { published: [{ ghsaId: ghsa('plaa') }], closed: [{ ghsaId: ghsa('plbb') }] },
   });
-  // The closed list fails, so the walk of the completed half stops short.
+  // The closed list fails. The walk of the completed half stops short.
   delete pages[`${base}?state=closed`];
   await view.collect(doc, { ...QUEUE_OPTIONS, href: `https://github.com${base}?state=triage` });
 
@@ -1809,7 +1809,7 @@ test('the time to close is over closed advisories, with no row beside it', async
         timeline: [closedOn('prakleumas', '09')],
       },
       { ghsaId: ids.silent, state: 'Closed', reportedAt: reported },
-      // Closed and reopened, so outside the closed advisories.
+      // This one was closed and reopened. It is outside the closed advisories.
       {
         ghsaId: ids.reopened,
         state: 'Triage',
@@ -1904,7 +1904,8 @@ test('the time to publish is over published advisories, and waits on drafts', as
       { ghsaId: ids.shorter, state: 'Draft', reportedAt: before(3 * DAY_MS) },
       // Unpublished and waiting longer than the drafts, but not drafts.
       { ghsaId: ids.triage, state: 'Triage', reportedAt: before(60 * DAY_MS) },
-      // The population is by state, so this event is outside it.
+      // The timing covers the advisories whose state is Published. This
+      // closed advisory's publication is outside that set.
       {
         ghsaId: ids.closed,
         state: 'Closed',
@@ -2009,7 +2010,7 @@ test('the statistics export is the summary the page shows, written here', async 
 
   statsToggle(doc).click();
   const held = clockAt;
-  // The summary is taken on the first of September, so the table ends there.
+  // The summary is taken on the first of September. The table ends there.
   clockAt = Date.parse('2026-09-01T00:00:00Z');
   try {
     await statistics.load(doc);

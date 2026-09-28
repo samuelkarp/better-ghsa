@@ -1982,7 +1982,7 @@ test('moving between the list and an advisory keeps the page load', async () => 
       frame.innerHTML = '<div id="show_dialog"></div>';
       await until('took the table away', () => doc.getElementById(table.ROOT_ID) === null);
       await quiet();
-      // Past the refresh interval, so coming back rereads the advisory.
+      // The clock moves past the refresh interval. Coming back rereads the advisory.
       clockAt += 6 * MINUTE;
       goTo(base);
       frame.innerHTML = list;
@@ -2031,7 +2031,8 @@ test('coming back to the list from another page walks every list again', async (
       frame.innerHTML = '<div id="pulls"></div>';
       await until('took the table away', () => doc.getElementById(table.ROOT_ID) === null);
       await quiet();
-      // Inside the refresh interval, so only a new page load walks the lists.
+      // The clock stays inside the refresh interval. Only a new page load walks
+      // the lists.
       clockAt += MINUTE;
       goTo(base);
       frame.innerHTML = list;
@@ -2080,7 +2081,8 @@ test('surfaces stopped and started again on one document walk every list again',
       observer?.disconnect();
       table.stop(doc);
       assert.strictEqual(doc.getElementById(table.ROOT_ID), null, 'the table stayed');
-      // Inside the refresh interval, so only a new page load walks the lists.
+      // The clock stays inside the refresh interval. Only a new page load walks
+      // the lists.
       clockAt += MINUTE;
       observer = table.observe(doc, pass);
       await pass();
@@ -2176,7 +2178,7 @@ test('a walk the page left is not joined when the page comes back', async () => 
     ...doneLists(ref),
     [`${base}/${ghsaId}`]: detailHtml(ghsaId, 'Triage'),
   });
-  // Hold the wait before the published list, so the page leaves before it is asked for.
+  // Hold the wait before the published list so the page leaves before it is asked for.
   let armed = false;
   let holding = false;
   /** @type {() => void} */
@@ -2311,7 +2313,7 @@ test('a walk starts only after the walk of the same lists before it settles', as
     release = () => resolve(undefined);
   });
   let asked = false;
-  // The draft list is in flight when the page leaves, so the stop does not end the walk.
+  // The draft list is in flight when the page leaves. The stop does not end the walk.
   /** @type {import('../src/common/write.js').WriteFetch} */
   const send = async (url, init) => {
     if (String(url) === draft) {

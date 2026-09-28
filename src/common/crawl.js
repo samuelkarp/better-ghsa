@@ -308,7 +308,7 @@ if (typeof require === 'function') {
 
   /**
    * Walk each list once per page load. A list gains entries whenever an
-   * advisory changes state, so a walk that completed on an earlier page load
+   * advisory changes state. A walk that completed on an earlier page load
    * says nothing about what the list holds now.
    *
    * @param {CrawledList} list
@@ -364,7 +364,7 @@ if (typeof require === 'function') {
    * @param {number} since When this page load began, epoch milliseconds.
    * @returns {boolean} Whether the walk started during this page load and is
    *   neither complete nor stalled. A walk an earlier page load left part way
-   *   starts over from page one, because the pages it read then can have
+   *   starts over from page one because the pages it read then can have
    *   changed since.
    */
   function resumable(list, state, since) {

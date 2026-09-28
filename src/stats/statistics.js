@@ -176,7 +176,7 @@ if (typeof require === 'function') {
    * Open over Outcome, then Closure reason, then Severity, and the timings
    * four across. A box keeps its own height. A last row of `1fr` takes up
    * the height a box spanning every row adds beyond the boxes stacked beside
-   * it, so the stacked boxes keep their own heights too.
+   * it. The stacked boxes then keep their own heights too.
    */
   const STYLE_TEXT = [
     '.bghsa-stats-root { container-type: inline-size; container-name: bghsa-stats; }',
@@ -355,7 +355,7 @@ if (typeof require === 'function') {
         walked: half.states.some((state) => crawl.walkOf(list, state).started),
       });
     }
-    // Take the instant after loading, so every figure on the page uses it.
+    // Take the instant after loading so every figure on the page uses it.
     const summary = await globalThis.bghsa.stats.summarize(
       whole(halves),
       globalThis.bghsa.cache.now()
@@ -512,7 +512,7 @@ if (typeof require === 'function') {
       });
     }
     if (unread > 0) {
-      // Unread members have no percentage because their values are unknown.
+      // Unread members do not have a percentage because their values are unknown.
       rows.push({ kind: 'unread', label: UNREAD_TEXT, count: unread, share: null });
     }
     return { counted: over, total: tally.corpus + unread, rows };
@@ -884,8 +884,8 @@ if (typeof require === 'function') {
   const turns = new WeakMap();
 
   /**
-   * Read and draw the statistics. The load started last wins, so a read that
-   * finishes after a later one began is discarded.
+   * Read and draw the statistics. A read that finishes after a later load
+   * began is discarded.
    *
    * @param {Document} doc
    * @returns {Promise<Element | null>}

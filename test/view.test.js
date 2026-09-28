@@ -2315,7 +2315,7 @@ test('the done view walks the lists once per page load and rereads nothing fresh
       reportedAt: '2026-04-05T00:00:00Z',
     });
   }
-  // Open lists that read, so that no walk is left unfinished to resume.
+  // Serve readable open lists so that no walk is left unfinished to resume.
   pages[`${base}?state=triage`] = listHtml({ state: 'triage', ids: [], counts: {} });
   pages[`${base}?state=draft`] = listHtml({ state: 'draft', ids: [], counts: {} });
   pages[detailUrl(TRIAGE_ID)] = detailHtml({
