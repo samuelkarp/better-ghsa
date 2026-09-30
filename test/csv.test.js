@@ -28,6 +28,8 @@ function advisory(fields) {
     severityFieldPresent: false,
     cvssV3: null,
     cvssV3Present: false,
+    cvssV4: null,
+    cvssV4Present: false,
     cveId: null,
     cveSelection: null,
     descriptionOriginal: null,

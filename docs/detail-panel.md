@@ -32,8 +32,9 @@ The "Title", "Description", and "Severity" lines each show "Confirmed",
 value on the page.
 
 A confirmation applies to a specific value. Changing the title, description,
-or score returns its line to "Not confirmed". A confirmed line names the
-maintainer and confirmation time.
+or score returns its line to "Not confirmed". The score is the severity with
+its CVSS v3 or CVSS v4 vector. A confirmed line names the maintainer and
+confirmation time.
 
 The "Description" line also shows whether the description is the reporter's
 original text: "Not updated", "Updated", or "Unknown".

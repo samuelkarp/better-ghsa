@@ -152,6 +152,19 @@ if (typeof require === 'function') {
   }
 
   /**
+   * GitHub renders one vector field, named after the selected score type, and
+   * renders the empty v3 field for a plain severity level.
+   *
+   * @param {ParsedDetail} advisory
+   * @returns {{ present: boolean, value: string | null }}
+   */
+  function scoringVector(advisory) {
+    return advisory.cvssV4Present
+      ? { present: true, value: advisory.cvssV4 }
+      : { present: advisory.cvssV3Present, value: advisory.cvssV3 };
+  }
+
+  /**
    * Fingerprint the metadata form source values, including raw description
    * markdown.
    *
@@ -160,11 +173,12 @@ if (typeof require === 'function') {
    */
   async function fingerprints(advisory) {
     const schema = globalThis.bghsa.schema;
+    const vector = scoringVector(advisory);
     const [title, description, scoring] = await Promise.all([
       advisory.title === null ? null : schema.fingerprint(advisory.title),
       advisory.description === null ? null : schema.fingerprint(advisory.description),
-      advisory.severityFieldPresent && advisory.cvssV3Present
-        ? schema.scoringFingerprint(advisory.severityField, advisory.cvssV3)
+      advisory.severityFieldPresent && vector.present
+        ? schema.scoringFingerprint(advisory.severityField, vector.value)
         : null,
     ]);
     return { title, description, scoring };

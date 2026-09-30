@@ -170,6 +170,8 @@ if (typeof require === 'function') {
       severityFieldPresent: record.severityFieldPresent === true,
       cvssV3: text(record.cvssV3),
       cvssV3Present: record.cvssV3Present === true,
+      cvssV4: text(record.cvssV4),
+      cvssV4Present: record.cvssV4Present === true,
       cveId: text(record.cveId),
       cveSelection: text(record.cveSelection),
       descriptionOriginal:

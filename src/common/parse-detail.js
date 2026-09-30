@@ -91,7 +91,11 @@ if (typeof require === 'function') {
  *   found. Scoring confirmation requires a readable field.
  * @property {string | null} cvssV3
  * @property {boolean} cvssV3Present Whether the metadata form carries the CVSS
- *   v3 vector field, which the scoring confirmation binds to alongside the
+ *   v3 vector field.
+ * @property {string | null} cvssV4
+ * @property {boolean} cvssV4Present Whether the metadata form carries the CVSS
+ *   v4 vector field. GitHub renders one vector field, named after the selected
+ *   score type, and the scoring confirmation binds to it alongside the
  *   severity selection.
  * @property {string | null} cveId
  * @property {string | null} cveSelection `requesting`, `existing`, or `not_applicable`.
@@ -471,6 +475,7 @@ if (typeof require === 'function') {
 
     const severityField = metadataField(root, 'severity');
     const cvssV3 = metadataField(root, 'cvss_v3');
+    const cvssV4 = metadataField(root, 'cvss_v4');
 
     return {
       ref: parseRef(root),
@@ -494,6 +499,8 @@ if (typeof require === 'function') {
       severityFieldPresent: severityField.present,
       cvssV3: cvssV3.value,
       cvssV3Present: cvssV3.present,
+      cvssV4: cvssV4.value,
+      cvssV4Present: cvssV4.present,
       cveId: metadataField(root, 'cve_id').value,
       cveSelection: metadataField(root, 'cve_selection').value,
       descriptionOriginal: history === null ? null : revision === null,

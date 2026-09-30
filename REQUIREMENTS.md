@@ -151,9 +151,11 @@ carrying a fingerprint of the value confirmed and the time of confirmation.
 
 **Scoring confirmation.** A record that a named maintainer confirmed the
 severity and CVSS vector, carrying a fingerprint of the value confirmed and the
-time of confirmation. The reporter's proposed score is not stored. The display
-distinguishes a score confirmed by a maintainer from a score supplied by the
-reporter and not yet confirmed.
+time of confirmation. The vector is the CVSS v3 or CVSS v4 vector, whichever
+the severity is assessed with, and is empty for a plain severity level. The
+reporter's proposed score is not stored. The display distinguishes a score
+confirmed by a maintainer from a score supplied by the reporter and not yet
+confirmed.
 
 A confirmation applies only while its fingerprint matches the current value.
 After a mismatch, display the track as unconfirmed and identify the maintainer

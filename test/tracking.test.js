@@ -8,6 +8,7 @@ const { parseHTML } = require('linkedom');
 
 const parse = require('../src/common/parse-detail.js');
 const merge = require('../src/common/merge.js');
+const record = require('../src/common/record.js');
 const schema = require('../src/common/schema.js');
 const tracking = require('../src/detail/tracking.js');
 
@@ -25,6 +26,37 @@ function advisory(name) {
 
 const triage = advisory('triage-thread.html');
 const draft = advisory('draft.html');
+
+/**
+ * The triage fixture scored with CVSS v4. GitHub then selects `cvss_v4` and
+ * names its one vector input `cvss_v4`, with no `cvss_v3` input.
+ *
+ * @param {string} vector
+ * @returns {import('../src/common/parse-detail.js').ParsedDetail}
+ */
+function scoredWithV4(vector) {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'testdata', 'triage-thread.html'), 'utf8');
+  /** @type {[string, string][]} */
+  const edits = [
+    ['<option selected="selected" value="cvss_v3">', '<option value="cvss_v3">'],
+    ['<option value="cvss_v4">', '<option selected="selected" value="cvss_v4">'],
+    [
+      'name="repository_advisory[cvss_v3]" id="repository_advisory_cvss_v3" value="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"',
+      `name="repository_advisory[cvss_v4]" id="repository_advisory_cvss_v3" value="${vector}"`,
+    ],
+  ];
+  let edited = html;
+  for (const [from, to] of edits) {
+    if (!edited.includes(from)) throw new Error(`the triage fixture no longer carries ${from}`);
+    edited = edited.replace(from, to);
+  }
+  const root = /** @type {Document} */ (/** @type {unknown} */ (parseHTML(edited).document));
+  const parsed = parse.parseDetail(root);
+  if (parsed === null) throw new Error('the v4 triage page is not an advisory detail page');
+  return parsed;
+}
+
+const V4_VECTOR = 'CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N';
 
 /**
  * @param {string} fp
@@ -171,6 +203,29 @@ test('an unset severity and an unset vector still fingerprint', async () => {
   assert.ok(draft.severityField === null, 'the draft fixture carries a severity');
   assert.ok(draft.cvssV3 === null, 'the draft fixture carries a vector');
   assert.ok(fingerprints.scoring === 'a533e6b86c5c', 'the empty scoring fingerprint changed');
+});
+
+test('a CVSS v4 score binds its confirmation to the v4 vector', async () => {
+  const scored = scoredWithV4(V4_VECTOR);
+  const { scoring } = await tracking.fingerprints(scored);
+  assert.ok(scoring !== null, 'a v4 score could not be confirmed');
+
+  const confirmed = { confirmed: { scoring: { by: 'samuelkarp', at: '2026-09-28T10:00:00Z', fp: scoring } } };
+  const same = tracking.read(confirmed, await tracking.fingerprints(scoredWithV4(V4_VECTOR)));
+  assert.ok(same.scoring.status === 'confirmed', `the unchanged v4 score reads ${same.scoring.status}`);
+
+  const rescored = scoredWithV4(V4_VECTOR.replace('VA:H', 'VA:L'));
+  const moved = tracking.read(confirmed, await tracking.fingerprints(rescored));
+  assert.ok(moved.scoring.status === 'drifted', `the rescored v4 vector reads ${moved.scoring.status}`);
+});
+
+test('a cached CVSS v4 advisory fingerprints its score as the page does', async () => {
+  const scored = scoredWithV4(V4_VECTOR);
+  const cached = record.advisoryFrom(JSON.parse(JSON.stringify(scored)));
+  if (cached === null) throw new Error('the v4 advisory did not read back from the cache');
+  const live = (await tracking.fingerprints(scored)).scoring;
+  const held = (await tracking.fingerprints(cached)).scoring;
+  assert.ok(live !== null && held === live, `the page fingerprints ${live}, the cache ${held}`);
 });
 
 test("the triage fixture's stored state drifted from its title", async () => {
