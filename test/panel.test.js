@@ -469,7 +469,14 @@ test('a CVSS vector the form does not carry reads as unread, not as drift', asyn
 });
 
 test('the stored tracks the triage advisory carries are shown', async () => {
-  const built = await buildTracked(triage);
+  const now = Date.now;
+  let built;
+  try {
+    Date.now = () => Date.parse('2026-08-27T09:00:00Z');
+    built = await buildTracked(triage);
+  } finally {
+    Date.now = now;
+  }
   assert.deepStrictEqual(rowLabels(built), [
     'Triage',
     'Owners',
