@@ -6,6 +6,7 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
 if (typeof require === 'function') {
   require('./common/diag.js');
   require('./common/allowlist.js');
+  require('./common/approvals.js');
   require('./common/settings-control.js');
   require('./common/pr-layout.js');
 }
@@ -175,8 +176,8 @@ if (typeof require === 'function') {
 
   /**
    * Load the allowlist before starting surfaces, then reconsider the document
-   * after navigation and allowlist changes. A change to the diagnostics
-   * setting applies to the open page.
+   * after navigation and allowlist changes. A change to the diagnostics or
+   * approvals setting applies to the open page.
    *
    * @returns {void}
    */
@@ -184,6 +185,7 @@ if (typeof require === 'function') {
     const allowlist = globalThis.bghsa.allowlist;
     watch();
     globalThis.bghsa.diag.watch();
+    globalThis.bghsa.approvals.watch();
     allowlist.watch();
     allowlist.subscribe(() => {
       reconsider(globalThis.document, true);

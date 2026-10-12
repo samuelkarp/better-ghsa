@@ -15,6 +15,8 @@ const chips = require('../src/common/chips.js');
 const tracking = require('../src/detail/tracking.js');
 const panel = require('../src/detail/panel.js');
 const table = require('../src/list/table.js');
+const approvals = require('../src/common/approvals.js');
+const readiness = require('../src/common/readiness.js');
 
 
 const AT = Date.parse('2026-08-28T12:00:00Z');
@@ -140,7 +142,10 @@ async function listChips(advisory) {
  */
 async function panelChips(advisory) {
   const view = await tracking.readAdvisory(advisory, merge.mergeSnapshots(advisory.comments));
-  const built = panel.buildPanel(BLANK, advisory, derive.derive(advisory), view);
+  const ref = advisory.ref;
+  const required = approvals.requiredFor(ref === null ? '' : `${ref.owner}/${ref.repo}`);
+  const ready = readiness.compute(advisory, view, {}, required);
+  const built = panel.buildPanel(BLANK, advisory, derive.derive(advisory), view, undefined, ready);
   return Array.from(built.querySelectorAll('.Box-header .Label')).map((node) => {
     const classes = String(node.getAttribute('class') ?? '').split(/\s+/);
     const tone = classes.find((name) => name.startsWith('bghsa-tone-'));

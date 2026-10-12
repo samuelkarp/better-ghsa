@@ -95,6 +95,26 @@ function repositoryOf(target) {
 }
 
 /**
+ * A request may go to a listed repository, or to the temporary private fork
+ * of the advisory the page names, `{owner}/{repo}-{ghsa}`, when its
+ * repository is listed.
+ *
+ * @param {unknown} target The requested URL or path.
+ * @param {readonly string[]} listed The loaded allowlist, lowercased.
+ * @param {string} pathname The page's path.
+ * @returns {boolean}
+ */
+function admitted(target, listed, pathname) {
+  const wanted = repositoryOf(target);
+  if (wanted === null) return false;
+  if (listed.includes(wanted)) return true;
+  const [owner, repo, security, advisories, ghsa] = pathname.split('/').filter((part) => part !== '');
+  if (security !== 'security' || advisories !== 'advisories' || ghsa === undefined) return false;
+  const parent = `${owner}/${repo}`.toLowerCase();
+  return listed.includes(parent) && wanted === `${parent}-${ghsa.toLowerCase()}`;
+}
+
+/**
  * Simulate the shared global scope of content scripts. Omitting `require`
  * and `module` selects the browser code paths. Record observers, storage
  * access, and requests. Requests outside the allowlist fail the test.
@@ -265,8 +285,7 @@ function contentScriptScope(options = {}) {
      */
     fetch: (target) => {
       asked.push(String(target));
-      const wanted = repositoryOf(target);
-      if (wanted !== null && listed().includes(wanted)) return new Promise(() => {});
+      if (admitted(target, listed(), sandbox.location.pathname)) return new Promise(() => {});
       const refused = new Error(`the extension asked GitHub for ${String(target)}`);
       setTimeout(() => {
         throw refused;
@@ -1067,4 +1086,43 @@ test('a change to the diagnostics setting reaches a page already open', async ()
   announce(true);
   sandbox.bghsa.diag.log('queue add given=2');
   assert.deepStrictEqual(lines, ['[better-ghsa] diag queue add given=2']);
+});
+
+test("the request guard admits a listed repository and its open advisory's own fork", () => {
+  const listed = [ALLOWED];
+  const page = `${ADVISORY_LIST}/GHSA-jmvx-2wfw-xfgj`;
+  const fork = '/git-utensils/Spoon-Knife-ghsa-jmvx-2wfw-xfgj/pull/1/page_data/merge_box';
+  assert.strictEqual(admitted(`${REPO}/security/advisories`, listed, page), true);
+  assert.strictEqual(admitted(fork, listed, page), true);
+  assert.strictEqual(admitted(fork, listed, ADVISORY), false, "another advisory's fork");
+  assert.strictEqual(admitted(fork, listed, ADVISORY_LIST), false, 'a fork from the list page');
+  assert.strictEqual(admitted(fork, [], page), false, 'a fork of an unlisted repository');
+  assert.strictEqual(
+    admitted('/another-owner/another-repo-ghsa-jmvx-2wfw-xfgj/pull/1', listed, page),
+    false,
+    'a fork of another repository'
+  );
+});
+
+test("a draft on a listed repository asks its own fork for each pull request's reviews", async () => {
+  const pathname = `${ADVISORY_LIST}/GHSA-jmvx-2wfw-xfgj`;
+  const frame = fixture('triage-thread.html').replace(
+    '<span aria-hidden="true">Triage</span>',
+    '<span aria-hidden="true">Draft</span>'
+  );
+  const sandbox = contentScriptScope({ pathname, frame });
+  assert.deepStrictEqual(loadScripts(sandbox), []);
+  const reads = () =>
+    sandbox.asked.filter((/** @type {string} */ target) => target.endsWith('/page_data/merge_box'));
+  await waitFor(() => reads().length >= 2);
+
+  const fork = '/git-utensils/Spoon-Knife-ghsa-jmvx-2wfw-xfgj';
+  assert.deepStrictEqual(reads().sort(), [
+    `${fork}/pull/1/page_data/merge_box`,
+    `${fork}/pull/2/page_data/merge_box`,
+  ]);
+  assert.ok(
+    sandbox.asked.every((/** @type {string} */ target) => admitted(target, [ALLOWED], pathname)),
+    `the extension asked for ${sandbox.asked.join(', ')}`
+  );
 });

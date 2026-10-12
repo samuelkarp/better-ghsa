@@ -131,6 +131,39 @@ if (typeof require === 'function') {
   }
 
   /**
+   * @param {unknown} value
+   * @returns {import('./parse-detail.js').Package | null}
+   */
+  function packageFrom(value) {
+    if (!globalThis.bghsa.schema.isPlainObject(value)) return null;
+    return {
+      ecosystem: text(value.ecosystem),
+      name: text(value.name),
+      affected: text(value.affected),
+      patched: text(value.patched),
+    };
+  }
+
+  /**
+   * A record cached before packages were read does not carry them. Its
+   * packages read as null, which leaves the draft not ready until its page is
+   * read again.
+   *
+   * @param {unknown} value
+   * @returns {import('./parse-detail.js').Package[] | null}
+   */
+  function packagesFrom(value) {
+    if (!Array.isArray(value)) return null;
+    /** @type {import('./parse-detail.js').Package[]} */
+    const packages = [];
+    for (const entry of value) {
+      const held = packageFrom(entry);
+      if (held !== null) packages.push(held);
+    }
+    return packages;
+  }
+
+  /**
    * Require both comments and timeline arrays before deriving advisory state.
    *
    * @param {unknown} record
@@ -181,6 +214,7 @@ if (typeof require === 'function') {
       timeline,
       fork: forkFrom(record.fork),
       collaborators: strings(record.collaborators),
+      packages: packagesFrom(record.packages),
     };
   }
 

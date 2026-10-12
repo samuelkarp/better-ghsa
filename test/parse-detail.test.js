@@ -532,3 +532,54 @@ test('an href whose percent escape does not decode names no login', () => {
   const box = composer(avatar('/%zz', '@%zz') + COMPOSER_FORM);
   assert.strictEqual(parse.parseViewer(box), null);
 });
+
+test('each affected product on the form is a package', () => {
+  const advisory = parse.parseDetail(fixture('published-containerd.html'));
+  if (advisory === null) throw new Error('published-containerd.html did not parse');
+  assert.deepStrictEqual(advisory.packages, [
+    {
+      ecosystem: 'go',
+      name: 'github.com/containerd/containerd/v2',
+      affected: '>= 2.0.0, < 2.0.10, >= 2.1.0, < 2.1.9, >= 2.2.0, < 2.2.5, >= 2.3.0, < 2.3.2',
+      patched: '2.3.2, 2.2.5, 2.1.9, 2.0.10',
+    },
+    {
+      ecosystem: 'go',
+      name: 'github.com/containerd/containerd',
+      affected: '>= 1.7.0, < 1.7.33',
+      patched: '1.7.33',
+    },
+  ]);
+});
+
+test("a new draft holds one empty package, and the form's template for another product is not a package", () => {
+  const advisory = parse.parseDetail(fixture('draft.html'));
+  if (advisory === null) throw new Error('draft.html did not parse');
+  assert.deepStrictEqual(advisory.packages, [
+    { ecosystem: 'other', name: null, affected: null, patched: null },
+  ]);
+});
+
+test('a product removed before saving is not a package, and a page without a form reads as null', () => {
+  /**
+   * @param {string} index
+   * @param {string} destroy
+   * @param {string} name
+   * @returns {string}
+   */
+  const product = (index, destroy, name) => {
+    const field = `repository_advisory[affected_products_attributes][${index}]`;
+    return [
+      `<input type="hidden" name="${field}[_destroy]" value="${destroy}">`,
+      `<select name="${field}[ecosystem]"><option selected="selected" value="npm">npm</option></select>`,
+      `<input name="${field}[package]" value="${name}">`,
+      `<input name="${field}[affected_versions]" value="< 1.2.0">`,
+      `<input name="${field}[patches]" value="1.2.0">`,
+    ].join('');
+  };
+  const doc = document(`<form>${product('0', 'true', 'gone')}${product('1', 'false', 'kept')}</form>`);
+  assert.deepStrictEqual(parse.parsePackages(doc), [
+    { ecosystem: 'npm', name: 'kept', affected: '< 1.2.0', patched: '1.2.0' },
+  ]);
+  assert.strictEqual(parse.parsePackages(document('<form></form>')), null);
+});

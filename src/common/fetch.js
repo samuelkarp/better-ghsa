@@ -748,6 +748,7 @@ if (typeof require === 'function') {
 
   const exported = {
     RATE_MS,
+    REQUEST_TIMEOUT_MS,
     progressFrom,
     plan,
     createQueue,

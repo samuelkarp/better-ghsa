@@ -11,7 +11,10 @@ The extension loads directly from the repository and does not need a build.
 
 Committed fixtures are in `testdata/`. They include GitHub page captures and
 synthetic markup based on observed page structures. The capture helpers in
-`tools/` blank session tokens before saving markup.
+`tools/` blank session tokens before saving markup. The `merge-box-*.json`
+files are invented pull request merge box data modeled on captured responses.
+JSON does not allow comments. Each `merge-box-*.json` file has a `//` key that
+says what the file was modeled on.
 
 ## Tracking editor refreshes
 

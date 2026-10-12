@@ -237,6 +237,34 @@ published.
 Every triage value is classified as blocked on us or blocked on the reporter,
 and that classification drives sorting and filtering.
 
+### Readiness
+
+Readiness indicates whether a draft advisory can be published. It is computed
+only for `draft` advisories and is not stored. A draft is ready when all of the
+following hold:
+
+- The title, description, and scoring are each confirmed. Each
+  confirmation has a fingerprint matching the current value.
+- The private fork has at least one open pull request against any branch.
+- Each branch has at most one open pull request.
+- Every open pull request in the fork is approved. A pull request is approved
+  when it has at least the required number of approvals and does not have an
+  undismissed review requesting changes. An approval or a review requesting
+  changes counts if and only if GitHub counts it. The required number is a
+  per-repository setting (section 12).
+- Every backport target has an open pull request against its branch.
+- The advisory lists at least one package. Every package has an ecosystem, a
+  package name, affected versions, and patched versions.
+- When backport targets are set, the total number of comma-separated
+  patched versions across all packages equals the number of backport targets.
+
+CVE assignment and an embargo in force do not affect readiness.
+
+The advisory detail page supplies the readiness data except approvals and
+reviews. Read these from each open pull request's merge box data
+(`/pull/{number}/page_data/merge_box`) in the private fork, one fetch per pull
+request. A draft whose merge box data cannot be read is not ready.
+
 ## 7. Preserving the original report
 
 The reporter's title and text are overwritten in place when maintainers rewrite
@@ -281,6 +309,33 @@ implementation. Also show the stored triage value and waiting duration in a
 separate row. Show the patch chip for draft advisories. Omit severity, CVE, and
 the list of snapshots from the panel. Mark untrusted snapshots on their comments
 in the thread alongside the author role labels from section 4.
+
+On a draft advisory, the panel's first section is "Ready" and shows readiness
+from section 6. It has one line each for "Package", "Affected versions", and
+"Patched versions". Each line carries a chip reading "Missing",
+"Incomplete", or "Complete". A "Complete" chip is green. "Patched versions"
+reads "Incomplete" when backport targets are set and the patched-version count
+does not equal the number of targets.
+
+> Agent preference, not a requirement (Sam accepted either reading): "Missing"
+> means no package has a value for that line, and "Incomplete" means some
+> packages have one and some do not.
+
+On a draft advisory, readiness also colors chips the panel already shows:
+
+- A backport target chip is green when exactly one open pull request targets
+  its branch and that pull request is approved. It is red when more than one
+  open pull request targets its branch.
+- When the patched versions outnumber the backport targets, the backport
+  targets row also shows a red "Incomplete" chip.
+- The title, description, and severity confirmation chips are green when
+  each value is confirmed and its confirmation's fingerprint matches the
+  current value.
+- The patch chip is green and shows "Patches approved" when every open pull
+  request in the fork is approved. More than one open pull request against
+  any branch leaves it uncolored.
+
+The panel reads a draft's merge box data when it opens.
 
 The extension writes nothing to GitHub beyond its two comment types. It does
 not change `summary`, `description`, severity, advisory state, or any other
@@ -586,6 +641,9 @@ on listed repositories. Apply its changes to open pages without reloading. The
 lines carry advisory identifiers, counts, states, and error messages, and
 never titles, logins, or comment text.
 
+For each allowlisted repository, settings specify the number of approvals a
+private-fork pull request needs for readiness (section 6). The default is 2.
+
 On a GHSA private fork's pull request diff page (`/pull/{number}/changes` or
 `/pull/{number}/files`), the extension removes the outer width limit and extra
 horizontal padding. The diff viewer retains its own padding. This layout change
@@ -616,9 +674,6 @@ actions in derived state.
 
 ## 13. Out of scope for v1
 
-- Review status of private-fork pull requests. The advisory page omits review
-  status; reading it would require one fetch per pull request. Patch state
-  treats approved and unreviewed pull requests alike.
 - Check status of private-fork pull requests. Private forks do not run CI,
   although GitHub displays an expected check state.
 - Field-level merge on a write conflict.

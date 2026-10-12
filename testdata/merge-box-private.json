@@ -1,0 +1,89 @@
+{
+  "//": "Invented merge box data, modeled on a pull request in a temporary private fork. That capture recorded the first three merge conditions only. This data does not carry a PULL_REQUEST rule rollup. Logins and identifiers are invented. GitHub read four approving reviews by reviewers with write access.",
+  "pullRequest": {
+    "baseRefName": "main",
+    "headRefName": "fix-1",
+    "isDraft": false,
+    "isCrossRepo": false,
+    "latestOpinionatedReviews": [
+      {
+        "id": 1000000004,
+        "authorCanPushToRepository": true,
+        "author": {
+          "login": "lindqvist-ana",
+          "avatarUrl": "https://avatars.githubusercontent.com/u/0?v=4",
+          "name": "lindqvist-ana",
+          "url": "/lindqvist-ana"
+        },
+        "onBehalfOf": [],
+        "state": "APPROVED"
+      },
+      {
+        "id": 1000000005,
+        "authorCanPushToRepository": true,
+        "author": {
+          "login": "okafor-dev",
+          "avatarUrl": "https://avatars.githubusercontent.com/u/0?v=4",
+          "name": "okafor-dev",
+          "url": "/okafor-dev"
+        },
+        "onBehalfOf": [],
+        "state": "APPROVED"
+      },
+      {
+        "id": 1000000006,
+        "authorCanPushToRepository": true,
+        "author": {
+          "login": "marisol-t",
+          "avatarUrl": "https://avatars.githubusercontent.com/u/0?v=4",
+          "name": "marisol-t",
+          "url": "/marisol-t"
+        },
+        "onBehalfOf": [],
+        "state": "APPROVED"
+      },
+      {
+        "id": 1000000007,
+        "authorCanPushToRepository": true,
+        "author": {
+          "login": "tobias-r",
+          "avatarUrl": "https://avatars.githubusercontent.com/u/0?v=4",
+          "name": "tobias-r",
+          "url": "/tobias-r"
+        },
+        "onBehalfOf": [],
+        "state": "APPROVED"
+      }
+    ],
+    "pendingReviewRequests": [],
+    "resourcePath": "/git-utensils/Spoon-Knife-ghsa-jmvx-2wfw-xfgj/pull/1",
+    "state": "OPEN"
+  },
+  "mergeRequirements": {
+    "state": "MERGEABLE_IF_STATUSES_PASS",
+    "conditions": [
+      {
+        "type": "PULL_REQUEST_STATE",
+        "displayName": "Pull request state",
+        "description": "Pull request must be open and not in draft mode in order to be merged",
+        "message": null,
+        "result": "PASSED"
+      },
+      {
+        "type": "PULL_REQUEST_REPO_STATE",
+        "displayName": "Pull request repository state",
+        "description": "The repository must be not archived or locked",
+        "message": null,
+        "result": "PASSED"
+      },
+      {
+        "type": "PULL_REQUEST_USER_STATE",
+        "displayName": "Pull request user state",
+        "description": "The user must have push access to the repo and a verified email",
+        "message": null,
+        "result": "PASSED",
+        "failedSubConditions": []
+      }
+    ]
+  }
+}

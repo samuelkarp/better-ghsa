@@ -1,6 +1,6 @@
 # Privacy policy for Better GHSA
 
-Last updated: 2026-09-21.
+Last updated: 2026-10-11.
 
 Better GHSA adds triage tracking to GitHub Security Advisories. This policy
 covers the extension's storage, requests, and writes to GitHub. GitHub's privacy
@@ -28,7 +28,7 @@ Web pages cannot read it.
 
 It does not store local data elsewhere or use its own cookies, `localStorage`,
 or IndexedDB.
-Local storage contains seven kinds of entry.
+Local storage contains eight kinds of entry.
 
 **Repository settings**, under `allowlist`. This contains the lowercase
 `owner/repo` names you enter in settings. The list starts empty. Advisory data
@@ -50,6 +50,12 @@ advisory data and its observation time:
   and assignees.
 - The logins of the advisory's collaborators.
 - The login of the GitHub account the page was rendered for, which is yours.
+- Each affected package: its ecosystem, its name, and its affected and patched
+  versions.
+- For a draft advisory, a review result for each open pull request in the
+  private fork: how many approvals GitHub counts, whether a review requests
+  changes, and when it was read. A review result holds only these three
+  values.
 
 Triage and draft advisories are private. Stored data can include details of
 unfixed vulnerabilities.
@@ -69,6 +75,9 @@ suggestions and tracking-state trust decisions.
 **Observed release branches**, under `branches`. The extension records branch
 names beginning `release/` by repository for backport suggestions.
 
+**Approvals setting**, under `approvals`. It holds the `Approvals` number you
+set for each repository. The default value is 2.
+
 **Diagnostics setting**, under `diagnostics`. This holds whether the `Log
 diagnostics to the browser console` checkbox in settings is checked. It starts
 unchecked. While it is checked, the extension prints advisory identifiers,
@@ -79,7 +88,8 @@ comment text. The extension does not store or send them.
 ### Which repositories this covers
 
 The extension reads advisory data on the advisory pages of repositories listed
-in its settings. It also makes layout adjustments on their GHSA private forks.
+in its settings. It also reads review data from their GHSA private forks and
+makes layout adjustments there.
 On unlisted repositories, it shows only the settings button on advisory pages.
 It does not read or store advisory data or fetch advisory pages.
 
@@ -97,12 +107,12 @@ entries accumulate, and nothing ages them out.
 
 `Clear cache` in settings immediately removes advisory reads, list reads,
 refresh progress, observed members, and observed branches. It preserves your
-repository list and the diagnostics setting. Later advisory reads rebuild the
-cleared data.
+repository list, the approvals setting, and the diagnostics setting. Later
+advisory reads rebuild the cleared data.
 
 Removing a repository clears its advisory reads, list read, refresh progress,
-and observed branches. Organization members remain while another listed
-repository belongs to that organization.
+observed branches, and approvals setting. Organization members remain while
+another listed repository belongs to that organization.
 
 ## What is transmitted, and to whom
 
@@ -116,6 +126,11 @@ The requests are:
   `https://github.com/{owner}/{repo}/security/advisories`.
 - `GET` on an advisory page,
   `https://github.com/{owner}/{repo}/security/advisories/{GHSA-id}`.
+- `GET` on the merge box data of an open pull request in a draft advisory's
+  private fork,
+  `https://github.com/{owner}/{repo}-{GHSA-id}/pull/{number}/page_data/merge_box`.
+  The detail panel sends one for each open pull request when you open the
+  advisory.
 - `GET` on an owner's profile image, `https://github.com/{login}.png?size=40`,
   for the advisory list's owner icons.
 - `POST` to an advisory's comment endpoint to create or edit a comment when
@@ -184,7 +199,9 @@ The extension cannot delete its comments. To remove one, use GitHub's interface.
 
 - No browsing history, and no data at all from pages outside
   `github.com/{owner}/{repo}/security/advisories` on a repository you listed.
-  Private-fork layout adjustments do not collect page contents.
+  Private-fork layout adjustments do not collect page contents. The extension
+  stores the review results described above from the pull requests in a
+  private fork, and nothing else.
 - No analytics, usage metrics, session recording, crash reports, or device,
   advertising, or user identifiers.
 - No location data.

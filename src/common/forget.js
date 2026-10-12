@@ -7,6 +7,7 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
 if (typeof require === 'function') {
   require('./schema.js');
   require('./allowlist.js');
+  require('./approvals.js');
   require('./members.js');
   require('./branches.js');
   require('./cache.js');
@@ -176,7 +177,8 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Clear a repository's cache and observed release branches. Remove its
+   * Clear a repository's cache, observed release branches, and approvals
+   * setting. Remove its
    * organization's members only when the allowlist contains no other repository
    * from that organization (REQUIREMENTS.md section 2).
    *
@@ -193,6 +195,7 @@ if (typeof require === 'function') {
     }
     const taken = await discard(storage, keysFor(wanted, Object.keys(await held(storage))));
     const branches = await prune(storage, globalThis.bghsa.branches.BRANCHES_KEY, wanted);
+    await prune(storage, globalThis.bghsa.approvals.STORAGE_KEY, wanted);
     const members = organizationListed(wanted, remaining)
       ? false
       : await prune(storage, globalThis.bghsa.members.MEMBERS_KEY, ownerOf(wanted));

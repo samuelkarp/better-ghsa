@@ -6,6 +6,7 @@ globalThis.bghsa ??= /** @type {BghsaNamespace} */ ({});
 if (typeof require === 'function') {
   require('../common/diag.js');
   require('../common/allowlist.js');
+  require('../common/approvals.js');
   require('../common/forget.js');
 }
 
@@ -88,6 +89,20 @@ if (typeof require === 'function') {
     name.className = 'row-name';
     name.textContent = entry;
     row.append(name);
+    const label = doc.createElement('label');
+    label.className = 'row-approvals';
+    label.append('Approvals');
+    const count = doc.createElement('input');
+    count.className = 'row-approvals-input';
+    count.type = 'number';
+    count.min = '0';
+    count.step = '1';
+    count.dataset.approvals = entry;
+    // Identify the repository the way the Remove button does.
+    count.setAttribute('aria-label', `Approvals for ${entry}`);
+    count.value = String(globalThis.bghsa.approvals.requiredFor(entry));
+    label.append(count);
+    row.append(label);
     const button = doc.createElement('button');
     button.className = 'button button-danger';
     button.type = 'button';
@@ -113,6 +128,55 @@ if (typeof require === 'function') {
       if (entries.length === 0) empty.removeAttribute('hidden');
       else empty.setAttribute('hidden', '');
     }
+  }
+
+  /**
+   * @param {string} typed
+   * @returns {number | null} The whole number typed, or null for anything else.
+   */
+  function approvalsOf(typed) {
+    const trimmed = typed.trim();
+    if (!/^\d+$/.test(trimmed)) return null;
+    const count = Number(trimmed);
+    return globalThis.bghsa.approvals.isValid(count) ? count : null;
+  }
+
+  /**
+   * Show each repository's saved approvals, leaving the field being edited
+   * alone.
+   *
+   * @param {Document} doc
+   * @returns {void}
+   */
+  function showApprovals(doc) {
+    for (const node of doc.querySelectorAll('input[data-approvals]')) {
+      const field = /** @type {HTMLInputElement} */ (node);
+      if (field === doc.activeElement) continue;
+      const entry = field.dataset['approvals'] ?? '';
+      field.value = String(globalThis.bghsa.approvals.requiredFor(entry));
+    }
+  }
+
+  /**
+   * Save a whole number of 0 or more. Other input waits for the field to lose
+   * focus, which puts the saved value back.
+   *
+   * @param {HTMLInputElement} field
+   * @returns {Promise<boolean>} Whether the setting was saved.
+   */
+  async function changeApprovals(field) {
+    const count = approvalsOf(field.value);
+    if (count === null) return false;
+    return globalThis.bghsa.approvals.save(field.dataset['approvals'] ?? '', count);
+  }
+
+  /**
+   * @param {HTMLInputElement} field
+   * @returns {void} Puts the saved value back in a field holding anything else.
+   */
+  function leaveApprovals(field) {
+    if (approvalsOf(field.value) !== null) return;
+    field.value = String(globalThis.bghsa.approvals.requiredFor(field.dataset['approvals'] ?? ''));
   }
 
   /**
@@ -148,6 +212,8 @@ if (typeof require === 'function') {
     const entries = await globalThis.bghsa.allowlist.remove(entry);
     render(doc, entries);
     await globalThis.bghsa.forget.repository(entry, entries);
+    // A repository added back starts from the default.
+    await globalThis.bghsa.approvals.reload();
   }
 
   /**
@@ -196,6 +262,17 @@ if (typeof require === 'function') {
       event.preventDefault();
       void submit(doc);
     });
+    list?.addEventListener('change', (event) => {
+      const field = /** @type {HTMLInputElement | null} */ (event.target);
+      if (field?.dataset?.['approvals'] === undefined) return;
+      void changeApprovals(field);
+    });
+    // Blur does not bubble; focusout does.
+    list?.addEventListener('focusout', (event) => {
+      const field = /** @type {HTMLInputElement | null} */ (event.target);
+      if (field?.dataset?.['approvals'] === undefined) return;
+      leaveApprovals(field);
+    });
     list?.addEventListener('click', (event) => {
       const target = /** @type {Element | null} */ (event.target);
       const button = target?.closest?.('button[data-entry]');
@@ -215,6 +292,12 @@ if (typeof require === 'function') {
       showDiag(doc, on);
     });
     showDiag(doc, await diag.load());
+    const approvals = globalThis.bghsa.approvals;
+    approvals.watch();
+    approvals.subscribe(() => {
+      showApprovals(doc);
+    });
+    await approvals.load();
     const allowlist = globalThis.bghsa.allowlist;
     allowlist.watch();
     allowlist.subscribe((entries) => {
@@ -229,6 +312,8 @@ if (typeof require === 'function') {
     CLEARED_MESSAGE,
     render,
     submit,
+    changeApprovals,
+    leaveApprovals,
     drop,
     clear,
     toggleDiag,

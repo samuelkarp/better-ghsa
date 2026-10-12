@@ -149,13 +149,16 @@ test('many advisories are read in one call, however old they are', async () => {
   const ids = ['GHSA-aaaa-aaaa-aaaa', 'GHSA-bbbb-bbbb-bbbb', 'GHSA-cccc-cccc-cccc'];
   await cache.putAdvisory({ ...REF, ghsaId: ids[0] }, { state: 'triage' }, { storage, at: 0 });
   await cache.putAdvisory({ ...REF, ghsaId: ids[1] }, { state: 'closed' }, { storage, at: 0 });
+  // Each write reads the entry it replaces.
+  const written = storage.reads.length;
 
   const found = await cache.getAdvisories(REF, ids, { storage, at: 365 * DAY });
   assert.ok(found.size === 2, `${found.size} entries were held`);
   assert.ok(found.has(ids[0] ?? ''), 'the triage entry was dropped at a year old');
   assert.ok(found.has(ids[1] ?? ''), 'the closed entry was dropped at a year old');
   assert.ok(!found.has(ids[2] ?? ''), 'an advisory nothing wrote was handed back');
-  assert.ok(storage.reads.length === 1, `storage saw ${storage.reads.length} reads`);
+  const reads = storage.reads.length - written;
+  assert.ok(reads === 1, `storage saw ${reads} reads`);
   assert.deepStrictEqual(storage.removals, [], 'a removal went out for an entry read in a pass');
   assert.ok((await cache.clear({ storage })) === 2, 'the clear took neither entry');
   assert.ok(storage.removals.length === 1, 'the removal went unrecorded');
@@ -406,4 +409,60 @@ test('counting a 404 the storage will not hold leaves the entry', async () => {
   const held = await cache.getAdvisory(REF, { storage, at: MINUTE });
   assert.ok(held !== null, 'a count that could not be written took the entry');
   assert.strictEqual(held.misses, 0, 'a count that could not be written was read back');
+});
+
+/**
+ * @param {number[]} open The numbers of the fork's open pull requests.
+ * @returns {Record<string, unknown>} a draft whose fork lists them.
+ */
+function draftWith(open) {
+  return {
+    state: 'Draft',
+    fork: { pullRequests: open.map((number) => ({ number, state: 'open', baseRef: 'main' })) },
+  };
+}
+
+test('a reread advisory keeps review results for the pull requests still open', async () => {
+  const storage = fakeStorage();
+  await cache.putAdvisory(REF, draftWith([1, 2]), { storage, at: 0 });
+  const approved = { approvals: 2, changesRequested: false, observedAt: 5 };
+  await cache.putReviews(REF, { 1: approved, 2: approved }, { storage });
+
+  // Pull request 2 merged away from the fork; 3 opened.
+  await cache.putAdvisory(REF, draftWith([1, 3]), { storage, at: 10 });
+  const entry = await cache.getAdvisory(REF, { storage });
+  assert.ok(entry?.observedAt === 10, `the reread was not stored: ${entry?.observedAt}`);
+  assert.deepStrictEqual(entry?.reviews, { 1: approved });
+
+  await cache.putReviews(REF, { 3: { ...approved, approvals: 0 } }, { storage });
+  assert.deepStrictEqual((await cache.getAdvisory(REF, { storage }))?.reviews, {
+    1: approved,
+    3: { ...approved, approvals: 0 },
+  });
+});
+
+test('review results land on the entry while it is being rewritten', async () => {
+  const storage = fakeStorage();
+  await cache.putAdvisory(REF, draftWith([1]), { storage, at: 0 });
+  const approved = { approvals: 2, changesRequested: false, observedAt: 5 };
+  // Both read the entry before either writes, unless writes take turns.
+  await Promise.all([
+    cache.putAdvisory(REF, draftWith([1]), { storage, at: 10 }),
+    cache.putReviews(REF, { 1: approved }, { storage }),
+    cache.putAdvisory(REF, draftWith([1]), { storage, at: 20 }),
+  ]);
+  assert.deepStrictEqual((await cache.getAdvisory(REF, { storage }))?.reviews, { 1: approved });
+});
+
+test('review results for an advisory without an entry, or malformed, are not stored', async () => {
+  const storage = fakeStorage();
+  const approved = { approvals: 2, changesRequested: false, observedAt: 5 };
+  assert.strictEqual(await cache.putReviews(REF, { 1: approved }, { storage }), null);
+  assert.deepStrictEqual(storage.entries, {});
+
+  await cache.putAdvisory(REF, draftWith([1]), { storage, at: 0 });
+  await cache.putReviews(REF, /** @type {any} */ ({ 1: { approvals: -1 }, x: approved }), {
+    storage,
+  });
+  assert.strictEqual((await cache.getAdvisory(REF, { storage }))?.reviews, undefined);
 });

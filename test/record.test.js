@@ -79,3 +79,20 @@ test('a cache record naming half an advisory names none', () => {
   );
   assert.strictEqual(record.advisoryFrom({ ...half, ref: 'git-utensils' })?.ref, null);
 });
+
+test('a cache record carries its packages, and one written before packages were read does not carry them', () => {
+  const held = { comments: [], timeline: [] };
+  const advisory = record.advisoryFrom({
+    ...held,
+    packages: [
+      { ecosystem: 'go', name: 'example.com/drawer', affected: '< 1.2.0', patched: '1.2.0' },
+      { ecosystem: 'other', name: '', affected: null },
+      'npm',
+    ],
+  });
+  assert.deepStrictEqual(advisory?.packages, [
+    { ecosystem: 'go', name: 'example.com/drawer', affected: '< 1.2.0', patched: '1.2.0' },
+    { ecosystem: 'other', name: null, affected: null, patched: null },
+  ]);
+  assert.strictEqual(record.advisoryFrom(held)?.packages, null);
+});

@@ -43,9 +43,9 @@ again.
 ## The three surfaces
 
 **The advisory detail panel** shows patch progress in the private fork,
-waiting time, and review status. It lets you edit stored triage state
-and preserve the reporter's title and description in a comment before you
-rewrite them for publication.
+waiting time, review status, and whether a draft is ready to publish. It lets
+you edit stored triage state and preserve the reporter's title and description
+in a comment before you rewrite them for publication.
 See [docs/detail-panel.md](docs/detail-panel.md).
 
 **The advisory list** replaces GitHub's list body with a table of open
@@ -121,6 +121,10 @@ GHSA card, and choose "Extension options".
 An entry is `owner/repo`, for example `containerd/containerd`. Case does not
 matter. Removing a repository stops the extension on its pages, including pages
 already open.
+
+Each listed repository has an `Approvals` field: the number of approvals a pull
+request in an advisory's private fork needs before a draft counts as ready to
+publish. It starts at 2. A change applies to open pages without a reload.
 
 ## Logging diagnostics
 

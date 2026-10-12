@@ -148,8 +148,31 @@ h2 {
 }
 
 .row-name {
+  flex: 1 1 auto;
   overflow-wrap: anywhere;
   font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+.row-approvals {
+  display: inline-flex;
+  gap: 0.5rem;
+  align-items: center;
+  color: var(--muted-fg);
+}
+
+.row-approvals-input {
+  width: 4rem;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--field-bg);
+  color: var(--page-fg);
+  font: inherit;
+}
+
+.row-approvals-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .clear {

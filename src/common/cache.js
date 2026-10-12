@@ -30,6 +30,17 @@ if (typeof require === 'function') {
  * @property {number} [jitterMs] Additional refresh delay in milliseconds,
  *   chosen when the entry is written. Defaults to zero.
  * @property {number} [misses] The consecutive 404 count. Defaults to zero.
+ * @property {Record<string, ReviewResult>} [reviews] An advisory's review
+ *   results, keyed by private-fork pull request number.
+ */
+
+/**
+ * What one merge box read said about a pull request's reviews.
+ *
+ * @typedef {object} ReviewResult
+ * @property {number} approvals The approvals GitHub counts.
+ * @property {boolean} changesRequested Whether a review GitHub counts requests changes.
+ * @property {number} observedAt Epoch milliseconds.
  */
 
 /**
@@ -287,6 +298,37 @@ if (typeof require === 'function') {
   }
 
   /**
+   * @param {unknown} value A stored review result.
+   * @returns {ReviewResult | null} The result, or null if malformed.
+   */
+  function reviewFrom(value) {
+    if (!globalThis.bghsa.schema.isPlainObject(value)) return null;
+    const { approvals, changesRequested, observedAt } = value;
+    if (typeof approvals !== 'number' || !Number.isSafeInteger(approvals) || approvals < 0) {
+      return null;
+    }
+    if (typeof changesRequested !== 'boolean') return null;
+    if (typeof observedAt !== 'number' || !Number.isFinite(observedAt)) return null;
+    return { approvals, changesRequested, observedAt };
+  }
+
+  /**
+   * @param {unknown} value The stored review results.
+   * @returns {Record<string, ReviewResult>} The well-formed results keyed by
+   *   pull request number.
+   */
+  function reviewsFrom(value) {
+    /** @type {Record<string, ReviewResult>} */
+    const kept = {};
+    if (!globalThis.bghsa.schema.isPlainObject(value)) return kept;
+    for (const [number, held] of Object.entries(value)) {
+      const result = reviewFrom(held);
+      if (/^[1-9]\d*$/.test(number) && result !== null) kept[number] = result;
+    }
+    return kept;
+  }
+
+  /**
    * @param {unknown} value The stored entry.
    * @returns {CacheEntry | null} The validated cache entry, or null if malformed.
    */
@@ -295,13 +337,82 @@ if (typeof require === 'function') {
     const observedAt = value.observedAt;
     if (typeof observedAt !== 'number' || !Number.isFinite(observedAt)) return null;
     const state = normalizeState(value.state);
-    return {
+    /** @type {CacheEntry} */
+    const entry = {
       record: value.record,
       observedAt,
       state,
       jitterMs: jitterOf(state, value.jitterMs),
       misses: missesOf(value.misses),
     };
+    const reviews = reviewsFrom(value.reviews);
+    if (Object.keys(reviews).length > 0) entry.reviews = reviews;
+    return entry;
+  }
+
+  /**
+   * @param {unknown} record A parsed advisory.
+   * @returns {Set<string>} The numbers of the pull requests its private fork
+   *   lists as open.
+   */
+  function openPullsOf(record) {
+    const schema = globalThis.bghsa.schema;
+    /** @type {Set<string>} */
+    const open = new Set();
+    if (!schema.isPlainObject(record) || !schema.isPlainObject(record.fork)) return open;
+    const pulls = record.fork.pullRequests;
+    if (!Array.isArray(pulls)) return open;
+    for (const pull of pulls) {
+      if (!schema.isPlainObject(pull) || pull.state !== 'open') continue;
+      if (typeof pull.number === 'number' && Number.isSafeInteger(pull.number)) {
+        open.add(String(pull.number));
+      }
+    }
+    return open;
+  }
+
+  /**
+   * @param {Record<string, ReviewResult> | undefined} reviews
+   * @param {unknown} record
+   * @returns {Record<string, ReviewResult>} The results for pull requests the
+   *   record lists as open.
+   */
+  function reviewsStillOpen(reviews, record) {
+    const open = openPullsOf(record);
+    /** @type {Record<string, ReviewResult>} */
+    const kept = {};
+    for (const [number, result] of Object.entries(reviews ?? {})) {
+      if (open.has(number)) kept[number] = result;
+    }
+    return kept;
+  }
+
+  /**
+   * Writes to one key in this page run one at a time. A read-modify-write
+   * keeps what another write stored between its read and its write.
+   *
+   * @type {Map<string, Promise<unknown>>}
+   */
+  const writing = new Map();
+
+  /**
+   * @template T
+   * @param {string} key
+   * @param {() => Promise<T>} work
+   * @returns {Promise<T>}
+   */
+  function serially(key, work) {
+    const before = writing.get(key) ?? Promise.resolve();
+    const run = before.then(work, work);
+    const settled = run.then(
+      () => {},
+      () => {}
+    );
+    writing.set(key, settled);
+    void settled.then(() => {
+      if (writing.get(key) === settled) writing.delete(key);
+    });
+    return run;
   }
 
   /**
@@ -376,7 +487,8 @@ if (typeof require === 'function') {
    * @param {unknown} record
    * @param {string | null} state The advisory state for refresh scheduling.
    *   List and progress entries use null.
-   * @param {CacheOptions} [options]
+   * @param {CacheOptions & { reviews?: Record<string, ReviewResult> }} [options]
+   *   `reviews` are review results the entry carries on.
    * @returns {Promise<CacheEntry | null>} The stored entry, or null if storage failed
    *   or the key or storage provider was missing.
    */
@@ -390,6 +502,7 @@ if (typeof require === 'function') {
       state,
       jitterMs: drawJitter(state),
     };
+    if (options.reviews !== undefined) entry.reviews = options.reviews;
     try {
       await storage.set({ [key]: entry });
     } catch (error) {
@@ -410,6 +523,8 @@ if (typeof require === 'function') {
 
   /**
    * Cache both fetched advisories and observations from the live detail page.
+   * The entry keeps the review results it holds for pull requests the record
+   * lists as open.
    *
    * @param {{ owner?: unknown, repo?: unknown, ghsaId?: unknown } | null | undefined} ref
    * @param {unknown} record The parsed advisory.
@@ -417,7 +532,50 @@ if (typeof require === 'function') {
    * @returns {Promise<CacheEntry | null>}
    */
   function putAdvisory(ref, record, options = {}) {
-    return putEntry(advisoryKey(ref), record, stateOf(record), options);
+    const key = advisoryKey(ref);
+    if (key === null) return Promise.resolve(null);
+    return serially(key, async () => {
+      const before = await getEntry(key, options);
+      const reviews = reviewsStillOpen(before?.reviews, record);
+      return putEntry(key, record, stateOf(record), {
+        ...options,
+        ...(Object.keys(reviews).length > 0 ? { reviews } : {}),
+      });
+    });
+  }
+
+  /**
+   * Store review results on an advisory's entry, beside the results it holds
+   * for other pull requests. An absent entry stores nothing because the
+   * results describe pull requests only a record lists.
+   *
+   * @param {{ owner?: unknown, repo?: unknown, ghsaId?: unknown } | null | undefined} ref
+   * @param {Record<string, ReviewResult>} results Keyed by pull request number.
+   * @param {CacheOptions} [options]
+   * @returns {Promise<CacheEntry | null>} The stored entry, or null when there
+   *   was none or storage failed.
+   */
+  function putReviews(ref, results, options = {}) {
+    const key = advisoryKey(ref);
+    const storage = options.storage ?? storageOf();
+    if (key === null || storage === null) return Promise.resolve(null);
+    return serially(key, async () => {
+      const before = await getEntry(key, options);
+      if (before === null) return null;
+      const merged = { ...before.reviews, ...reviewsFrom(results) };
+      const reviews = reviewsStillOpen(merged, before.record);
+      /** @type {CacheEntry} */
+      const entry = { ...before };
+      if (Object.keys(reviews).length > 0) entry.reviews = reviews;
+      else delete entry.reviews;
+      try {
+        await storage.set({ [key]: entry });
+      } catch (error) {
+        diagCaught('cache putReviews', error);
+        return null;
+      }
+      return entry;
+    });
   }
 
   /**
@@ -586,6 +744,7 @@ if (typeof require === 'function') {
     getEntry,
     getAdvisory,
     putAdvisory,
+    putReviews,
     getAdvisories,
     noteMissing,
     getList,

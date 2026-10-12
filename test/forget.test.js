@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 
 const allowlist = require('../src/common/allowlist.js');
+const approvals = require('../src/common/approvals.js');
 const branches = require('../src/common/branches.js');
 const cache = require('../src/common/cache.js');
 const members = require('../src/common/members.js');
@@ -274,4 +275,15 @@ test('the clear empties the sets this session holds', async () => {
 
   assert.strictEqual(members.isKnown({ owner: 'containerd' }, 'samuelkarp'), false);
   assert.deepStrictEqual(branches.known({ owner: 'containerd', repo: 'containerd' }), []);
+});
+
+test('unlisting takes the repository approvals setting, and the clear keeps every one', async () => {
+  const storage = stored([CONTAINERD, NERDCTL]);
+  storage.entries[approvals.STORAGE_KEY] = { [CONTAINERD]: 0, [NERDCTL]: 1 };
+
+  await forget.repository(CONTAINERD, [NERDCTL], { storage });
+  assert.deepStrictEqual(storage.entries[approvals.STORAGE_KEY], { [NERDCTL]: 1 });
+
+  await forget.everything({ storage });
+  assert.deepStrictEqual(storage.entries[approvals.STORAGE_KEY], { [NERDCTL]: 1 });
 });

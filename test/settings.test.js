@@ -7,6 +7,7 @@ const path = require('node:path');
 const { parseHTML } = require('linkedom');
 
 const allowlist = require('../src/common/allowlist.js');
+const approvals = require('../src/common/approvals.js');
 const branches = require('../src/common/branches.js');
 const cache = require('../src/common/cache.js');
 const diag = require('../src/common/diag.js');
@@ -151,6 +152,7 @@ async function pressClear(doc, window) {
 
 test.afterEach(() => {
   allowlist.setStorage(null);
+  approvals.setStorage(null);
   cache.setStorage(null);
   diag.setStorage(null);
 });
@@ -427,4 +429,77 @@ test('the diagnostics checkbox shows the setting and stores a change to it', asy
   // Another settings tab turns it back on.
   await diag.save(true);
   assert.strictEqual(box.checked, true, 'a change made elsewhere left the checkbox behind');
+});
+
+/**
+ * @param {Document} doc
+ * @param {string} repository
+ * @returns {HTMLInputElement} the repository's approvals field.
+ */
+function approvalsField(doc, repository) {
+  const field = doc.querySelector(`#list input[data-approvals="${repository}"]`);
+  assert.ok(field !== null, `the ${repository} row does not carry an approvals field`);
+  return /** @type {HTMLInputElement} */ (field);
+}
+
+test('each row carries its approvals, named for its repository', async () => {
+  const store = memory([CONTAINERD, NERDCTL], { [approvals.STORAGE_KEY]: { [NERDCTL]: 0 } });
+  allowlist.setStorage(store);
+  approvals.setStorage(store);
+  const { document } = page();
+  await settings.start(document);
+
+  const field = approvalsField(document, CONTAINERD);
+  assert.strictEqual(field.value, '2');
+  assert.strictEqual(field.getAttribute('aria-label'), `Approvals for ${CONTAINERD}`);
+  assert.strictEqual(field.closest('label')?.textContent?.trim(), 'Approvals');
+  assert.strictEqual(approvalsField(document, NERDCTL).value, '0');
+
+  // Another settings tab saves a count.
+  await approvals.save(CONTAINERD, 1);
+  assert.strictEqual(approvalsField(document, CONTAINERD).value, '1');
+});
+
+test('a whole number typed into the field is saved, and anything else goes back on leaving', async () => {
+  const store = memory([CONTAINERD]);
+  allowlist.setStorage(store);
+  approvals.setStorage(store);
+  const { window, document } = page();
+  await settings.start(document);
+  const field = approvalsField(document, CONTAINERD);
+
+  field.value = '3';
+  field.dispatchEvent(new window.Event('change', { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepStrictEqual(store.entries[approvals.STORAGE_KEY], { [CONTAINERD]: 3 });
+
+  for (const typed of ['-1', '1.5', 'two', '']) {
+    field.value = typed;
+    field.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepStrictEqual(
+      store.entries[approvals.STORAGE_KEY],
+      { [CONTAINERD]: 3 },
+      `${JSON.stringify(typed)} was saved`
+    );
+    field.dispatchEvent(new window.Event('focusout', { bubbles: true }));
+    assert.strictEqual(field.value, '3', `${JSON.stringify(typed)} stayed after leaving`);
+  }
+});
+
+test('a repository removed and added back needs two approvals again', async () => {
+  const store = memory([CONTAINERD, NERDCTL], {
+    [approvals.STORAGE_KEY]: { [CONTAINERD]: 0, [NERDCTL]: 1 },
+  });
+  allowlist.setStorage(store);
+  approvals.setStorage(store);
+  cache.setStorage(store);
+  const { document } = page();
+  await settings.start(document);
+
+  await settings.drop(document, CONTAINERD);
+  assert.deepStrictEqual(store.entries[approvals.STORAGE_KEY], { [NERDCTL]: 1 });
+
+  assert.strictEqual(await type(document, CONTAINERD), true);
+  assert.strictEqual(approvalsField(document, CONTAINERD).value, '2');
 });

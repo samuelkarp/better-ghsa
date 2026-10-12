@@ -1,0 +1,134 @@
+{
+  "//": "Merge box data modeled on a public pull request whose two listed approvals GitHub calls stale. Logins, identifiers, and branches are made up; the conditions are as captured. The PULL_REQUEST rule rollup counts one approval.",
+  "pullRequest": {
+    "baseRefName": "main",
+    "headRefName": "fix-2",
+    "isDraft": false,
+    "isCrossRepo": false,
+    "latestOpinionatedReviews": [
+      {
+        "id": 1000000001,
+        "authorCanPushToRepository": true,
+        "author": {
+          "login": "lindqvist-ana",
+          "avatarUrl": "https://avatars.githubusercontent.com/u/0?v=4",
+          "name": "lindqvist-ana",
+          "url": "/lindqvist-ana"
+        },
+        "onBehalfOf": [],
+        "state": "APPROVED"
+      },
+      {
+        "id": 1000000002,
+        "authorCanPushToRepository": true,
+        "author": {
+          "login": "okafor-dev",
+          "avatarUrl": "https://avatars.githubusercontent.com/u/0?v=4",
+          "name": "okafor-dev",
+          "url": "/okafor-dev"
+        },
+        "onBehalfOf": [],
+        "state": "APPROVED"
+      }
+    ],
+    "pendingReviewRequests": [],
+    "resourcePath": "/git-utensils/Spoon-Knife-ghsa-jmvx-2wfw-xfgj/pull/2",
+    "state": "OPEN"
+  },
+  "mergeRequirements": {
+    "state": "UNMERGEABLE",
+    "conditions": [
+      {
+        "type": "PULL_REQUEST_STATE",
+        "displayName": "Pull request state",
+        "description": "Pull request must be open and not in draft mode in order to be merged",
+        "message": null,
+        "result": "PASSED"
+      },
+      {
+        "type": "PULL_REQUEST_REPO_STATE",
+        "displayName": "Pull request repository state",
+        "description": "The repository must be not archived or locked",
+        "message": null,
+        "result": "PASSED"
+      },
+      {
+        "type": "PULL_REQUEST_USER_STATE",
+        "displayName": "Pull request user state",
+        "description": "The user must have push access to the repo and a verified email",
+        "message": null,
+        "result": "PASSED",
+        "failedSubConditions": []
+      },
+      {
+        "type": "PULL_REQUEST_RULES",
+        "displayName": "Repo rules",
+        "description": "Pull request repository rules",
+        "message": "<div>Changes must be made through the merge queue Waiting on 1 reapproval from someone other than the last pusher. Reviews from okafor-dev and lindqvist-ana are stale because they were submitted before the most recent code changes.</div>",
+        "result": "FAILED",
+        "ruleRollups": [
+          {
+            "ruleType": "PULL_REQUEST",
+            "displayName": "Require a pull request before merging",
+            "message": "<div>Waiting on 1 reapproval from someone other than the last pusher. Reviews from okafor-dev and lindqvist-ana are stale because they were submitted before the most recent code changes.</div>",
+            "result": "FAILED",
+            "bypassable": true,
+            "metadata": {
+              "proofOfPresence": null,
+              "requiredReviewers": 2,
+              "approvedReviewers": 1,
+              "requiresCodeowners": false,
+              "failureReasons": [
+                "more_reviews_required",
+                "last_push_approval_required"
+              ]
+            }
+          },
+          {
+            "ruleType": "AUTHORIZATION",
+            "displayName": "Restrict who can push",
+            "message": "<div></div>",
+            "result": "PASSED",
+            "bypassable": false,
+            "metadata": null
+          },
+          {
+            "ruleType": "DELETION",
+            "displayName": "Restrict deletions",
+            "message": "<div></div>",
+            "result": "PASSED",
+            "bypassable": false,
+            "metadata": null
+          }
+        ]
+      },
+      {
+        "type": "PULL_REQUEST_MERGE_CONFLICT_STATE",
+        "displayName": "Pull request merge conflict state",
+        "description": "The pull request must not have any unresolved merge conflicts",
+        "message": null,
+        "result": "PASSED",
+        "conflicts": null,
+        "isConflictResolvableInWeb": null,
+        "webEditorConflictResolution": null
+      },
+      {
+        "type": "PULL_REQUEST_MERGE_METHOD",
+        "displayName": "Pull request merge method",
+        "description": "The selected merge method must be valid for the base repository.",
+        "message": null,
+        "result": "PASSED"
+      },
+      {
+        "type": "STACK",
+        "displayName": "Stacked PR conditions",
+        "description": "Stacked pull requests must be up-to-date to merge",
+        "message": null,
+        "result": "PASSED",
+        "stack": null,
+        "isStacked": false,
+        "entries": []
+      }
+    ]
+  }
+}

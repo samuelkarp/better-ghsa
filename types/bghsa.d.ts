@@ -8,6 +8,7 @@ interface BghsaNamespace {
   dom: typeof import('../src/common/dom.js');
   text: typeof import('../src/common/text.js');
   allowlist: typeof import('../src/common/allowlist.js');
+  approvals: typeof import('../src/common/approvals.js');
   settingsControl: typeof import('../src/common/settings-control.js');
   trust: typeof import('../src/common/trust.js');
   schema: typeof import('../src/common/schema.js');
@@ -18,6 +19,7 @@ interface BghsaNamespace {
   derive: typeof import('../src/common/derive.js');
   order: typeof import('../src/common/order.js');
   chips: typeof import('../src/common/chips.js');
+  readiness: typeof import('../src/common/readiness.js');
   row: typeof import('../src/common/row.js');
   duplicate: typeof import('../src/common/duplicate.js');
   members: typeof import('../src/common/members.js');
@@ -26,6 +28,7 @@ interface BghsaNamespace {
   forget: typeof import('../src/common/forget.js');
   write: typeof import('../src/common/write.js');
   fetch: typeof import('../src/common/fetch.js');
+  reviews: typeof import('../src/common/reviews.js');
   crawl: typeof import('../src/common/crawl.js');
   tracking: typeof import('../src/detail/tracking.js');
   comments: typeof import('../src/detail/comments.js');

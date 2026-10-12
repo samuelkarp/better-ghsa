@@ -4,7 +4,10 @@ On an advisory page,
 `https://github.com/{owner}/{repo}/security/advisories/GHSA-xxxx-xxxx-xxxx`, the
 extension adds a "Better GHSA" panel to the main column above the report.
 
-The panel reads the open page. Rendering does not send requests; saving does.
+The panel reads the open page. It sends requests to GitHub in two cases: when
+you open a draft advisory, it reads the merge box data of each open pull
+request in the private fork, and when you save an edit, it posts it to the
+advisory.
 
 ## What it shows
 
@@ -19,11 +22,48 @@ been set. Waiting chips are hidden on published and closed advisories.
 
 Draft advisories show a patch chip: "Patch in review" when the private fork
 lists an open pull request, "No patch yet" when it does not, or "Unknown" when
-a pull request's state could not be read.
+a pull request's state could not be read. The chip shows a green "Patches
+approved" when every open pull request is approved and each branch has at most
+one.
 
 An "Unknown" chip also appears when the advisory's state could not be read.
 
 Severity and CVE appear on GitHub's page outside the panel.
+
+### Ready
+
+On a draft advisory, the "Ready" section comes first, under the header chips.
+Its heading shows a green "Ready" chip when the draft can be published. A
+draft is ready when all of these hold:
+
+- The title, description, and severity are confirmed.
+- The private fork has at least one open pull request, at most one per branch,
+  and every pull request's state was read.
+- Every open pull request is approved.
+- Every backport target has an open pull request against its branch.
+- The advisory lists at least one package, and every package has an
+  ecosystem, a package name, affected versions, and patched versions.
+- When backport targets are set, the count of comma-separated patched versions
+  across all packages equals the number of targets.
+
+CVE assignment and an embargo do not affect readiness.
+
+The "Package", "Affected versions", and "Patched versions" lines each show a
+chip: "Missing" when no package has that value, "Incomplete" when some
+packages do, and a green "Complete" when all do. A package has a value for
+"Package" when it has both an ecosystem and a name. "Patched versions" also
+shows "Incomplete" when backport targets are set and the patched-version count
+differs from the number of targets.
+
+A pull request is approved when it has at least the number of approvals set
+for the repository in settings, 2 by default, and when no review requests
+changes. The approval count and the changes-requested state come from the
+merge box data GitHub returns for each pull request in the private fork. When
+that data lacks an approval count, the extension counts the latest approving
+and change-requesting review from each reviewer with write access. A pull
+request whose data cannot be read is not approved. The extension stores the
+results with the cached advisory. The panel shows the stored results until new
+ones arrive. A rebuilt panel reuses them.
 
 ### Confirmations
 
@@ -39,6 +79,8 @@ confirmation time.
 The "Description" line also shows whether the description is the reporter's
 original text: "Not updated", "Updated", or "Unknown".
 
+On a draft advisory, the chip of a confirmed line is green.
+
 This block is hidden on published and closed advisories.
 
 ### Stored values
@@ -47,7 +89,11 @@ One row for each value that has been set:
 
 - "Triage", the triage value and how long it has been set.
 - "Owners", one chip per maintainer.
-- "Backport targets", one chip per release branch.
+- "Backport targets", one chip per release branch. On a draft advisory, a
+  branch chip is green when exactly one open pull request targets the branch
+  and that pull request is approved. It is red when more than one open pull
+  request targets the branch. A red "Incomplete" chip leads the row when the
+  patched versions outnumber the targets.
 - "Embargo", reading "No lift date", "Lifts 2026-04-01", or "Overdue since
   2026-04-01".
 - "Closed as", the closure reason and, for a duplicate, its reference. An exact

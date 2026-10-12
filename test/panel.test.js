@@ -19,6 +19,9 @@ const cache = require('../src/common/cache.js');
 const members = require('../src/common/members.js');
 const branches = require('../src/common/branches.js');
 const edit = require('../src/detail/edit.js');
+const approvals = require('../src/common/approvals.js');
+const reviews = require('../src/common/reviews.js');
+const readiness = require('../src/common/readiness.js');
 
 const allowlist = require('../src/common/allowlist.js');
 
@@ -95,12 +98,25 @@ function page() {
 
 /**
  * @param {import('../src/common/parse-detail.js').ParsedDetail} advisory
+ * @param {import('../src/detail/tracking.js').TrackingView} view
+ * @returns {import('../src/common/readiness.js').Readiness | null} The draft's
+ *   readiness before any review result arrives.
+ */
+function unreviewed(advisory, view) {
+  const ref = advisory.ref;
+  const required = approvals.requiredFor(ref === null ? '' : `${ref.owner}/${ref.repo}`);
+  return readiness.compute(advisory, view, {}, required);
+}
+
+/**
+ * @param {import('../src/common/parse-detail.js').ParsedDetail} advisory
  * @param {import('../src/detail/tracking.js').TrackingView} [view] The tracking
  *   state to render; defaults to untracked.
  * @returns {Element} the panel this advisory renders to.
  */
 function build(advisory, view = tracking.untracked()) {
-  return panel.buildPanel(blank, advisory, derive.derive(advisory), view);
+  const derived = derive.derive(advisory);
+  return panel.buildPanel(blank, advisory, derived, view, undefined, unreviewed(advisory, view));
 }
 
 /**
@@ -122,13 +138,14 @@ async function buildEditable(advisory) {
   const merged = merge.mergeSnapshots(advisory.comments);
   const view = await tracking.readAdvisory(advisory, merged);
   const derived = derive.derive(advisory);
-  return panel.buildPanel(blank, advisory, derived, view, {
+  const context = {
     advisory,
     derived,
     tracking: view,
     fingerprints: await tracking.fingerprints(advisory),
     merged,
-  });
+  };
+  return panel.buildPanel(blank, advisory, derived, view, context, unreviewed(advisory, view));
 }
 
 /**
@@ -137,7 +154,9 @@ async function buildEditable(advisory) {
  * @returns {Element} the panel placed in `doc`.
  */
 function place(doc, advisory = triage) {
-  const injected = panel.injectPanel(doc, advisory, derive.derive(advisory), tracking.untracked());
+  const view = tracking.untracked();
+  const ready = unreviewed(advisory, view);
+  const injected = panel.injectPanel(doc, advisory, derive.derive(advisory), view, undefined, ready);
   if (injected === null) throw new Error('the document offered no anchor');
   return injected;
 }
@@ -1607,6 +1626,254 @@ test('a page that does not say which advisory it is leaves no entry', async () =
     assert.ok(held === null, 'an advisory with no reference was cached');
     assert.deepStrictEqual(Object.keys(storage.entries), []);
   } finally {
+    cache.setStorage(null);
+  }
+});
+
+/**
+ * @param {Element} root
+ * @param {string} selector
+ * @returns {string[]} each matching chip as its text and tone, `text[tone]`.
+ */
+function toned(root, selector) {
+  return Array.from(root.querySelectorAll(selector)).map((chip) => {
+    const tone = /bghsa-tone-([a-z-]+)/.exec(String(chip.getAttribute('class') ?? ''));
+    return tone === null ? text(chip) : `${text(chip)}[${tone[1]}]`;
+  });
+}
+
+/**
+ * @param {Element} root
+ * @returns {string} the patch chip, the last chip in a draft's header, as
+ *   `text[tone]`.
+ */
+function patchChipOf(root) {
+  return toned(root, '.Box-header .Label').at(-1) ?? '';
+}
+
+test('a draft panel opens with Ready under the chip row, and no other state has it', () => {
+  const built = build({ ...triage, state: 'Draft' });
+  const first = built.querySelector('.Box-header')?.nextElementSibling ?? null;
+  assert.ok(first?.classList.contains('bghsa-ready') === true, 'Ready is not under the chip row');
+  assert.ok(first !== null);
+  assert.strictEqual(text(first.querySelector('.bghsa-ready-heading')), 'Ready');
+  assert.deepStrictEqual(texts(first, '.bghsa-confirmation-name'), [
+    'Package',
+    'Affected versions',
+    'Patched versions',
+  ]);
+  assert.deepStrictEqual(toned(first, '.Label'), ['Missing', 'Missing', 'Missing']);
+  for (const state of ['Triage', 'Published', 'Closed', null]) {
+    assert.strictEqual(build({ ...triage, state }).querySelector('.bghsa-ready'), null, String(state));
+  }
+});
+
+test('readiness paints the chips the panel already shows', () => {
+  const advisory = { ...triage, state: 'Draft' };
+  const view = { ...tracking.untracked(), backports: ['main', 'release/1.0', 'release/0.9'] };
+  /** @type {import('../src/common/readiness.js').Readiness} */
+  const readiness = {
+    ready: true,
+    detailReady: true,
+    lines: { package: 'Complete', affected: 'Incomplete', patched: 'Missing' },
+    backports: [
+      { branch: 'main', tone: 'success-muted' },
+      { branch: 'release/1.0', tone: 'danger' },
+      { branch: 'release/0.9', tone: undefined },
+    ],
+    backportsIncomplete: true,
+    patchApproved: true,
+    confirmed: { title: true, description: false, scoring: true },
+  };
+  const built = panel.buildPanel(blank, advisory, derive.derive(advisory), view, undefined, readiness);
+
+  const ready = /** @type {Element} */ (built.querySelector('.bghsa-ready'));
+  assert.deepStrictEqual(toned(ready, '.Label'), [
+    'Ready[success-muted]',
+    'Complete[success-muted]',
+    'Incomplete',
+    'Missing',
+  ]);
+  const backports = [...built.querySelectorAll('.Box-row')].find(
+    (row) => text(row.querySelector('.bghsa-label')) === 'Backport targets'
+  );
+  assert.ok(backports !== undefined, 'no backport targets row');
+  assert.deepStrictEqual(toned(backports, '.Label'), [
+    'Incomplete[danger]',
+    'main[success-muted]',
+    'release/1.0[danger]',
+    'release/0.9',
+  ]);
+  assert.deepStrictEqual(toned(built, '.bghsa-confirmation .Label:first-of-type'), [
+    'Not confirmed[success-muted]',
+    'Not confirmed',
+    'Not confirmed[success-muted]',
+  ]);
+  assert.strictEqual(patchChipOf(built), 'Patches approved[success-muted]');
+});
+
+/**
+ * @returns {Document} the triage fixture, read as a draft.
+ */
+function draftDoc() {
+  const html = fs
+    .readFileSync(path.join(__dirname, '..', 'testdata', 'triage-thread.html'), 'utf8')
+    .replace('<span aria-hidden="true">Triage</span>', '<span aria-hidden="true">Draft</span>');
+  return /** @type {Document} */ (/** @type {unknown} */ (parseHTML(html).document));
+}
+
+const PRIVATE_MERGE_BOX = fs.readFileSync(
+  path.join(__dirname, '..', 'testdata', 'merge-box-private.json'),
+  'utf8'
+);
+
+test(
+  'a draft visit reads each open merge box once, keeps it, and the next visit reads again',
+  { timeout: 10_000 },
+  async () => {
+  const storage = fakeStorage();
+  cache.setStorage(storage);
+  /** @type {string[]} */
+  const asked = [];
+  reviews.setFetch(async (url) => {
+    asked.push(url);
+    return { status: 200, text: async () => PRIVATE_MERGE_BOX };
+  });
+  const doc = draftDoc();
+  const fork = '/git-utensils/Spoon-Knife-ghsa-jmvx-2wfw-xfgj';
+  try {
+    await panel.render(doc);
+    const stored = async () =>
+      Object.keys((await cache.getAdvisory(triage.ref))?.reviews ?? {}).sort();
+    const deadline = Date.now() + 2000;
+    while ((await stored()).length < 2 && Date.now() < deadline) await delay(5);
+    assert.deepStrictEqual(await stored(), ['1', '2']);
+
+    // The results' own redraws and a rebuild ask nothing more.
+    await panel.render(doc);
+    await delay(20);
+    assert.deepStrictEqual(asked.slice().sort(), [
+      `${fork}/pull/1/page_data/merge_box`,
+      `${fork}/pull/2/page_data/merge_box`,
+    ]);
+
+    // The document shows another page, then the advisory again.
+    const meta = /** @type {Element} */ (doc.querySelector('.gh-header-meta'));
+    const parent = /** @type {Element} */ (meta.parentElement);
+    const next = meta.nextSibling;
+    meta.remove();
+    await panel.render(doc);
+    parent.insertBefore(meta, next);
+    await panel.render(doc);
+    await until(() => asked.length === 4);
+    assert.strictEqual(asked.length, 4, 'a return to the advisory read nothing');
+  } finally {
+    reviews.setFetch(null);
+    panel.stop(doc);
+    await delay(20);
+    cache.setStorage(null);
+  }
+});
+
+test(
+  'the stored approvals count colors the patch chip, and a new one recolors it without a request',
+  { timeout: 10_000 },
+  async () => {
+  const storage = fakeStorage();
+  cache.setStorage(storage);
+  approvals.setStorage(fakeStorage({ [approvals.STORAGE_KEY]: { 'git-utensils/spoon-knife': 5 } }));
+  let asked = 0;
+  reviews.setFetch(async () => {
+    asked += 1;
+    return { status: 200, text: async () => PRIVATE_MERGE_BOX };
+  });
+  const doc = draftDoc();
+  /** @returns {string} */
+  const patch = () => {
+    const drawn = doc.getElementById(panel.PANEL_ID);
+    return drawn === null ? '' : patchChipOf(drawn);
+  };
+  try {
+    await panel.render(doc);
+    const stored = async () =>
+      Object.keys((await cache.getAdvisory(triage.ref))?.reviews ?? {}).length;
+    const deadline = Date.now() + 2000;
+    while ((await stored()) < 2 && Date.now() < deadline) await delay(5);
+    await panel.render(doc);
+    // Four approvals fall short of five.
+    assert.strictEqual(patch(), 'Patch in review[attention]', 'four approvals of five approved');
+
+    await approvals.save('git-utensils/spoon-knife', 2);
+    await panel.render(doc);
+    assert.strictEqual(
+      patch(),
+      'Patches approved[success-muted]',
+      'four approvals of two did not approve'
+    );
+    assert.strictEqual(asked, 2, 'the new count was answered with a request');
+  } finally {
+    reviews.setFetch(null);
+    panel.stop(doc);
+    await delay(20);
+    approvals.setStorage(null);
+    cache.setStorage(null);
+  }
+});
+
+test(
+  'a merge box this visit cannot read leaves its pull request unapproved over a cached approval',
+  { timeout: 10_000 },
+  async () => {
+  const storage = fakeStorage();
+  cache.setStorage(storage);
+  approvals.setStorage(fakeStorage());
+  const doc = draftDoc();
+  const draft = parse.parseDetail(doc);
+  if (draft === null) throw new Error('the draft fixture did not parse');
+  await cache.putAdvisory(triage.ref, draft);
+  const approving = { approvals: 4, changesRequested: false, observedAt: 1 };
+  await cache.putReviews(triage.ref, { 1: approving, 2: approving });
+  /** @type {() => void} */
+  let answer = () => {};
+  const answered = new Promise((resolve) => {
+    answer = () => resolve(undefined);
+  });
+  let asked = 0;
+  reviews.setFetch(async () => {
+    asked += 1;
+    await answered;
+    return { status: 404, text: async () => '{"error":"Not Found"}' };
+  });
+  /** @returns {Element} */
+  const drawn = () => {
+    const found = doc.getElementById(panel.PANEL_ID);
+    if (found === null) throw new Error('no panel was drawn');
+    return found;
+  };
+  try {
+    await panel.render(doc);
+    await until(() => asked === 2);
+    assert.strictEqual(
+      patchChipOf(drawn()),
+      'Patches approved[success-muted]',
+      'the cached approvals did not approve before the reads answered'
+    );
+
+    answer();
+    await until(() => patchChipOf(drawn()) === 'Patch in review[attention]');
+    await delay(20);
+    assert.strictEqual(
+      patchChipOf(drawn()),
+      'Patch in review[attention]',
+      'a cached approval stood in for a merge box that could not be read'
+    );
+    const heading = /** @type {Element} */ (drawn().querySelector('.bghsa-ready-heading'));
+    assert.strictEqual(heading.querySelectorAll('.Label').length, 0, 'the draft reads as ready');
+  } finally {
+    reviews.setFetch(null);
+    panel.stop(doc);
+    await delay(20);
+    approvals.setStorage(null);
     cache.setStorage(null);
   }
 });

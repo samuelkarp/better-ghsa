@@ -13,6 +13,9 @@ if (typeof require === 'function') {
   require('../common/derive.js');
   require('../common/order.js');
   require('../common/chips.js');
+  require('../common/readiness.js');
+  require('../common/approvals.js');
+  require('../common/reviews.js');
   require('../common/duplicate.js');
   require('../common/members.js');
   require('../common/branches.js');
@@ -47,6 +50,9 @@ if (typeof require === 'function') {
   ].join('\n');
 
   const UNKNOWN = 'Unknown';
+
+  /** The patch chip of a draft whose open pull requests are all approved. */
+  const PATCHES_APPROVED = 'Patches approved';
 
   const DRAFT_STATE = globalThis.bghsa.chips.DRAFT_STATE;
 
@@ -85,9 +91,10 @@ if (typeof require === 'function') {
    * @param {import('../common/parse-detail.js').ParsedDetail} advisory
    * @param {import('../common/derive.js').DerivedState} derived
    * @param {import('./tracking.js').TrackingView} tracking
+   * @param {import('../common/readiness.js').Readiness | null} readiness
    * @returns {Element}
    */
-  function buildChips(doc, advisory, derived, tracking) {
+  function buildChips(doc, advisory, derived, tracking, readiness) {
     const header = element(doc, 'div', 'Box-header bghsa-chips');
     header.append(element(doc, 'strong', 'mr-2', 'Better GHSA'));
     if (advisory.state === null) {
@@ -105,6 +112,10 @@ if (typeof require === 'function') {
       const patch = globalThis.bghsa.chips.patchChip(
         globalThis.bghsa.chips.patchStateOf(derived.patch)
       );
+      if (readiness?.patchApproved === true) {
+        patch.text = PATCHES_APPROVED;
+        patch.tone = globalThis.bghsa.chips.READINESS_TONES.MET;
+      }
       header.append(globalThis.bghsa.chips.buildChip(doc, patch));
     }
     return header;
@@ -174,14 +185,61 @@ if (typeof require === 'function') {
   }
 
   /**
+   * The package lines of the readiness section, in display order.
+   *
+   * @type {readonly { key: 'package' | 'affected' | 'patched', name: string }[]}
+   */
+  const READINESS_LINES = [
+    { key: 'package', name: 'Package' },
+    { key: 'affected', name: 'Affected versions' },
+    { key: 'patched', name: 'Patched versions' },
+  ];
+
+  /**
+   * Show whether a draft is ready to publish and how complete its packages
+   * are (REQUIREMENTS.md section 8).
+   *
+   * @param {Document} doc
+   * @param {import('../common/readiness.js').Readiness} readiness
+   * @returns {Element}
+   */
+  function buildReady(doc, readiness) {
+    const chips = globalThis.bghsa.chips;
+    const container = element(doc, 'div', 'Box-row bghsa-confirmed bghsa-ready');
+    const heading = element(doc, 'div', 'bghsa-chips bghsa-ready-heading');
+    heading.append(element(doc, 'span', 'text-bold', chips.READY));
+    if (readiness.ready) {
+      heading.append(
+        chips.buildChip(doc, { text: chips.READY, tone: chips.READINESS_TONES.MET })
+      );
+    }
+    container.append(heading);
+
+    for (const line of READINESS_LINES) {
+      const state = readiness.lines[line.key];
+      const built = element(doc, 'div', 'd-flex flex-items-baseline bghsa-ready-line');
+      built.append(element(doc, 'span', 'bghsa-confirmation-name', line.name));
+      const body = element(doc, 'div', 'flex-auto bghsa-chips');
+      built.append(body);
+      /** @type {import('../common/chips.js').ChipSpec} */
+      const chip = { text: state };
+      if (state === chips.COMPLETE) chip.tone = chips.READINESS_TONES.MET;
+      body.append(chips.buildChip(doc, chip));
+      container.append(built);
+    }
+    return container;
+  }
+
+  /**
    * Show confirmation status and description provenance together.
    *
    * @param {Document} doc
    * @param {import('./tracking.js').TrackingView} tracking
    * @param {import('../common/parse-detail.js').ParsedDetail} advisory
+   * @param {import('../common/readiness.js').Readiness | null} readiness
    * @returns {Element}
    */
-  function buildConfirmations(doc, tracking, advisory) {
+  function buildConfirmations(doc, tracking, advisory, readiness) {
     const container = element(doc, 'div', 'Box-row bghsa-confirmed');
     container.append(element(doc, 'div', 'text-bold bghsa-confirmed-heading', 'Confirmations'));
 
@@ -192,7 +250,12 @@ if (typeof require === 'function') {
       // Use a separate flex container for chip gaps to preserve panel row alignment.
       const body = element(doc, 'div', 'flex-auto bghsa-chips');
       line.append(body);
-      body.append(globalThis.bghsa.chips.buildChip(doc, { text: confirmationText(state) }));
+      /** @type {import('../common/chips.js').ChipSpec} */
+      const chip = { text: confirmationText(state) };
+      if (readiness?.confirmed[track.key] === true) {
+        chip.tone = globalThis.bghsa.chips.READINESS_TONES.MET;
+      }
+      body.append(globalThis.bghsa.chips.buildChip(doc, chip));
       if (track.key === 'description') {
         const provenance = provenanceText(advisory.descriptionOriginal);
         body.append(globalThis.bghsa.chips.buildChip(doc, { text: provenance }));
@@ -239,9 +302,10 @@ if (typeof require === 'function') {
    * @param {boolean} embargoOverdue Whether the lift date has passed on an unpublished advisory.
    * @param {{ owner: string, repo: string } | null} ref The repository used for duplicate
    *   advisory links.
+   * @param {import('../common/readiness.js').Readiness | null} readiness
    * @returns {Element[]}
    */
-  function buildTracks(doc, tracking, embargoOverdue, ref) {
+  function buildTracks(doc, tracking, embargoOverdue, ref, readiness) {
     /** @type {Element[]} */
     const rows = [];
 
@@ -262,7 +326,22 @@ if (typeof require === 'function') {
     }
     if (tracking.owners.length > 0) rows.push(chipRow(doc, 'Owners', tracking.owners));
     if (tracking.backports.length > 0) {
-      rows.push(chipRow(doc, 'Backport targets', tracking.backports));
+      const chips = globalThis.bghsa.chips;
+      const built = row(doc, 'Backport targets');
+      built.body.className = 'flex-auto bghsa-chips';
+      if (readiness?.backportsIncomplete === true) {
+        built.body.append(
+          chips.buildChip(doc, { text: chips.INCOMPLETE, tone: chips.READINESS_TONES.BROKEN })
+        );
+      }
+      tracking.backports.forEach((branch, at) => {
+        /** @type {import('../common/chips.js').ChipSpec} */
+        const chip = { text: branch };
+        const tone = readiness?.backports[at]?.tone;
+        if (tone !== undefined) chip.tone = tone;
+        built.body.append(chips.buildChip(doc, chip));
+      });
+      rows.push(built.row);
     }
     if (tracking.embargo) {
       const built = row(doc, 'Embargo');
@@ -393,10 +472,13 @@ if (typeof require === 'function') {
    * @param {import('../common/parse-detail.js').ParsedDetail} advisory
    * @param {import('../common/derive.js').DerivedState} derived
    * @param {import('./tracking.js').TrackingView} tracking
-   * @param {import('./edit.js').EditorContext} [context] Enables editing when supplied.
+   * @param {import('./edit.js').EditorContext | undefined} context Enables editing
+   *   when supplied.
+   * @param {import('../common/readiness.js').Readiness | null} readiness A draft's
+   *   readiness.
    * @returns {Element}
    */
-  function buildPanel(doc, advisory, derived, tracking, context) {
+  function buildPanel(doc, advisory, derived, tracking, context, readiness) {
     const panel = element(doc, 'div', 'Box mb-3 bghsa-panel');
     panel.id = PANEL_ID;
     panel.setAttribute('data-bghsa-panel', '1');
@@ -404,11 +486,12 @@ if (typeof require === 'function') {
       advisory,
       tracking.embargo ? tracking.embargoLift : null
     );
-    panel.append(buildChips(doc, advisory, derived, tracking));
+    panel.append(buildChips(doc, advisory, derived, tracking, readiness));
+    if (readiness !== null) panel.append(buildReady(doc, readiness));
 
     const dealtWith = settled(advisory);
-    if (!dealtWith) panel.append(buildConfirmations(doc, tracking, advisory));
-    for (const track of buildTracks(doc, tracking, embargoOverdue, advisory.ref)) {
+    if (!dealtWith) panel.append(buildConfirmations(doc, tracking, advisory, readiness));
+    for (const track of buildTracks(doc, tracking, embargoOverdue, advisory.ref, readiness)) {
       panel.append(track);
     }
 
@@ -454,12 +537,14 @@ if (typeof require === 'function') {
    * @param {import('../common/parse-detail.js').ParsedDetail} advisory
    * @param {import('../common/derive.js').DerivedState} derived
    * @param {import('./tracking.js').TrackingView} tracking
-   * @param {import('./edit.js').EditorContext} [context] Enables editing when supplied.
+   * @param {import('./edit.js').EditorContext | undefined} context Enables editing
+   *   when supplied.
+   * @param {import('../common/readiness.js').Readiness | null} readiness
    * @returns {Element | null} The panel, or null if neither an anchor nor an existing panel
    *   is available.
    */
-  function injectPanel(doc, advisory, derived, tracking, context) {
-    const panel = buildPanel(doc, advisory, derived, tracking, context);
+  function injectPanel(doc, advisory, derived, tracking, context, readiness) {
+    const panel = buildPanel(doc, advisory, derived, tracking, context, readiness);
     const existing = doc.getElementById(PANEL_ID);
     const place = anchor(doc);
     if (place !== null) {
@@ -533,6 +618,93 @@ if (typeof require === 'function') {
   }
 
   /**
+   * @param {import('../common/parse-detail.js').ParsedDetail} advisory
+   * @param {import('./tracking.js').TrackingView} tracking
+   * @param {Readonly<Record<string, import('../common/cache.js').ReviewResult>>} reviews
+   * @returns {import('../common/readiness.js').Readiness | null} The draft's
+   *   readiness against the repository's approvals setting.
+   */
+  function readinessOf(advisory, tracking, reviews) {
+    const ref = advisory.ref;
+    const required = globalThis.bghsa.approvals.requiredFor(
+      ref === null ? '' : `${ref.owner}/${ref.repo}`
+    );
+    return globalThis.bghsa.readiness.compute(advisory, tracking, reviews, required);
+  }
+
+  /**
+   * @typedef {object} Visit
+   * @property {string} key The advisory's edit key.
+   * @property {boolean} started Whether this visit's merge box requests were
+   *   sent.
+   * @property {Record<string, import('../common/cache.js').ReviewResult>} results
+   *   What those reads returned, by pull request number.
+   * @property {Set<string>} failed The pull requests whose merge box could not be read.
+   */
+
+  /**
+   * The advisory each document shows. A visit reads each open pull request's
+   * merge box once, and ends when the document shows anything else.
+   *
+   * @type {WeakMap<Document, Visit>}
+   */
+  const visits = new WeakMap();
+
+  /**
+   * Read a draft's merge boxes once per visit, after the page's own reading
+   * is stored, and redraw as each answer arrives.
+   *
+   * @param {Document} doc
+   * @param {import('../common/parse-detail.js').ParsedDetail} advisory
+   * @param {Promise<unknown>} remembered The store of the page's reading.
+   * @returns {Visit}
+   */
+  function visitFor(doc, advisory, remembered) {
+    const key = globalThis.bghsa.edit.keyOf(advisory);
+    const held = visits.get(doc);
+    /** @type {Visit} */
+    const visit =
+      held !== undefined && held.key === key
+        ? held
+        : { key, started: false, results: {}, failed: new Set() };
+    visits.set(doc, visit);
+    if (visit.started || advisory.state !== DRAFT_STATE || advisory.fork === null) return visit;
+    visit.started = true;
+    const open = advisory.fork.pullRequests.filter((pull) => pull.state === 'open');
+    const read = () =>
+      Promise.all(
+        open.map(async (pull) => {
+          const number = String(pull.number);
+          const result = await globalThis.bghsa.reviews.readReview(advisory.ref, pull);
+          if (visits.get(doc) !== visit) return;
+          if (result === null) visit.failed.add(number);
+          else {
+            visit.results[number] = result;
+            await globalThis.bghsa.cache.putReviews(advisory.ref, { [number]: result });
+          }
+          void passFor(doc)();
+        })
+      );
+    void remembered.then(read, read);
+    return visit;
+  }
+
+  /**
+   * @param {import('../common/parse-detail.js').ParsedDetail} advisory
+   * @param {Visit} visit
+   * @returns {Promise<Record<string, import('../common/cache.js').ReviewResult>>} The
+   *   cached review results under what this visit read. The results omit a
+   *   pull request this visit could not read.
+   */
+  async function reviewsFor(advisory, visit) {
+    if (advisory.state !== DRAFT_STATE || advisory.ref === null) return {};
+    const entry = await globalThis.bghsa.cache.getAdvisory(advisory.ref);
+    const held = { ...(entry?.reviews ?? {}), ...visit.results };
+    for (const number of visit.failed) delete held[number];
+    return held;
+  }
+
+  /**
    * Read the document and place the panel. Fingerprinting confirmation values
    * requires an asynchronous digest.
    *
@@ -545,13 +717,14 @@ if (typeof require === 'function') {
     // Record departures caused by navigation without a click.
     if (advisory === null) {
       rendered.delete(doc);
+      visits.delete(doc);
       edit.panelShows(null);
       return null;
     }
 
     edit.panelShows(edit.keyOf(advisory));
 
-    void remember(advisory);
+    const visit = visitFor(doc, advisory, remember(advisory));
 
     // Prefer locally saved state until the document includes that write.
     const context = await edit.contextFor(advisory, {
@@ -562,9 +735,15 @@ if (typeof require === 'function') {
       },
     });
 
+    // Readiness compares review results with the approvals setting, which
+    // has to be read before the first draw.
+    await globalThis.bghsa.approvals.load();
+    const readiness = readinessOf(advisory, context.tracking, await reviewsFor(advisory, visit));
+
     // Changes to sequence numbers, holders, fingerprints, or unknown fields
     // require new handlers even when the displayed values are unchanged.
     const inputs = JSON.stringify({
+      readiness,
       advisory,
       merged: context.merged,
       tracking: context.tracking,
@@ -593,7 +772,7 @@ if (typeof require === 'function') {
 
     const placed = reusable
       ? held.panel
-      : injectPanel(doc, advisory, context.derived, context.tracking, context);
+      : injectPanel(doc, advisory, context.derived, context.tracking, context, readiness);
 
     if (placed !== null) rendered.set(doc, { panel: placed, inputs });
     else rendered.delete(doc);
@@ -666,11 +845,15 @@ if (typeof require === 'function') {
   /**
    * Retain the observer and navigation cleanup callback for {@link stop}.
    *
-   * @type {WeakMap<Document, { observer: MutationObserver | null, disarm: () => void }>}
+   * @type {WeakMap<Document, { observer: MutationObserver | null, disarm: () => void,
+   *   unsubscribe: () => void }>}
    */
   const attached = new WeakMap();
 
   /**
+   * A change to the approvals setting redraws readiness from the review
+   * results already read.
+   *
    * @returns {void}
    */
   function start() {
@@ -679,7 +862,10 @@ if (typeof require === 'function') {
     void pass();
     const observer = observe(doc, pass);
     const disarm = globalThis.bghsa.edit.armNavigationWarning(doc);
-    attached.set(doc, { observer, disarm });
+    const unsubscribe = globalThis.bghsa.approvals.subscribe(() => {
+      void pass();
+    });
+    attached.set(doc, { observer, disarm, unsubscribe });
   }
 
   /**
@@ -690,11 +876,13 @@ if (typeof require === 'function') {
    */
   function stop(doc = globalThis.document) {
     rendered.delete(doc);
+    visits.delete(doc);
 
     const held = attached.get(doc);
     if (held !== undefined) {
       held.observer?.disconnect();
       held.disarm();
+      held.unsubscribe();
       attached.delete(doc);
     }
 

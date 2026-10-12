@@ -107,6 +107,25 @@ if (typeof require === 'function') {
   }
 
   /**
+   * Readiness labels (REQUIREMENTS.md section 8). A ready draft carries
+   * `Ready`, and each package line carries one of the other three.
+   */
+  const READY = 'Ready';
+
+  const MISSING = 'Missing';
+
+  const INCOMPLETE = 'Incomplete';
+
+  const COMPLETE = 'Complete';
+
+  /**
+   * Readiness paints a met condition green and a broken one red.
+   *
+   * @type {{ readonly MET: 'success-muted', readonly BROKEN: 'danger' }}
+   */
+  const READINESS_TONES = { MET: 'success-muted', BROKEN: 'danger' };
+
+  /**
    * Muted backgrounds use the default text color. Emphasis backgrounds use
    * `--fgColor-onEmphasis`. Fallbacks preserve the translucent or opaque fill.
    *
@@ -194,6 +213,11 @@ if (typeof require === 'function') {
     PATCH_UNKNOWN,
     patchStateOf,
     patchChip,
+    READY,
+    MISSING,
+    INCOMPLETE,
+    COMPLETE,
+    READINESS_TONES,
   };
 
   globalThis.bghsa.chips = exported;

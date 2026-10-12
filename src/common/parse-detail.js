@@ -65,6 +65,16 @@ if (typeof require === 'function') {
  */
 
 /**
+ * One affected product from the metadata form. A field left empty reads as null.
+ *
+ * @typedef {object} Package
+ * @property {string | null} ecosystem The selected ecosystem, `other` included.
+ * @property {string | null} name
+ * @property {string | null} affected The affected versions as entered.
+ * @property {string | null} patched The patched versions as entered.
+ */
+
+/**
  * @typedef {object} DescriptionRevision
  * @property {string} summary The revision control's summary text.
  * @property {string | null} historyUrl The edit history log partial.
@@ -107,6 +117,8 @@ if (typeof require === 'function') {
  * @property {TimelineEvent[]} timeline
  * @property {PrivateFork | null} fork
  * @property {string[]} collaborators
+ * @property {Package[] | null} packages The affected products, or null when
+ *   the page does not carry an affected-products form.
  */
 
 (() => {
@@ -447,6 +459,56 @@ if (typeof require === 'function') {
     };
   }
 
+  const PRODUCT_PREFIX = 'repository_advisory[affected_products_attributes][';
+
+  /**
+   * The form groups each product's fields under one index. The client-side
+   * template for a new product uses `{{affected-product-entry-index}}`, and a
+   * product removed before saving carries `_destroy` set to true.
+   *
+   * @param {Document} root
+   * @returns {Package[] | null}
+   */
+  function parsePackages(root) {
+    const fields = root.querySelectorAll(`[name^="${PRODUCT_PREFIX}"]`);
+    if (fields.length === 0) return null;
+    /** @type {Map<string, Map<string, Element>>} */
+    const groups = new Map();
+    for (const field of fields) {
+      const name = field.getAttribute('name') ?? '';
+      const match = /^\[(\d+)\]\[([a-z_]+)\]$/.exec(name.slice(PRODUCT_PREFIX.length - 1));
+      if (match === null) continue;
+      const index = /** @type {string} */ (match[1]);
+      const group = groups.get(index) ?? new Map();
+      group.set(/** @type {string} */ (match[2]), field);
+      groups.set(index, group);
+    }
+    /**
+     * @param {Element | undefined} field
+     * @returns {string | null}
+     */
+    const valueOf = (field) => {
+      if (field === undefined) return null;
+      if (field.tagName === 'SELECT') {
+        const selected = field.querySelector('option[selected]');
+        return selected === null ? null : orNull(selected.getAttribute('value') ?? '');
+      }
+      return orNull(field.getAttribute('value') ?? '');
+    };
+    /** @type {Package[]} */
+    const packages = [];
+    for (const group of groups.values()) {
+      if (valueOf(group.get('_destroy')) === 'true') continue;
+      packages.push({
+        ecosystem: valueOf(group.get('ecosystem')),
+        name: valueOf(group.get('package')),
+        affected: valueOf(group.get('affected_versions')),
+        patched: valueOf(group.get('patches')),
+      });
+    }
+    return packages;
+  }
+
   /**
    * @param {Document} root
    * @returns {ParsedDetail | null} null when the document is not a detail page.
@@ -515,6 +577,7 @@ if (typeof require === 'function') {
       timeline: parseTimeline(root),
       fork: parseFork(root),
       collaborators,
+      packages: parsePackages(root),
     };
   }
 
@@ -527,6 +590,7 @@ if (typeof require === 'function') {
     parseComments,
     parseTimeline,
     parseFork,
+    parsePackages,
     parseViewer,
     parseStateComment,
   };

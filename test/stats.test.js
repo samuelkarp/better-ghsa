@@ -66,6 +66,7 @@ function advisory(fields) {
     timeline: [],
     fork: null,
     collaborators: [],
+    packages: null,
     ...fields,
   };
 }
