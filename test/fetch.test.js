@@ -177,7 +177,10 @@ test('an advisory observed four minutes ago is not fetched and five is', async (
   /** @type {string[]} */
   const reported = [];
   const queue = queues.createQueue(
-    options(clock, storage, { fetch: fetch.send, onEntry: (ghsaId) => reported.push(ghsaId) })
+    options(clock, storage, {
+      fetch: fetch.send,
+      onEntry: (ghsaId, _entry, fetched) => reported.push(`${ghsaId} fetched=${fetched}`),
+    })
   );
   await queue.add([ghsa('aaaa'), ghsa('bbbb')]);
   const summary = await queue.run();
@@ -187,7 +190,10 @@ test('an advisory observed four minutes ago is not fetched and five is', async (
   ]);
   assert.ok(summary.fetched === 1, `${summary.fetched} advisories were fetched`);
   assert.ok(summary.skipped === 1, `${summary.skipped} advisories were skipped`);
-  assert.deepStrictEqual(reported.sort(), [ghsa('aaaa'), ghsa('bbbb')]);
+  assert.deepStrictEqual(reported.sort(), [
+    `${ghsa('aaaa')} fetched=false`,
+    `${ghsa('bbbb')} fetched=true`,
+  ]);
 });
 
 test('requests go out one second apart on the injected clock', async () => {
@@ -728,10 +734,13 @@ test('an advisory refreshed mid-pass is dropped from the queue', async () => {
   const clock = fakeClock(0);
   const storage = fakeStorage();
   const fetch = fakeFetch(clock);
+  /** @type {string[]} */
+  const reported = [];
   const queue = queues.createQueue(
     options(clock, storage, {
       fetch: fetch.send,
-      onEntry: async (ghsaId) => {
+      onEntry: async (ghsaId, _entry, fetched) => {
+        reported.push(`${ghsaId} fetched=${fetched}`);
         if (ghsaId !== ghsa('aaaa')) return;
         await cache.putAdvisory(
           { ...REF, ghsaId: ghsa('bbbb') },
@@ -750,6 +759,7 @@ test('an advisory refreshed mid-pass is dropped from the queue', async () => {
     'the advisory refreshed mid-pass was fetched anyway'
   );
   assert.ok(summary.skipped === 1, `${summary.skipped} advisories were skipped`);
+  assert.deepStrictEqual(reported, [`${ghsa('aaaa')} fetched=true`, `${ghsa('bbbb')} fetched=false`]);
 });
 
 test('what a read holds is the parsed record, stamped with the read time', async () => {

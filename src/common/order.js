@@ -22,6 +22,7 @@ if (typeof require === 'function') {
  *   severity. The caller clears confirmations for changed values.
  * @property {string | null} waitingSince The time the advisory entered its
  *   current triage value.
+ * @property {boolean} ready Whether the advisory is a draft ready to publish.
  */
 
 /**
@@ -268,15 +269,18 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Sort drafts before triage, then by each state's group priority. Within a
-   * group, sort by confirmed severity, unconfirmed severity, waiting time, and
-   * identifier (REQUIREMENTS.md section 9).
+   * Sort ready drafts first, then drafts before triage, then by each state's
+   * group priority. Within a group, sort by confirmed severity, unconfirmed
+   * severity, waiting time, and identifier (REQUIREMENTS.md section 9).
    *
    * @param {OrderEntry} a
    * @param {OrderEntry} b
    * @returns {number}
    */
   function compare(a, b) {
+    const ready = Number(b.ready) - Number(a.ready);
+    if (ready !== 0) return ready;
+
     const draft = Number(stateOf(b) === 'draft') - Number(stateOf(a) === 'draft');
     if (draft !== 0) return draft;
 

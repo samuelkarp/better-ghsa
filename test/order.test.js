@@ -21,6 +21,7 @@ function entry(ghsaId, fields = {}) {
     severity: null,
     severityConfirmed: false,
     waitingSince: null,
+    ready: false,
     ...fields,
   };
 }
@@ -254,6 +255,17 @@ test('a waiting time that went unread sorts after every one that is known', () =
     entry('A', { ...THEIRS, waitingSince: null }),
   ];
   ordersAs(entries, ['C', 'B', 'A'], 'a waiting time that went unread sorts last');
+});
+
+test('ready drafts come first, and each side keeps the default order', () => {
+  const entries = [
+    entry('A', { state: 'Draft', ...OVERDUE, severity: 'critical', severityConfirmed: true }),
+    entry('B', { state: 'Triage', ...OVERDUE }),
+    entry('C', { state: 'Draft', ...THEIRS, ready: true }),
+    entry('D', { state: 'Draft', ...OVERDUE, ready: true }),
+    entry('E', { state: 'Draft', ...THEIRS, ready: true, severity: 'low' }),
+  ];
+  ordersAs(entries, ['D', 'E', 'C', 'A', 'B'], 'ready drafts first');
 });
 
 function grid() {

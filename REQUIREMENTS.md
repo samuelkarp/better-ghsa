@@ -354,6 +354,9 @@ state of text and scoring, the CVE state, the severity marked as confirmed or
 unconfirmed, and the embargo. A confirmed severity is filled with the color
 GitHub paints that level. Each row shows the time its data was observed.
 
+Show a ready chip as the first chip on a row only when the advisory is a ready
+draft (section 6).
+
 Use the sentence-cased stored triage value as the waiting chip. If triage is
 unset, use the derived waiting state. Show never reviewed and new activity as
 additional derived chips before a stored triage chip. Show blocked on us and
@@ -376,6 +379,8 @@ the refresh status counting those reads. Beside the row count, count the rows
 shown whose advisory data predates the page load, and omit the count at zero.
 
 The default order places draft advisories before triage advisories.
+Ready drafts (section 6) precede every other advisory, and the order below
+holds within the ready drafts and within the rest.
 
 Within draft:
 
@@ -410,7 +415,8 @@ done page described in section 10.
 The list page renders from cache immediately and refreshes in the background,
 stalest first, at a throttled rate. Rows update as data arrives. Reading an
 advisory's state costs one fetch of its detail page, which also supplies every
-derived value.
+derived value except the approvals and reviews required for readiness. Read a
+draft's merge box data only when every other readiness condition is met.
 
 Read every page of each repository advisory list without a page-count cap.
 Throttle requests and report any walk that stops before its last page as

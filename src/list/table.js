@@ -15,9 +15,12 @@ if (typeof require === 'function') {
   require('../common/derive.js');
   require('../common/order.js');
   require('../common/chips.js');
+  require('../common/readiness.js');
   require('../common/row.js');
+  require('../common/approvals.js');
   require('../common/cache.js');
   require('../common/fetch.js');
+  require('../common/reviews.js');
   require('../common/crawl.js');
   require('../detail/tracking.js');
   require('../content.js');
@@ -56,6 +59,7 @@ if (typeof require === 'function') {
  * @property {number} backportsDone The number of targets with an open pull request.
  * @property {string | null} cve The CVE chip text, or null when absent.
  * @property {boolean} cveAssigned Whether the advisory has an assigned CVE.
+ * @property {boolean} ready Whether the advisory is a draft ready to publish.
  */
 
 /**
@@ -323,7 +327,24 @@ if (typeof require === 'function') {
       backportsDone: 0,
       cve: null,
       cveAssigned: false,
+      ready: false,
     };
+  }
+
+  /**
+   * @param {import('../common/parse-detail.js').ParsedDetail} advisory
+   * @param {import('../detail/tracking.js').TrackingView} tracking
+   * @param {import('../common/cache.js').CacheEntry} entry
+   * @returns {import('../common/readiness.js').Readiness | null} A draft's
+   *   readiness from the review results the entry holds, against the
+   *   repository's approvals setting.
+   */
+  function readinessOf(advisory, tracking, entry) {
+    const ref = advisory.ref;
+    const required = globalThis.bghsa.approvals.requiredFor(
+      ref === null ? '' : `${ref.owner}/${ref.repo}`
+    );
+    return globalThis.bghsa.readiness.compute(advisory, tracking, entry.reviews ?? {}, required);
   }
 
   /**
@@ -376,6 +397,7 @@ if (typeof require === 'function') {
       backportsDone: backportsDoneIn(derived.patch, tracking.backports),
       cve: cveTextOf(derived.cve),
       cveAssigned: derived.cve.state === 'assigned',
+      ready: readinessOf(advisory, tracking, entry)?.ready === true,
     };
   }
 
@@ -430,6 +452,9 @@ if (typeof require === 'function') {
   async function readView(parsed, options = {}) {
     const cache = globalThis.bghsa.cache;
     const at = options.at ?? cache.now();
+    // Readiness compares review results with the approvals setting, which
+    // has to be read before the first draw.
+    await globalThis.bghsa.approvals.load();
     const sources = await listRows(parsed, { ...options, at });
     const ids = [...sources.keys()];
     const entries = await cache.getAdvisories(parsed, ids, { storage: options.storage, at });
@@ -454,6 +479,13 @@ if (typeof require === 'function') {
   function chipsFor(row) {
     /** @type {import('../common/chips.js').ChipSpec[]} */
     const chips = [];
+
+    if (row.ready) {
+      chips.push({
+        text: globalThis.bghsa.chips.READY,
+        tone: globalThis.bghsa.chips.READINESS_TONES.MET,
+      });
+    }
 
     // Waiting state requires an advisory read; list markup does not provide it.
     if (row.read) chips.push(...globalThis.bghsa.chips.waitingChips(row));
@@ -1658,6 +1690,66 @@ if (typeof require === 'function') {
   }
 
   /**
+   * Merge box reads in flight, by advisory cache key and pull request number.
+   *
+   * @type {Set<string>}
+   */
+  const reviewing = new Set();
+
+  /**
+   * Read merge boxes once every readiness condition that the advisory page
+   * answers holds. A read of the advisory over the network reads the merge
+   * box of every open pull request, and a fresh cache entry reads each one
+   * that is missing a cached review result. The reads bypass the request
+   * queue. Each result replaces the cached one and is drawn on the row when
+   * it arrives. A failed read removes the cached result.
+   *
+   * @param {Document} doc
+   * @param {string} ghsaId
+   * @param {import('../common/cache.js').CacheEntry} entry
+   * @param {boolean} fetched Whether the entry was read over the network.
+   * @param {RefreshOptions} options
+   * @returns {Promise<void>}
+   */
+  async function readReviews(doc, ghsaId, entry, fetched, options) {
+    const advisory = globalThis.bghsa.record.advisoryFrom(entry.record);
+    if (advisory === null || advisory.ref === null) return;
+    const ref = advisory.ref;
+    const merged = globalThis.bghsa.merge.mergeSnapshots(advisory.comments);
+    const tracking = await globalThis.bghsa.tracking.readAdvisory(advisory, merged);
+    if (readinessOf(advisory, tracking, entry)?.detailReady !== true) return;
+    const key = globalThis.bghsa.cache.advisoryKey(ref);
+    const held = entry.reviews ?? {};
+    const wanted = (advisory.fork?.pullRequests ?? []).filter(
+      (pull) =>
+        pull.state === 'open' &&
+        pull.number !== null &&
+        (fetched || held[String(pull.number)] === undefined) &&
+        !reviewing.has(`${key} #${pull.number}`)
+    );
+    const send = options.fetch === undefined ? {} : { fetch: options.fetch };
+    await Promise.all(
+      wanted.map(async (pull) => {
+        const number = String(pull.number);
+        const reading = `${key} #${number}`;
+        reviewing.add(reading);
+        try {
+          const result = await globalThis.bghsa.reviews.readReview(ref, pull, send);
+          if (result === null && held[number] === undefined) return;
+          const stored = await globalThis.bghsa.cache.putReviews(
+            ref,
+            { [number]: result },
+            { storage: options.storage }
+          );
+          if (stored !== null) await applyEntry(doc, ghsaId, stored, { storage: options.storage });
+        } finally {
+          reviewing.delete(reading);
+        }
+      })
+    );
+  }
+
+  /**
    * @returns {string} A selector for the table and its stylesheet.
    */
   function ownedSelector() {
@@ -1666,21 +1758,23 @@ if (typeof require === 'function') {
 
   /**
    * Serialize renders to prevent an older storage read from overwriting a
-   * newer render. Requests during a render schedule one additional pass.
+   * newer render. Requests during a render schedule one additional pass, and
+   * each of them resolves once that pass has drawn.
    *
    * @param {Document} doc
    * @param {RefreshOptions} [options]
    * @returns {() => Promise<void>}
    */
   function renderLoop(doc, options = {}) {
-    let running = false;
+    /** @type {Promise<void> | null} The renders running, until the last ends. */
+    let running = null;
     let again = false;
     return async function pass() {
       visit(doc, globalThis.location?.pathname);
-      if (running) {
+      if (running !== null) {
         diag(`render pass queued-again mode=${viewMode(doc)}`);
         again = true;
-        return;
+        return running;
       }
       // Recheck the allowlist: GitHub can change repositories in this document
       // without a navigation event.
@@ -1689,17 +1783,23 @@ if (typeof require === 'function') {
         return;
       }
       diag(`render pass start mode=${viewMode(doc)}`);
-      running = true;
+      running = (async () => {
+        try {
+          do {
+            again = false;
+            await render(doc);
+          } while (again);
+        } finally {
+          // Clear in the turn of the last check of `again` so that a later
+          // request starts a pass of its own.
+          running = null;
+        }
+      })();
       try {
-        do {
-          again = false;
-          await render(doc);
-        } while (again);
+        await running;
       } catch (error) {
         diagCaught('render pass render', error);
         throw error;
-      } finally {
-        running = false;
       }
       diag(`render pass end mode=${viewMode(doc)} root=${doc.getElementById(ROOT_ID) !== null}`);
       ensureRefresh(doc, options);
@@ -1735,7 +1835,7 @@ if (typeof require === 'function') {
   /**
    * @typedef {object} QueueHandle
    * @property {ReturnType<typeof globalThis.bghsa.fetch.createQueue>} queue
-   * @property {Set<(ghsaId: string, entry: import('../common/cache.js').CacheEntry) => void>} listening
+   * @property {Set<(ghsaId: string, entry: import('../common/cache.js').CacheEntry, fetched: boolean) => void>} listening
    */
 
   /**
@@ -1771,10 +1871,10 @@ if (typeof require === 'function') {
       now: options.now,
       wait: options.wait,
       fetch: options.fetch,
-      onEntry: (ghsaId, entry) => {
+      onEntry: (ghsaId, entry, fetched) => {
         for (const listener of [...listening]) {
           try {
-            listener(ghsaId, entry);
+            listener(ghsaId, entry, fetched);
           } catch (error) {
             diagCaught(`table queue listener ${ghsaId}`, error);
             // Continue notifying the remaining listeners if one fails.
@@ -2449,11 +2549,18 @@ if (typeof require === 'function') {
 
     /** @type {Promise<unknown>[]} */
     const updates = [];
+    /** @type {Promise<unknown>[]} The merge box reads this refresh started. */
+    const reads = [];
     /** @type {() => RefreshProgress} The open advisories' work left. */
     let work = () => ({ phase: 'walking', left: 0 });
-    /** @type {(ghsaId: string, entry: import('../common/cache.js').CacheEntry) => void} */
-    const listener = (ghsaId, entry) => {
+    /** @type {(ghsaId: string, entry: import('../common/cache.js').CacheEntry, fetched: boolean) => void} */
+    const listener = (ghsaId, entry, fetched) => {
       updates.push(applyEntry(doc, ghsaId, entry, { storage: options.storage }));
+      reads.push(
+        readReviews(doc, ghsaId, entry, fetched, options).catch((error) => {
+          diagCaught(`table reviews ${ghsaId}`, error);
+        })
+      );
       if (progresses.get(doc)?.phase === 'reading') setProgress(doc, work());
     };
     /** @type {WalkWatcher} */
@@ -2488,6 +2595,9 @@ if (typeof require === 'function') {
       diag('fill await walk');
       const crawled = await walking.started;
       diag(`fill walk ended complete=${crawled.complete}`);
+      // Wait for every merge box read so the last draw places the ready
+      // drafts.
+      await Promise.all(reads);
       summary = { crawled, read };
     } catch (error) {
       diagCaught('fill', error);
@@ -2750,7 +2860,9 @@ if (typeof require === 'function') {
   }
 
   /**
-   * Render and observe the page through the shared render loop.
+   * Render and observe the page through the shared render loop. A change to
+   * the approvals setting draws the rows again from the review results
+   * already cached.
    *
    * @returns {MutationObserver | null} The observer, or null when observation is
    *   unavailable.
@@ -2761,14 +2873,17 @@ if (typeof require === 'function') {
     diag('table start');
     void diagWatch('table start pass', pass());
     const observer = observe(doc, pass);
-    attached.set(doc, observer);
+    const unsubscribe = globalThis.bghsa.approvals.subscribe(() => {
+      void diagWatch('table approvals pass', pass());
+    });
+    attached.set(doc, { observer, unsubscribe });
     return observer;
   }
 
   /**
-   * Retain observers for disconnection by stop.
+   * Retain observers and the approvals subscription for stop.
    *
-   * @type {WeakMap<Document, MutationObserver | null>}
+   * @type {WeakMap<Document, { observer: MutationObserver | null, unsubscribe: () => void }>}
    */
   const attached = new WeakMap();
 
@@ -2780,7 +2895,9 @@ if (typeof require === 'function') {
    * @returns {void}
    */
   function stop(doc = globalThis.document) {
-    attached.get(doc)?.disconnect();
+    const held = attached.get(doc);
+    held?.observer?.disconnect();
+    held?.unsubscribe();
     attached.delete(doc);
     depart(doc, null);
     loads.delete(doc);

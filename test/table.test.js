@@ -15,6 +15,8 @@ const chips = require('../src/common/chips.js');
 const fetchQueue = require('../src/common/fetch.js');
 
 const allowlist = require('../src/common/allowlist.js');
+const approvals = require('../src/common/approvals.js');
+const tracking = require('../src/detail/tracking.js');
 
 const { fakeStorage } = require('../test-support/storage.js');
 
@@ -2096,6 +2098,81 @@ test('surfaces stopped and started again on one document walk every list again',
   });
 });
 
+test('a draw asked for during a draw resolves once the draw after it ends', async () => {
+  const ref = { owner: 'render-again', repo: 'repo' };
+  const base = `/${ref.owner}/${ref.repo}/security/advisories`;
+  const ghsaId = 'GHSA-aaaa-aaaa-aaaa';
+  const fetch = fakeFetch({
+    [`${base}?state=draft`]: listHtml({ ...ref, state: 'draft', ids: [] }),
+    ...doneLists(ref),
+    [`${base}/${ghsaId}`]: detailHtml(ghsaId, 'Triage'),
+  });
+  const doc = pageOf(listHtml({ ...ref, state: 'triage', ids: [ghsaId] }));
+  const storage = fakeStorage();
+  cache.setStorage(storage);
+  const options = { storage, fetch: fetch.send, wait: advance, href: `${base}?state=triage` };
+
+  // The first draw reads the cache before the advisory is in it, then holds
+  // until released.
+  /** @type {() => void} */
+  let release = () => {};
+  /** @type {Promise<unknown> | null} */
+  let holding = new Promise((resolve) => {
+    release = () => resolve(undefined);
+  });
+  let read = false;
+  const get = storage.get;
+  storage.get = async (keys) => {
+    const answer = await get(keys);
+    if (holding !== null) {
+      read = true;
+      await holding;
+    }
+    return answer;
+  };
+  let draws = 0;
+  const parsing = parseList.parseList;
+  parseList.parseList = (page) => {
+    if (page === doc) draws += 1;
+    return parsing(page);
+  };
+  const started = clockAt;
+  try {
+    await allowing(ref, async () => {
+      goTo(base);
+      const pass = table.passFor(doc, options);
+      const first = pass();
+      await until('read the cache', () => read);
+
+      const key = cache.advisoryKey({ ...ref, ghsaId });
+      if (key === null) throw new Error(`no cache key for ${ghsaId}`);
+      storage.entries[key] = entryOf(storedDetail(ghsaId, 'Triage'), 'triage');
+      let drawn = false;
+      const asked = Promise.all([pass(), pass()]).then(() => {
+        drawn = true;
+      });
+      await quiet();
+      assert.strictEqual(drawn, false, 'resolved while the first draw was held');
+
+      holding = null;
+      release();
+      await asked;
+      assert.strictEqual(
+        textOf(one(doc, `#${table.ROOT_ID} li.bghsa-list-row`), '.bghsa-list-observed'),
+        'Observed 2026-08-26 10:00 UTC',
+        'the row when the later asks resolve'
+      );
+      assert.strictEqual(draws, 2, 'draws for three asks');
+      await first;
+      await table.refresh(doc, options);
+    });
+  } finally {
+    parseList.parseList = parsing;
+    storage.get = get;
+    clockAt = started;
+  }
+});
+
 test('a caller that starts during a walk joins it', async () => {
   const ref = { owner: 'walk-join', repo: 'repo' };
   const base = `/${ref.owner}/${ref.repo}/security/advisories`;
@@ -2628,7 +2705,7 @@ test('the surface puts the table on the document it is given', async () => {
       [ghsaId]
     );
   } finally {
-    observer?.disconnect();
+    table.stop(doc);
     // @ts-expect-error the global is put back the way it was found.
     delete globalThis.document;
     if (held === undefined) {
@@ -2711,6 +2788,24 @@ test('every sort key orders by the value it names', () => {
     const got = viewOrder(each.rows, each.sort);
     assert.ok(got === 'C A B', `${each.sort}, ${each.what}: ${got}`);
   }
+});
+
+test('a sort a maintainer picks leaves a ready draft where its own key puts it', () => {
+  const rows = [
+    sortRow('A', { state: 'Draft', ready: true, waitingSince: '2026-08-20T00:00:00Z' }),
+    sortRow('B', {
+      state: 'Draft',
+      severity: 'critical',
+      severityLabel: 'Critical',
+      waitingSince: '2026-06-01T00:00:00Z',
+    }),
+  ];
+  for (const each of table.SORTS.filter((sort) => sort.compare !== null)) {
+    const got = viewOrder(rows, each.key);
+    assert.ok(got === 'B A', `${each.key}: ${got}`);
+  }
+  const byDefault = viewOrder(rows, table.DEFAULT_SORT);
+  assert.ok(byDefault === 'A B', `the default order: ${byDefault}`);
 });
 
 test('a filter and a sort the list no longer carries are gone', () => {
@@ -3481,4 +3576,508 @@ test("the controls go out of view with the table, and the toggle stays", async (
 
   toggleIn(doc).click();
   assert.ok(!controls.classList.contains(table.HIDDEN_CLASS), 'the controls did not come back');
+});
+
+/**
+ * The triage fixture read as a draft of the given repository that is ready
+ * to publish once both of its open pull requests are approved: title,
+ * description, and scoring confirmed, a backport target on each pull
+ * request's branch, and one complete package with a patched version per
+ * target.
+ *
+ * @param {{ owner: string, repo: string }} ref
+ * @param {string} ghsaId
+ * @returns {Promise<import('../src/common/parse-detail.js').ParsedDetail>}
+ */
+async function readyDraft(ref, ghsaId) {
+  const draft = /** @type {import('../src/common/parse-detail.js').ParsedDetail} */ (
+    structuredClone(/** @type {object} */ (TRIAGE_RECORD))
+  );
+  const fork = `${ref.owner}/${ref.repo}-${ghsaId.toLowerCase()}`;
+  const pulls = draft.fork?.pullRequests ?? [];
+  draft.state = 'Draft';
+  draft.ghsaId = ghsaId;
+  draft.ref = { ...ref, ghsaId };
+  draft.fork = {
+    cloneUrl: null,
+    repository: fork,
+    deleteUrl: null,
+    pullRequests: pulls.map((pull) => ({ ...pull, url: `/${fork}/pull/${pull.number}` })),
+  };
+  draft.packages = [
+    { ecosystem: 'go', name: 'example.com/drawer', affected: '< 1.0.1', patched: '1.1.0, 1.0.1' },
+  ];
+  const fingerprints = await tracking.fingerprints(draft);
+  const comment = draft.comments.find((entry) => entry.id === '282847');
+  if (comment === undefined || comment.stateComment === null) {
+    throw new Error('no snapshot on comment 282847');
+  }
+  const snapshot = JSON.parse(comment.stateComment.raw);
+  const by = { by: 'samuelkarp', at: '2026-08-25T18:04:11Z' };
+  snapshot.confirmed = {
+    title: { ...by, fp: fingerprints.title },
+    description: { ...by, fp: fingerprints.description },
+    scoring: { ...by, fp: fingerprints.scoring },
+  };
+  snapshot.backports = pulls.map((pull) => pull.baseRef);
+  comment.stateComment.raw = JSON.stringify(snapshot, null, 2);
+  return draft;
+}
+
+const APPROVED = { approvals: 2, changesRequested: false, observedAt: OBSERVED };
+
+const PRIVATE_MERGE_BOX = fixture('merge-box-private.json');
+
+test('a ready draft starts its row with a green Ready chip, and one unmet condition takes it away', async () => {
+  const ghsaId = 'GHSA-jmvx-2wfw-xfgj';
+  const record = await readyDraft(REF, ghsaId);
+
+  const ready = listPage('list-page-triage.html');
+  await render(ready, {
+    [keyFor(ghsaId)]: { ...entryOf(record, 'draft'), reviews: { 1: APPROVED, 2: APPROVED } },
+  });
+
+  const unapproved = listPage('list-page-triage.html');
+  await render(unapproved, {
+    [keyFor(ghsaId)]: {
+      ...entryOf(record, 'draft'),
+      reviews: { 1: APPROVED, 2: { ...APPROVED, changesRequested: true } },
+    },
+  });
+
+  assert.ok(
+    !chipsIn(unapproved).includes('Ready'),
+    `chips with a change request present: ${chipsIn(unapproved)}`
+  );
+  assert.strictEqual(
+    chipsIn(ready),
+    `Ready[Label--secondary bghsa-tone-success-muted] | ${chipsIn(unapproved)}`
+  );
+});
+
+test(
+  'a draft waiting only on reviews has its merge boxes read and gains the chip; no other draft has its merge boxes read',
+  { timeout: 10_000 },
+  async () => {
+    const ref = { owner: 'ready-reads', repo: 'repo' };
+    const base = `/${ref.owner}/${ref.repo}/security/advisories`;
+    const waiting = 'GHSA-aaaa-aaaa-aaaa';
+    const unconfirmed = 'GHSA-bbbb-bbbb-bbbb';
+    const triage = 'GHSA-cccc-cccc-cccc';
+    const reviewed = 'GHSA-dddd-dddd-dddd';
+    const unread = 'GHSA-eeee-eeee-eeee';
+    const ids = [waiting, unconfirmed, triage, reviewed, unread];
+    /** @param {string} ghsaId @returns {string[]} */
+    const mergeBoxes = (ghsaId) =>
+      [1, 2].map(
+        (number) =>
+          `/${ref.owner}/${ref.repo}-${ghsaId.toLowerCase()}/pull/${number}/page_data/merge_box`
+      );
+
+    await allowing(ref, async () => {
+      const storage = fakeStorage();
+      cache.setStorage(storage);
+      const put = async (/** @type {string} */ ghsaId, /** @type {unknown} */ record) => {
+        await cache.putAdvisory({ ...ref, ghsaId }, record, { storage, at: clockAt });
+      };
+      await put(waiting, await readyDraft(ref, waiting));
+      const drifted = await readyDraft(ref, unconfirmed);
+      drifted.title = 'A title nobody confirmed';
+      await put(unconfirmed, drifted);
+      await put(triage, { ...(await readyDraft(ref, triage)), state: 'Triage' });
+      await put(reviewed, await readyDraft(ref, reviewed));
+      await cache.putReviews({ ...ref, ghsaId: reviewed }, { 1: APPROVED, 2: APPROVED }, { storage });
+
+      /** @type {Record<string, string>} */
+      const pages = {
+        [`${base}?state=triage`]: listHtml({ ...ref, state: 'triage', ids: [] }),
+        ...doneLists(ref),
+      };
+      for (const ghsaId of ids) {
+        for (const path of mergeBoxes(ghsaId)) pages[path] = PRIVATE_MERGE_BOX;
+      }
+      const fetch = fakeFetch(pages);
+      // The merge box requests stay pending until the refresh has read the
+      // advisories and walked the lists.
+      /** @type {() => void} */
+      let answer = () => {};
+      const answered = new Promise((resolve) => {
+        answer = () => resolve(undefined);
+      });
+      /** @type {string[]} */
+      const asked = [];
+      /** @type {import('../src/common/write.js').WriteFetch} */
+      const send = async (url, init) => {
+        if (String(url).endsWith('/page_data/merge_box')) {
+          asked.push(String(url));
+          await answered;
+        }
+        return fetch.send(url, init);
+      };
+      const doc = pageOf(listHtml({ ...ref, state: 'draft', ids }));
+      /** @returns {string} */
+      const chipsOfWaiting = () => {
+        const row = tableRows(doc).find((item) => item.getAttribute('data-bghsa-ghsa') === waiting);
+        return row === undefined ? '' : chipLine(row);
+      };
+
+      await table.render(doc);
+      assert.ok(
+        !chipsOfWaiting().startsWith('Ready'),
+        `before the merge box requests are sent: ${chipsOfWaiting()}`
+      );
+      const refreshing = table.refresh(doc, {
+        storage,
+        fetch: send,
+        wait: advance,
+        href: `https://github.com${base}?state=draft`,
+      });
+      await until('asked for the merge boxes', () => asked.length === 2);
+      await quiet();
+      assert.ok(
+        !chipsOfWaiting().startsWith('Ready'),
+        `before the merge box responses arrive: ${chipsOfWaiting()}`
+      );
+      answer();
+      await refreshing;
+      assert.ok(chipsOfWaiting().startsWith('Ready['), `after the refresh: ${chipsOfWaiting()}`);
+      await quiet();
+
+      assert.deepStrictEqual(
+        fetch.urls.filter((url) => url.endsWith('/page_data/merge_box')).sort(),
+        mergeBoxes(waiting)
+      );
+      const stored = await cache.getAdvisory({ ...ref, ghsaId: waiting }, { storage });
+      assert.deepStrictEqual(Object.keys(stored?.reviews ?? {}).sort(), ['1', '2']);
+    });
+  }
+);
+
+test(
+  'the stored approvals setting draws the Ready chip, and a higher one takes it away without a request',
+  { timeout: 10_000 },
+  async () => {
+    const ref = { owner: 'ready-approvals', repo: 'repo' };
+    const ghsaId = 'GHSA-aaaa-aaaa-aaaa';
+    const doc = pageOf(listHtml({ ...ref, state: 'draft', ids: [ghsaId] }));
+    const storage = fakeStorage();
+    const finished = () => ({
+      next: null,
+      started: true,
+      complete: true,
+      startedAt: clockAt,
+      completedAt: clockAt,
+      pages: 1,
+      failures: 0,
+      stalled: false,
+      abandonedAt: 0,
+    });
+
+    await allowing(ref, async () => {
+      goTo(`/${ref.owner}/${ref.repo}/security/advisories`);
+      await cache.putList(
+        ref,
+        {
+          walks: { triage: finished(), draft: finished(), published: finished(), closed: finished() },
+          rows: {},
+        },
+        { storage, at: clockAt }
+      );
+      await cache.putAdvisory({ ...ref, ghsaId }, await readyDraft(ref, ghsaId), {
+        storage,
+        at: clockAt,
+      });
+      const once = { ...APPROVED, approvals: 1 };
+      await cache.putReviews({ ...ref, ghsaId }, { 1: once, 2: once }, { storage });
+      cache.setStorage(storage);
+      approvals.setStorage(
+        fakeStorage({ [approvals.STORAGE_KEY]: { [`${ref.owner}/${ref.repo}`]: 1 } })
+      );
+
+      /** @type {string[]} */
+      const sent = [];
+      const held = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
+      Object.defineProperty(globalThis, 'fetch', {
+        configurable: true,
+        writable: true,
+        value: async (/** @type {unknown} */ url) => {
+          sent.push(String(url));
+          throw new Error('the surface sent a request');
+        },
+      });
+      Object.defineProperty(globalThis, 'document', { configurable: true, writable: true, value: doc });
+      /** @returns {string} */
+      const drawn = () => {
+        const row = tableRows(doc)[0];
+        return row === undefined ? '' : chipLine(row);
+      };
+      // The startup refresh can begin and end within one poll of until, so
+      // its progress chip arriving in the page is recorded as it happens.
+      let refreshing = false;
+      const Observer = /** @type {typeof MutationObserver} */ (
+        /** @type {any} */ (doc.defaultView).MutationObserver
+      );
+      const progressSeen = new Observer((records) => {
+        for (const record of records) {
+          for (const node of record.addedNodes) {
+            if (node.nodeType !== 1) continue;
+            const added = /** @type {Element} */ (node);
+            if (added.matches('.bghsa-list-progress') || added.querySelector('.bghsa-list-progress')) {
+              refreshing = true;
+            }
+          }
+        }
+      });
+      progressSeen.observe(/** @type {Element} */ (doc.documentElement), { childList: true, subtree: true });
+      try {
+        // Page mutations and the refresh that start begins both draw the
+        // table again. Wait for the refresh to end before changing the
+        // setting.
+        table.start()?.disconnect();
+        await until('drew the Ready chip', () => drawn().startsWith('Ready['));
+        await until('began its refresh', () => refreshing);
+        await until('ended its refresh', () => table.progressOf(doc) === null);
+        await quiet();
+
+        await approvals.save(`${ref.owner}/${ref.repo}`, 2);
+        await until('took the Ready chip away', () => drawn() !== '' && !drawn().includes('Ready'));
+        await quiet();
+        assert.deepStrictEqual(sent, [], 'saving the new setting sent a request');
+      } finally {
+        progressSeen.disconnect();
+        table.stop(doc);
+        approvals.setStorage(null);
+        // @ts-expect-error the global is put back the way it was found.
+        delete globalThis.document;
+        if (held === undefined) {
+          // @ts-expect-error as above.
+          delete globalThis.fetch;
+        } else {
+          Object.defineProperty(globalThis, 'fetch', held);
+        }
+      }
+    });
+  }
+);
+
+test(
+  "a draft read over the network has every merge box read again and its row follows the new reviews, and a draft from a fresh cache entry keeps its stored reviews",
+  { timeout: 10_000 },
+  async () => {
+    const ref = { owner: 'ready-refresh', repo: 'repo' };
+    const base = `/${ref.owner}/${ref.repo}/security/advisories`;
+    const gains = 'GHSA-aaaa-aaaa-aaaa';
+    const loses = 'GHSA-bbbb-bbbb-bbbb';
+    const fails = 'GHSA-cccc-cccc-cccc';
+    const fresh = 'GHSA-dddd-dddd-dddd';
+    const ids = [gains, loses, fails, fresh];
+    /** @param {string} ghsaId @param {number} number @returns {string} */
+    const mergeBox = (ghsaId, number) =>
+      `/${ref.owner}/${ref.repo}-${ghsaId.toLowerCase()}/pull/${number}/page_data/merge_box`;
+    const once = { ...APPROVED, approvals: 1 };
+    /** @type {Record<string, import('../src/common/parse-detail.js').ParsedDetail>} */
+    const records = {};
+    for (const ghsaId of ids) records[ghsaId] = await readyDraft(ref, ghsaId);
+
+    // An advisory page here is only its identifier, read as that advisory's
+    // ready draft.
+    const parsing = parseDetail.parseDetail;
+    parseDetail.parseDetail = (doc) => {
+      const ghsaId = (doc.body?.textContent ?? '').trim();
+      const record = records[ghsaId];
+      return record === undefined ? parsing(doc) : structuredClone(record);
+    };
+    try {
+      await allowing(ref, async () => {
+        const storage = fakeStorage();
+        cache.setStorage(storage);
+        /** @type {(ghsaId: string, at: number, reviews: Record<string, import('../src/common/cache.js').ReviewResult>) => Promise<void>} */
+        const put = async (ghsaId, at, reviews) => {
+          await cache.putAdvisory({ ...ref, ghsaId }, records[ghsaId], { storage, at });
+          await cache.putReviews({ ...ref, ghsaId }, reviews, { storage });
+        };
+        const stale = clockAt - 30 * MINUTE;
+        await put(gains, stale, { 1: once, 2: once });
+        await put(loses, stale, { 1: APPROVED, 2: APPROVED });
+        await put(fails, stale, { 1: APPROVED, 2: APPROVED });
+        await put(fresh, clockAt, { 1: APPROVED, 2: APPROVED });
+
+        /** @type {Record<string, string>} */
+        const pages = {
+          [`${base}?state=triage`]: listHtml({ ...ref, state: 'triage', ids: [] }),
+          ...doneLists(ref),
+          [mergeBox(gains, 1)]: PRIVATE_MERGE_BOX,
+          [mergeBox(gains, 2)]: PRIVATE_MERGE_BOX,
+          [mergeBox(loses, 1)]: PRIVATE_MERGE_BOX,
+          [mergeBox(loses, 2)]: fixture('merge-box-changes-requested.json'),
+          // The first merge box of `fails` answers 404.
+          [mergeBox(fails, 2)]: PRIVATE_MERGE_BOX,
+          [mergeBox(fresh, 1)]: PRIVATE_MERGE_BOX,
+          [mergeBox(fresh, 2)]: PRIVATE_MERGE_BOX,
+        };
+        for (const ghsaId of ids) {
+          pages[`${base}/${ghsaId}`] = `<!doctype html><html><body>${ghsaId}</body></html>`;
+        }
+        const fetch = fakeFetch(pages);
+        const doc = pageOf(listHtml({ ...ref, state: 'draft', ids }));
+        /** @param {string} ghsaId @returns {boolean} */
+        const ready = (ghsaId) => {
+          const row = tableRows(doc).find((item) => item.getAttribute('data-bghsa-ghsa') === ghsaId);
+          return row !== undefined && chipLine(row).startsWith('Ready[');
+        };
+        /** @returns {string} */
+        const drawn = () => ids.map((ghsaId) => `${ghsaId}=${ready(ghsaId)}`).join(' ');
+
+        await table.render(doc);
+        assert.strictEqual(
+          drawn(),
+          `${gains}=false ${loses}=true ${fails}=true ${fresh}=true`,
+          'before the refresh'
+        );
+        await table.refresh(doc, {
+          storage,
+          fetch: fetch.send,
+          wait: advance,
+          href: `https://github.com${base}?state=draft`,
+        });
+        await until('followed the new reviews', () => ready(gains) && !ready(loses) && !ready(fails));
+        await quiet();
+
+        assert.strictEqual(
+          drawn(),
+          `${gains}=true ${loses}=false ${fails}=false ${fresh}=true`,
+          'after the refresh'
+        );
+        // A later report of `fails` from its fresh entry may ask again for
+        // the result the failed read removed.
+        assert.deepStrictEqual(
+          [...new Set(fetch.urls.filter((url) => url.endsWith('/page_data/merge_box')))].sort(),
+          [gains, loses, fails].flatMap((ghsaId) => [mergeBox(ghsaId, 1), mergeBox(ghsaId, 2)])
+        );
+        const failed = await cache.getAdvisory({ ...ref, ghsaId: fails }, { storage });
+        assert.deepStrictEqual(Object.keys(failed?.reviews ?? {}), ['2']);
+      });
+    } finally {
+      parseDetail.parseDetail = parsing;
+    }
+  }
+);
+
+test(
+  "a refresh ends with a draft first by its readiness when its merge boxes answer after the advisory reads",
+  { timeout: 10_000 },
+  async () => {
+    const ref = { owner: 'ready-late', repo: 'repo' };
+    const base = `/${ref.owner}/${ref.repo}/security/advisories`;
+    const above = 'GHSA-aaaa-aaaa-aaaa';
+    const gains = 'GHSA-zzzz-zzzz-zzzz';
+    /** @param {number} number @returns {string} */
+    const mergeBox = (number) =>
+      `/${ref.owner}/${ref.repo}-${gains.toLowerCase()}/pull/${number}/page_data/merge_box`;
+    const record = await readyDraft(ref, gains);
+
+    // The advisory page of `gains` is only its identifier, read as its ready
+    // draft.
+    const parsing = parseDetail.parseDetail;
+    parseDetail.parseDetail = (doc) =>
+      (doc.body?.textContent ?? '').trim() === gains ? structuredClone(record) : parsing(doc);
+    try {
+      await allowing(ref, async () => {
+        const storage = fakeStorage();
+        cache.setStorage(storage);
+        // `above` is fresh and held back by a change request, and `gains` is
+        // stale with too few approvals until its merge boxes answer.
+        await cache.putAdvisory({ ...ref, ghsaId: above }, await readyDraft(ref, above), {
+          storage,
+          at: clockAt,
+        });
+        const requested = { ...APPROVED, changesRequested: true };
+        await cache.putReviews({ ...ref, ghsaId: above }, { 1: requested, 2: requested }, { storage });
+        await cache.putAdvisory({ ...ref, ghsaId: gains }, record, {
+          storage,
+          at: clockAt - 30 * MINUTE,
+        });
+        const once = { ...APPROVED, approvals: 1 };
+        await cache.putReviews({ ...ref, ghsaId: gains }, { 1: once, 2: once }, { storage });
+
+        const fetch = fakeFetch({
+          [`${base}?state=triage`]: listHtml({ ...ref, state: 'triage', ids: [] }),
+          ...doneLists(ref),
+          [`${base}/${gains}`]: `<!doctype html><html><body>${gains}</body></html>`,
+          [mergeBox(1)]: PRIVATE_MERGE_BOX,
+          [mergeBox(2)]: PRIVATE_MERGE_BOX,
+        });
+        const doc = pageOf(listHtml({ ...ref, state: 'draft', ids: [gains, above] }));
+        const options = {
+          storage,
+          fetch: send,
+          wait: advance,
+          href: `https://github.com${base}?state=draft`,
+        };
+        // The merge boxes answer once the walk, which reads the lists and the
+        // advisory, has ended and the refresh has drawn what it read. The
+        // refresh then waits on the merge boxes alone.
+        /** @type {Promise<void> | null} */
+        let walked = null;
+        /** @type {import('../src/common/write.js').WriteFetch} */
+        async function send(url, init) {
+          if (String(url).endsWith('/page_data/merge_box')) {
+            if (walked === null) {
+              const parsed = table.pageOf(doc);
+              if (parsed === null) throw new Error('the page did not read as a list');
+              // Join the walk while it runs. A call after it ends would start
+              // another.
+              const running = table.walkProgress(doc, 'open') !== null;
+              const ending = running ? table.walk(doc, parsed, options) : Promise.resolve();
+              walked = ending.then(async () => {
+                // The merge boxes answer after the walk ends. The refresh's
+                // final draw must wait for their reads.
+                await table.passFor(doc, options)();
+                await new Promise((resolve) => setTimeout(resolve, 0));
+              });
+            }
+            await walked;
+          }
+          return fetch.send(url, init);
+        }
+        table.setViewState(doc, table.defaultViewState());
+        await table.render(doc);
+        assert.strictEqual(shownIds(doc), `${above} ${gains}`, 'before the refresh');
+
+        await table.refresh(doc, options);
+        assert.strictEqual(shownIds(doc), `${gains} ${above}`, 'when the refresh ends');
+        assert.deepStrictEqual(
+          fetch.urls.filter((url) => url.endsWith('/page_data/merge_box')).sort(),
+          [mergeBox(1), mergeBox(2)]
+        );
+      });
+    } finally {
+      parseDetail.parseDetail = parsing;
+    }
+  }
+);
+
+test('a draft whose reviews arrive moves ahead of the rows above it on the next draw', async () => {
+  const ref = { owner: 'ready-order', repo: 'repo' };
+  const above = 'GHSA-aaaa-aaaa-aaaa';
+  const gains = 'GHSA-zzzz-zzzz-zzzz';
+  const doc = pageOf(listHtml({ ...ref, state: 'draft', ids: [gains, above] }));
+  const storage = fakeStorage();
+  cache.setStorage(storage);
+  try {
+    for (const ghsaId of [above, gains]) {
+      await cache.putAdvisory({ ...ref, ghsaId }, await readyDraft(ref, ghsaId), {
+        storage,
+        at: clockAt,
+      });
+    }
+    await table.render(doc);
+    assert.strictEqual(shownIds(doc), `${above} ${gains}`, 'before the reviews arrive');
+
+    await cache.putReviews({ ...ref, ghsaId: gains }, { 1: APPROVED, 2: APPROVED }, { storage });
+    await table.render(doc);
+    assert.strictEqual(shownIds(doc), `${gains} ${above}`, 'after the reviews arrive');
+  } finally {
+    cache.setStorage(null);
+  }
 });

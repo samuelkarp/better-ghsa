@@ -546,11 +546,13 @@ if (typeof require === 'function') {
 
   /**
    * Store review results on an advisory's entry, beside the results it holds
-   * for other pull requests. An absent entry stores nothing because the
-   * results describe pull requests only a record lists.
+   * for other pull requests. A null result removes the pull request's result.
+   * An absent entry stores nothing because the results describe pull requests
+   * only a record lists.
    *
    * @param {{ owner?: unknown, repo?: unknown, ghsaId?: unknown } | null | undefined} ref
-   * @param {Record<string, ReviewResult>} results Keyed by pull request number.
+   * @param {Record<string, ReviewResult | null>} results Keyed by pull request
+   *   number.
    * @param {CacheOptions} [options]
    * @returns {Promise<CacheEntry | null>} The stored entry, or null when there
    *   was none or storage failed.
@@ -563,6 +565,9 @@ if (typeof require === 'function') {
       const before = await getEntry(key, options);
       if (before === null) return null;
       const merged = { ...before.reviews, ...reviewsFrom(results) };
+      for (const [number, result] of Object.entries(results)) {
+        if (result === null) delete merged[number];
+      }
       const reviews = reviewsStillOpen(merged, before.record);
       /** @type {CacheEntry} */
       const entry = { ...before };

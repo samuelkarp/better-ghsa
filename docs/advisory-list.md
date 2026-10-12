@@ -45,6 +45,13 @@ Other chips require data from the advisory page.
 
 ## The chips
 
+**Ready**, on draft advisories. A green "Ready" chip appears first on a draft
+that can be published under the conditions the
+[detail panel lists](detail-panel.md#ready). The row compares the review results
+cached with the advisory to the number of approvals the settings require for
+the repository. Changing the required approvals for the repository redraws the
+rows without a request.
+
 **Waiting.** A stored triage value appears in sentence case: "Evaluating",
 "Awaiting reporter", or "Awaiting maintainer input". Without a stored value,
 the chip reflects the comments and timeline:
@@ -97,14 +104,15 @@ have dimmed severity chips.
 
 By default:
 
-1. Draft advisories precede triage advisories.
-2. Draft groups are ordered: embargo overdue, new activity, blocked on us,
+1. Ready drafts precede every other advisory.
+2. Draft advisories precede triage advisories.
+3. Draft groups are ordered: embargo overdue, new activity, blocked on us,
    blocked on the reporter.
-3. Triage groups are ordered: embargo overdue, blocked on us, never reviewed,
+4. Triage groups are ordered: embargo overdue, blocked on us, never reviewed,
    new activity, blocked on the reporter.
-4. Within each group, confirmed severities precede unconfirmed severities.
+5. Within each group, confirmed severities precede unconfirmed severities.
    Each is ordered highest first, followed by advisories without severity.
-5. Then longest waiting first.
+6. Then longest waiting first.
 
 An advisory belongs to the first group it matches. Without a stored triage
 value, it sorts with never reviewed in triage and blocked on us in draft.
@@ -195,9 +203,9 @@ can occur closer together.
 The heading shows "Loading (12 left)..." while open advisories remain to be
 read, the one being requested included, and keeps that count while the walk
 serves another view first. It shows "Loading..." for the rest of the refresh.
-The progress chip disappears when the refresh finishes,
-once the four lists are walked and the advisory pages the view showing asked
-for are read.
+The progress chip disappears when the refresh finishes, once the four lists are
+walked, the advisory pages the view showing asked for are read, and every merge
+box request those reads started has answered, failed, or timed out.
 
 Each list is walked once per page load. A page load starts when a page shows
 the repository's advisory list. Moving between the list's tabs and the
@@ -214,8 +222,23 @@ apart, and a new page load refreshes at once. A new refresh waits until the
 current one finishes. Leaving the list stops the refresh after its current
 request. Coming back from an advisory resumes it.
 
-Failed reads leave existing cached data visible. Advisories without cached data
-remain marked "Not read". The list omits failure banners.
+After the extension reads a draft that meets every readiness condition except
+approval, it reads the merge box data of the open pull requests in the private
+fork. When the draft came from the network, the extension reads the merge box
+data of every open pull request. When the draft came from a fresh cache entry,
+it reads the merge box data only of open pull requests that are missing a cached
+review result. These requests go out at once, outside the queue and its
+throttle. The refresh finishes when every merge box request has answered,
+failed, or timed out. The final redraw of the table then orders the drafts with
+the ready ones first. Each result replaces the cached one and redraws its row.
+When a merge box read fails, the extension removes the cached result for that
+pull request. The row does not show Ready until a later read succeeds. When the
+draft came from a fresh cache entry and every open pull request already has a
+cached result, the extension does not send merge box requests.
+
+A failed read of an advisory leaves its existing cached data visible.
+Advisories without cached data remain marked "Not read". The list omits
+failure banners.
 
 ## On a repository the settings do not list
 

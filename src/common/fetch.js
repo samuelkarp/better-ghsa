@@ -63,8 +63,9 @@ if (typeof require === 'function') {
  * @property {import('./write.js').WriteFetch} [fetch]
  * @property {(html: string, ref: import('./parse-detail.js').AdvisoryRef) => unknown} [parse]
  *   Parses fetched HTML into a cache record.
- * @property {(ghsaId: string, entry: import('./cache.js').CacheEntry) => void} [onEntry]
- *   Called for each fetched or fresh cached advisory.
+ * @property {(ghsaId: string, entry: import('./cache.js').CacheEntry, fetched: boolean) => void} [onEntry]
+ *   Called for each fetched or fresh cached advisory. `fetched` is true when
+ *   the entry comes from a read of the advisory over the network.
  * @property {(ghsaId: string, reason: unknown) => void} [onFailure]
  */
 
@@ -343,12 +344,13 @@ if (typeof require === 'function') {
     /**
      * @param {string} ghsaId
      * @param {import('./cache.js').CacheEntry} entry
+     * @param {boolean} fetched Whether the entry was read over the network.
      * @returns {void}
      */
-    function report(ghsaId, entry) {
+    function report(ghsaId, entry, fetched) {
       if (options.onEntry === undefined) return;
       try {
-        options.onEntry(ghsaId, entry);
+        options.onEntry(ghsaId, entry, fetched);
       } catch (error) {
         diagCaught(`queue onEntry listener ${ghsaId}`, error);
         fail(ghsaId, error);
@@ -411,7 +413,7 @@ if (typeof require === 'function') {
         done.push(ghsaId);
         skipped += 1;
         const entry = entries.get(ghsaId);
-        if (entry !== undefined) report(ghsaId, entry);
+        if (entry !== undefined) report(ghsaId, entry, false);
       }
       if (startedAt === null) startedAt = at;
       await persist();
@@ -561,7 +563,7 @@ if (typeof require === 'function') {
       inFlight = null;
       if (!done.includes(ghsaId)) done.push(ghsaId);
       skipped += 1;
-      report(ghsaId, held);
+      report(ghsaId, held, false);
       await persist();
       return true;
     }
@@ -655,7 +657,7 @@ if (typeof require === 'function') {
         } else {
           if (!done.includes(ghsaId)) done.push(ghsaId);
           fetched += 1;
-          report(ghsaId, entry);
+          report(ghsaId, entry, true);
         }
         await persist();
         if (wanted !== null) break;

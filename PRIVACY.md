@@ -130,7 +130,11 @@ The requests are:
   private fork,
   `https://github.com/{owner}/{repo}-{GHSA-id}/pull/{number}/page_data/merge_box`.
   The detail panel sends one for each open pull request when you open the
-  advisory.
+  advisory. The advisory list sends them once the draft meets every other
+  readiness condition. When the list reads the advisory from the network, it
+  sends one for every open pull request. When it reads the advisory from a
+  fresh cache entry, it sends one for each pull request that is missing a
+  stored review result.
 - `GET` on an owner's profile image, `https://github.com/{login}.png?size=40`,
   for the advisory list's owner icons.
 - `POST` to an advisory's comment endpoint to create or edit a comment when
